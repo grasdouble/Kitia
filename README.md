@@ -22,21 +22,37 @@ npx --yes --package=github:grasdouble/Lufa-AI#main lufa outdated
 npx --yes --package=github:grasdouble/Lufa-AI#main lufa update [id]
 ```
 
-Avec pnpm, la syntaxe équivalente est `pnpm dlx` :
+Avec pnpm, autorisez explicitement le script de cycle de vie du paquet Git,
+ciblé sur sa référence résolue (remplacez `<resolved-ref>` par le SHA du commit
+visé) :
 
 ```sh
-pnpm dlx --yes --package=github:grasdouble/Lufa-AI#main lufa list
-pnpm dlx --yes --package=github:grasdouble/Lufa-AI#main lufa install hello-agent
+pnpm dlx \
+  --allow-build="lufa-ai@git+https://github.com/grasdouble/Lufa-AI.git#<resolved-ref>" \
+  --yes \
+  --package=git+https://github.com/grasdouble/Lufa-AI.git#<resolved-ref> \
+  lufa list
+pnpm dlx \
+  --allow-build="lufa-ai@git+https://github.com/grasdouble/Lufa-AI.git#<resolved-ref>" \
+  --yes \
+  --package=git+https://github.com/grasdouble/Lufa-AI.git#<resolved-ref> \
+  lufa install hello-agent
 ```
 
 `main` suit le développement et peut changer. Pour une exécution reproductible,
 remplacez `main` par un tag ou un SHA immuable, par exemple
 `github:grasdouble/Lufa-AI#<tag-ou-SHA>`. Le dépôt versionne le JavaScript
-précompilé sous `dist/` : npx et pnpm dlx lancent directement ce binaire, sans
-compiler les sources chez le consommateur et sans hook `prepare` ou `prepack`.
-Les dépendances runtime normales sont téléchargées et mises en cache par le
-gestionnaire. Git, Node.js 24+ et le gestionnaire utilisé (`npm`/`npx` ou `pnpm`)
-sont requis. Aucun registre npm public ni publication npm n’est nécessaire.
+précompilé sous `dist/` : npx et pnpm dlx lancent directement ce binaire. Le hook
+`prepare` installe uniquement Husky dans le clone Git temporaire ; il ne compile
+pas. Cette préparation n’affecte pas le projet consommateur. Aucun utilisateur
+ne compile le projet Lufa au cours de l’installation ou de l’utilisation. Pour
+pnpm, `--allow-build` autorise explicitement l’exécution du `prepare` du paquet
+Git à la référence résolue ; ce risque est accepté et limité à ce paquet et ce
+SHA. Le build TypeScript n’est jamais appelé par `prepare`, `prepack` ou le
+parcours consommateur. Les dépendances runtime normales sont téléchargées et
+mises en cache par le gestionnaire. Git, Node.js 24+ et le gestionnaire utilisé
+(`npm`/`npx` ou `pnpm`) sont requis. Aucun registre npm public ni publication npm
+n’est nécessaire.
 Le smoke Git utilise un dépôt fixture local contenant `dist/` mais pas `src/` ;
 il vérifie les deux gestionnaires sans modifier le manifeste consommateur. Il ne
 garantit pas la disponibilité future de GitHub ou du réseau.
@@ -78,7 +94,6 @@ Prérequis : Node.js 24 ou ultérieur et npm. À la racine du dépôt :
 
 ```sh
 npm ci
-npm run hooks:install # une fois par clone, pour activer le hook de commit local
 npm run format
 npm run lint
 npm run typecheck
@@ -86,22 +101,25 @@ npm test
 npm run check
 ```
 
+`npm ci` lance `prepare: husky` et active automatiquement les hooks dans le clone
+mainteneur. Cette préparation installe les hooks seulement, sans compiler.
 `npm run check` combine les contrôles statiques (formatage, lint et types) et les
 vérifications de plateforme (concordance du build versionné, catalogue, tests et
-smoke du paquet) utilisés par la CI. `build:check` compile dans un dossier
-temporaire et compare exactement fichiers et contenus avec `dist/`, y compris
-les fichiers manquants ou supplémentaires. Le typecheck dédié `tsc --noEmit` est
-exécuté une seule fois dans `check:quality` ; `check:platform` vérifie aussi le
-build compilé sur chaque système d’exploitation.
+smoke du paquet) utilisés par la CI. `npm run build:check` est une commande
+optionnelle de vérification locale/CI : elle compile dans un dossier temporaire
+et compare exactement fichiers et contenus avec `dist/`, y compris les fichiers
+manquants ou supplémentaires. Le typecheck dédié `tsc --noEmit` est exécuté une
+seule fois dans `check:quality` ; `check:platform` vérifie aussi le build compilé
+sur chaque système d’exploitation.
 
-Le hook Git n’est pas activé automatiquement par un clone. Chaque mainteneur doit
-exécuter `npm run hooks:install` une fois dans son clone ; cela configure
-localement `core.hooksPath=.githooks`. Avant un commit, le hook refuse les sources
-de build modifiées mais non stagées, compile TypeScript puis stage les créations,
-modifications et suppressions de `dist/` dans le commit. Il ne lance pas les
-tests. Ce mécanisme n’est pas garanti pour un commit créé depuis l’interface web,
-un clone sans hook installé ou un commit qui contourne les hooks ; la CI bloque
-alors toute PR dont `dist/` ne correspond pas au build.
+Après installation des dépendances du dépôt (par exemple `npm ci`), Husky active
+automatiquement le hook mainteneur. Avant un commit, celui-ci refuse les sources
+de build modifiées mais non stagées ou non suivies, puis lance `npm run build`
+(build atomique) et stage de force les créations, modifications et suppressions
+de `dist/`. Il ne lance pas les tests. Ce build est réservé au travail mainteneur
+dans le dépôt, jamais à l’utilisateur du paquet. Le hook n’est pas garanti pour
+un commit créé depuis l’interface web ou qui contourne les hooks ; la CI vérifie
+alors que `dist/` correspond au build via `npm run build:check`.
 `npm run format` applique le formatage ; `npm run format:check` le vérifie sans
 modifier les fichiers.
 
@@ -176,9 +194,9 @@ npm pack
 ```
 
 `dist/` est versionné et inclus tel quel par `npm pack` ; l’empaquetage ne compile
-pas le paquet. Pour packer des changements locaux avant leur commit, exécutez
-`npm run build` explicitement. Le hook mainteneur le fera automatiquement au
-commit si les sources de build sont stagées.
+pas le paquet. Pour packer des changements locaux avant leur commit, le
+mainteneur exécute `npm run build` explicitement ou laisse le hook le faire au
+commit si les sources de build sont stagées. Aucun utilisateur n’a à compiler.
 
 Pour prévisualiser son installation dans un préfixe npm isolé, après `npm pack` :
 
@@ -200,10 +218,12 @@ npm run pack:smoke
 
 Pour reproduire séparément le parcours Git source avec `npx` et `pnpm dlx`, le
 smoke crée un dépôt Git fixture temporaire à partir des sources présentes,
-l’installe avec `dist/` versionné et sans `src/` depuis chacun des deux runners
-dans un consommateur isolé, puis exécute `list`, `show` et `install`. Il vérifie
-que `prepare`/`prepack` sont absents et que le manifeste consommateur reste
-inchangé. Il nécessite Git, Node.js 24+, npm et pnpm, et n’est volontairement
+résout son SHA, puis l’installe avec `dist/` versionné et sans `src/` depuis
+chacun des deux runners dans un consommateur isolé, puis exécute `list`, `show` et
+`install`. Pour pnpm, il fournit `--allow-build` sur le seul paquet Git et le SHA
+résolu. Il vérifie que `prepare` est bien `husky`, que `prepack` est absent, que
+le `prepare` n’a pas besoin des sources de build et que le manifeste consommateur
+reste inchangé. Il nécessite Git, Node.js 24+, npm et pnpm, et n’est volontairement
 pas inclus dans `npm run check` (résolution Git et installation des dépendances
 prennent plus de temps) :
 

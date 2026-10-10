@@ -38,14 +38,20 @@
 4. **CLI :** paquet Node avec commande `bin`, lancé à la demande depuis le dépôt
    GitHub via `npx --package=github:grasdouble/Lufa-AI#main` ou `pnpm dlx`, avec
    `dist/` JavaScript précompilé et versionné dans Git. Les tags/SHAs immuables
-   sont recommandés pour la reproductibilité. Le hook mainteneur pre-commit,
-   activé une fois par clone, régénère puis stage `dist/` ; la CI compare ce
-   dossier au build courant, car les hooks ne sont pas garantis pour tous les
-   commits. Aucun hook `prepare`/`prepack` ne compile une dépendance Git chez le
-   consommateur. Il n’est nécessaire ni de publier le paquet sur un registre npm
-   public, ni de l’installer globalement ou comme dépendance du consommateur ;
-   Git et Node.js 24+ sont requis. Cette option évite de maintenir des binaires
-   par plateforme pour le MVP.
+   sont recommandés pour la reproductibilité. Husky est installé automatiquement
+   dans le clone mainteneur par `prepare: husky`, qui ne compile pas. Son hook
+   pre-commit refuse les sources de build non stagées ou non suivies, exécute le
+   build atomique puis stage `dist/` ; la CI compare ce dossier au build courant,
+   car les hooks ne sont pas garantis pour tous les commits. La dépendance Git
+   exécute le même `prepare` seulement dans son clone temporaire ; aucun utilisateur
+   ne compile, et ce hook n’affecte pas le consommateur. pnpm exige
+   `--allow-build="lufa-ai@git+…#<référence résolue>"` pour autoriser ce script du
+   paquet Git : ce risque est explicitement accepté et ciblé sur le paquet et sa
+   référence exacte. Aucun `prepack` ne compile. `npm run build:check` est un
+   contrôle optionnel local/CI. Il n’est nécessaire ni de publier le paquet sur
+   un registre npm public, ni de l’installer globalement ou comme dépendance du
+   consommateur ; Git et Node.js 24+ sont requis. Cette option évite de maintenir
+   des binaires par plateforme pour le MVP.
 5. **Site et hébergement :** Astro avec génération statique, publié sur GitHub
    Pages depuis le dépôt. Pas de serveur applicatif nécessaire au catalogue en
    lecture seule. Le déploiement sera réalisé à l’étape 7.

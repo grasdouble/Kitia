@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'lufa-git-smoke-'));
 const fixtureRepository = path.join(temporaryRoot, 'fixture-repository');
-const gitUrl = `git+${pathToFileURL(fixtureRepository).href}#main`;
+let gitUrl;
 const temporaryRegistry = 'http://127.0.0.1:1/registry/catalog-index.json';
 
 function run(command, args, cwd, options = {}) {
@@ -68,6 +68,12 @@ try {
       continue;
     }
     const source = path.join(repositoryRoot, relative);
+    try {
+      await stat(source);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
     const destination = path.join(fixtureRepository, relative);
     await mkdir(path.dirname(destination), { recursive: true });
     await cp(source, destination);
@@ -88,7 +94,7 @@ try {
   const fixtureManifest = JSON.parse(
     await readFile(path.join(fixtureRepository, 'package.json'), 'utf8'),
   );
-  assert.equal(fixtureManifest.scripts?.prepare, undefined);
+  assert.equal(fixtureManifest.scripts?.prepare, 'husky');
   assert.equal(fixtureManifest.scripts?.prepack, undefined);
   assert.equal(
     run(
@@ -105,7 +111,8 @@ try {
     ['commit', '--message', 'Git source smoke fixture'],
     fixtureRepository,
   );
-  run('git', ['rev-parse', 'HEAD'], fixtureRepository);
+  const resolvedRef = run('git', ['rev-parse', 'HEAD'], fixtureRepository);
+  gitUrl = `git+${pathToFileURL(fixtureRepository).href}#${resolvedRef}`;
 
   for (const runner of [
     {
@@ -123,6 +130,7 @@ try {
       command: 'pnpm',
       args: (commandArgs) => [
         'dlx',
+        `--allow-build=lufa-ai@${gitUrl}`,
         '--yes',
         `--package=${gitUrl}`,
         'lufa',
