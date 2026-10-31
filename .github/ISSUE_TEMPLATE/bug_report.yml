@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible problem with the CLI, catalog, website, or packaging.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, check whether this problem has already been reported.
+        Do not include credentials, customer data, or other sensitive information.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - CLI
+        - Catalog data or resource installation
+        - Static website
+        - Package or release
+        - CI or catalog generation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem and its impact.
+      placeholder: A clear description of the unexpected behavior.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the command, resource ID, or page URL where relevant.
+      placeholder: |
+        1. Run ...
+        2. Select ...
+        3. Observe ...
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: What did you expect, and what happened instead?
+      render: markdown
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: For example, 22.x
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system or browser
+      placeholder: For example, macOS 15 or Firefox 140
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Logs or additional context
+      description: Remove secrets and sensitive data before sharing logs.
+      render: markdown

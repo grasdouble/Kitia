@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest an improvement to the CLI, catalogs, website, or developer workflow.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user need first. This project maintains a Node.js catalog CLI
+        and a static catalog website; catalog listings do not install external tools.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - CLI
+        - Catalog data or resource lifecycle
+        - Static website
+        - Package or release
+        - CI or developer workflow
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what is difficult or missing today?
+      placeholder: Describe the user need and who would benefit.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or outcome you would like. Alternatives are welcome.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you have considered.
+      render: markdown
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add examples, mockups, relevant resource IDs, or links.
+      render: markdown
