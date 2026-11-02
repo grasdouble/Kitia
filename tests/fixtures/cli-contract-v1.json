@@ -1,0 +1,96 @@
+{
+  "discovery": [
+    {
+      "id": "contract-skill",
+      "kind": "skill",
+      "catalog": "internal",
+      "group": "fixture",
+      "description": "Contract fixture.",
+      "status": "stable"
+    }
+  ],
+  "emptyCheck": {
+    "schema_version": 1,
+    "command": "check",
+    "dry_run": false,
+    "status": "ok",
+    "resources": [],
+    "actions": [],
+    "errors": []
+  },
+  "currentCheck": {
+    "schema_version": 1,
+    "command": "check",
+    "dry_run": false,
+    "status": "ok",
+    "resources": [
+      { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "current", "issues": [] }
+    ],
+    "actions": [],
+    "errors": []
+  },
+  "modifiedCheck": {
+    "schema_version": 1,
+    "command": "check",
+    "dry_run": false,
+    "status": "attention",
+    "resources": [
+      {
+        "catalog": "internal",
+        "kind": "skill",
+        "id": "contract-skill",
+        "status": "attention",
+        "issues": [
+          { "code": "LOCAL_MODIFICATIONS", "paths": [".agents/skills/contract-skill/SKILL.md"] }
+        ]
+      }
+    ],
+    "actions": [],
+    "errors": []
+  },
+  "installPreview": {
+    "schema_version": 1,
+    "command": "install",
+    "dry_run": true,
+    "status": "ok",
+    "resources": [
+      { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "planned" }
+    ],
+    "actions": [
+      { "action": "install", "path": ".agents/kiti-lock.json", "resource": null },
+      {
+        "action": "install",
+        "path": ".agents/skills/contract-skill/SKILL.md",
+        "resource": { "catalog": "internal", "kind": "skill", "id": "contract-skill" }
+      }
+    ],
+    "errors": []
+  },
+  "uninstallPreview": {
+    "schema_version": 1,
+    "command": "uninstall",
+    "dry_run": true,
+    "status": "ok",
+    "resources": [
+      { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "planned" }
+    ],
+    "actions": [
+      { "action": "overwrite", "path": ".agents/kiti-lock.json", "resource": null },
+      {
+        "action": "remove",
+        "path": ".agents/skills/contract-skill/SKILL.md",
+        "resource": { "catalog": "internal", "kind": "skill", "id": "contract-skill" }
+      }
+    ],
+    "errors": []
+  },
+  "invalidArguments": {
+    "schema_version": 1,
+    "command": "install",
+    "dry_run": false,
+    "status": "error",
+    "resources": [],
+    "actions": [],
+    "errors": [{ "code": "INVALID_ARGUMENT" }]
+  }
+}

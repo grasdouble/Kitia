@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Kiti connects external AI artifact catalogs and manages their installations from a local dashboard.">
+    <title>Kiti — AI resource dashboard</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body class="landing-page dashboard-home">
+    <header class="site-header">
+      <div class="header-content">
+        <a class="brand" href="./" aria-label="Kiti home">
+          <span class="brand-mark" aria-hidden="true">K</span>
+          <span><strong>Kiti</strong><small>RESOURCE DASHBOARD</small></span>
+        </a>
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="./" aria-current="page">Overview</a>
+          <a href="./catalog.html">Public catalog</a>
+          <a href="./documentation.html">Guide</a>
+          <a href="./contribute.html">Sources</a>
+          <a class="source-link" href="https://github.com/grasdouble/Kiti">GitHub <span aria-hidden="true">↗</span></a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="dashboard-hero" aria-labelledby="home-title">
+        <div class="dashboard-hero-copy">
+          <p class="eyebrow">ONE DASHBOARD FOR YOUR AI RESOURCES</p>
+          <h1 id="home-title">Your catalogs.<br><span>Your workspace.</span></h1>
+          <p class="dashboard-lead">Connect the repositories you trust, find the right skill, agent, or instruction, and manage installations across projects and tools.</p>
+          <p class="dashboard-promise">Kiti stores catalog metadata and installation state—not AI artifact bodies.</p>
+          <div class="landing-actions">
+            <a class="primary-action" href="./documentation.html#dashboard">Explore the dashboard</a>
+            <a class="secondary-action" href="./catalog.html">Browse public metadata</a>
+          </div>
+          <div class="dashboard-command">
+            <span>START IN YOUR PROJECT</span>
+            <code>npx --yes github:grasdouble/Kiti</code>
+            <p>No subcommand needed. Kiti opens the dashboard.</p>
+          </div>
+        </div>
+
+        <section class="dashboard-preview" aria-label="Illustrative dashboard preview with sample data">
+          <div class="dashboard-preview-head">
+            <span><i aria-hidden="true"></i> DASHBOARD PREVIEW</span>
+            <span class="sample-label">ILLUSTRATIVE DATA</span>
+          </div>
+          <div class="dashboard-window">
+            <aside class="dashboard-rail" aria-label="Dashboard navigation preview">
+              <div class="rail-mark" aria-hidden="true">K</div>
+              <span class="rail-active">Overview</span>
+              <span>Catalogs</span>
+              <span>Resources</span>
+              <span>Settings</span>
+              <div class="rail-account"><span>JD</span><small>Local workspace</small></div>
+            </aside>
+            <div class="dashboard-workspace">
+              <div class="workspace-heading">
+                <div>
+                  <span class="workspace-kicker">PROJECT WORKSPACE</span>
+                  <h2>my-product</h2>
+                </div>
+                <span class="workspace-state"><i aria-hidden="true"></i> 3 catalogs connected</span>
+              </div>
+              <div class="workspace-stats">
+                <div><span>RESOURCES</span><strong>12</strong><small>skills · agents · instructions</small></div>
+                <div><span>MANAGED</span><strong>09</strong><small>tracked by Kiti</small></div>
+                <div><span>NEEDS REVIEW</span><strong>02</strong><small>updates available</small></div>
+              </div>
+              <div class="workspace-list-heading">
+                <div><span class="workspace-kicker">INVENTORY</span><strong>Resources</strong></div>
+                <span class="preview-filter">⌕ &nbsp; Filter resources</span>
+              </div>
+              <div class="resource-table-wrap">
+                <table class="dashboard-resource-table">
+                  <thead><tr><th>RESOURCE</th><th>CATALOG</th><th>SCOPE</th><th>STATUS</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="resource-type skill">SKILL</span><strong>create-readme</strong></td><td>AI-Kit</td><td>PROJECT</td><td><span class="status-chip current">CURRENT</span></td></tr>
+                    <tr><td><span class="resource-type agent">AGENT</span><strong>review-helper</strong></td><td>team-tools</td><td>USER</td><td><span class="status-chip update">UPDATE</span></td></tr>
+                    <tr><td><span class="resource-type instruction">INSTRUCTION</span><strong>repo-rules</strong></td><td>—</td><td>PROJECT</td><td><span class="status-chip local">UNMANAGED</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="workspace-foot"><span><i aria-hidden="true"></i> Project and user scopes</span><span>Local inventory · sample view</span></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="dashboard-flow-section">
+        <div class="section-heading">
+          <p class="eyebrow">BUILT AROUND YOUR DASHBOARD</p>
+          <h2>Bring catalogs together. Keep ownership clear.</h2>
+          <p>AI resources stay in their source repositories. Kiti connects the metadata and handles local discovery and lifecycle.</p>
+        </div>
+        <div class="dashboard-flow-grid">
+          <article class="dashboard-flow-card">
+            <span class="flow-index">01 / CONNECT</span>
+            <h3>Your repositories</h3>
+            <p>Add multiple external catalogs. Choose Basic discovery or define each skill, agent, and instruction path yourself.</p>
+            <code>kiti catalog add</code>
+          </article>
+          <article class="dashboard-flow-card">
+            <span class="flow-index">02 / DISCOVER</span>
+            <h3>One resource inventory</h3>
+            <p>Search the connected catalogs and see project, user, managed, and unmanaged resources in the dashboard.</p>
+            <code>skills · agents · instructions</code>
+          </article>
+          <article class="dashboard-flow-card">
+            <span class="flow-index">03 / MAINTAIN</span>
+            <h3>Safe local lifecycle</h3>
+            <p>Review installs, check updates, and remove resources with provenance, scope, and conflict checks.</p>
+            <code>preview · install · update</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="dashboard-sources-section">
+        <div class="sources-callout">
+          <div>
+            <p class="eyebrow">CATALOGS, NOT CONTENT</p>
+            <h2>Kiti is the dashboard—not another artifact repository.</h2>
+            <p>Connect sources such as AI-Kit or Matt Pocock’s Skills. Their folder structures can differ; you choose explicit paths when discovery cannot infer them.</p>
+          </div>
+          <div class="source-examples" aria-label="Example external repositories">
+            <a href="https://github.com/grasdouble/AI-Kit"><span>AK</span><strong>AI-Kit</strong><small>External repository ↗</small></a>
+            <a href="https://github.com/mattpocock/skills"><span>MP</span><strong>Skills</strong><small>External repository ↗</small></a>
+            <a href="./documentation.html#dashboard"><span>+</span><strong>Your catalogs</strong><small>Connect from Kiti</small></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="dashboard-cta">
+        <div>
+          <p class="eyebrow">GET STARTED</p>
+          <h2>Open your local dashboard.</h2>
+          <p>Add a catalog, find a resource, then choose where and how it should be installed.</p>
+        </div>
+        <div class="landing-actions">
+          <a class="primary-action" href="./documentation.html#dashboard">Set up Kiti</a>
+          <a class="secondary-action" href="https://github.com/grasdouble/Kiti">View on GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Kiti indexes metadata and manages local installations. Artifact content stays upstream.</p>
+      <a href="https://github.com/grasdouble/Kiti">Grasdouble/Kiti</a>
+    </footer>
+  </body>
+</html>

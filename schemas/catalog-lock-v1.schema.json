@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:kiti:inventory:1",
+  "title": "Kiti installation inventory version 1",
+  "description": "Catalog-qualified source ownership, bundles and native MCP entry ownership. Secret values are never stored. The CLI additionally checks paths, references and ownership.",
+  "type": "object",
+  "required": ["lock_version", "catalog", "resources", "sources", "bundles", "mcps"],
+  "additionalProperties": false,
+  "properties": {
+    "lock_version": { "const": 1 },
+    "catalog": { "enum": ["grasdouble/Kiti"] },
+    "resources": {
+      "type": "object",
+      "patternProperties": {
+        "^(skill|agent|instruction):[a-z0-9]+(?:-[a-z0-9]+)*$": {
+          "type": "object",
+          "required": ["tool", "digest", "commit", "version", "files", "standalone"],
+          "properties": {
+            "tool": { "$ref": "#/definitions/tool" },
+            "digest": { "$ref": "#/definitions/sha256" },
+            "commit": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" },
+            "version": { "type": "string" },
+            "files": { "$ref": "#/definitions/files" },
+            "standalone": { "type": "boolean" }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sources": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "skills": { "$ref": "#/definitions/sourceCollection" },
+          "agents": { "$ref": "#/definitions/sourceCollection" },
+          "instructions": { "$ref": "#/definitions/sourceCollection" },
+          "mcps": { "$ref": "#/definitions/sourceCollection" },
+          "bundles": { "$ref": "#/definitions/sourceCollection" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "bundles": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/definitions/id" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["tool", "scope", "digest", "resources"],
+        "properties": {
+          "tool": { "$ref": "#/definitions/tool" },
+          "scope": { "enum": ["project", "user"] },
+          "digest": { "$ref": "#/definitions/sha256" },
+          "resources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["catalog", "kind", "id"],
+              "properties": {
+                "catalog": { "enum": ["internal", "external"] },
+                "kind": { "enum": ["skill", "agent", "instruction", "mcp"] },
+                "id": { "$ref": "#/definitions/id" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      }
+    },
+    "mcps": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/definitions/id" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["server", "digest", "values", "configurations", "files"],
+        "properties": {
+          "server": { "type": "string", "pattern": "^[a-z0-9]+(?:[._/-][a-z0-9]+)*$" },
+          "standalone": { "type": "boolean" },
+          "tool": { "$ref": "#/definitions/tool" },
+          "scope": { "enum": ["project", "user"] },
+          "digest": { "$ref": "#/definitions/sha256" },
+          "values": { "type": "object", "additionalProperties": { "type": "string" } },
+          "files": { "$ref": "#/definitions/files" },
+          "configurations": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": { "enum": [".mcp.json", ".claude.json", ".copilot/mcp-config.json"] },
+            "additionalProperties": {
+              "type": "object",
+              "required": ["managed"],
+              "properties": {
+                "managed": { "type": "boolean" },
+                "sha256": { "$ref": "#/definitions/sha256" }
+              },
+              "if": { "properties": { "managed": { "const": true } } },
+              "then": { "properties": { "sha256": { "$ref": "#/definitions/sha256" } }, "required": ["sha256"] }
+            }
+          }
+        },
+        "if": { "required": ["standalone"], "properties": { "standalone": { "const": true } } },
+        "then": {
+          "properties": {
+            "tool": { "$ref": "#/definitions/tool" },
+            "scope": { "enum": ["project", "user"] }
+          },
+          "required": ["tool", "scope"]
+        }
+      }
+    }
+  },
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "sourceCollection": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/definitions/id" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["source_repository", "source_path", "files"],
+        "properties": {
+          "source_repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+          "source_path": { "type": "string", "minLength": 1 },
+          "source_ref": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" },
+          "files": { "$ref": "#/definitions/files" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tool": { "enum": ["claude", "copilot", "both"] },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["sha256", "executable"],
+        "properties": {
+          "sha256": { "$ref": "#/definitions/sha256" },
+          "executable": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

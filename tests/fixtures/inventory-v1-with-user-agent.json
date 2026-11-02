@@ -1,0 +1,22 @@
+{
+  "lock_version": 1,
+  "catalog": "grasdouble/Kiti",
+  "resources": {
+    "agent:user-agent": {
+      "tool": "copilot",
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "version": "1.0.0",
+      "standalone": true,
+      "files": {
+        ".copilot/agents/user-agent.agent.md": {
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "executable": false
+        }
+      }
+    }
+  },
+  "sources": {},
+  "bundles": {},
+  "mcps": {}
+}

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Catalog | Kiti</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./catalog-search.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body class="catalog-page">
+    <a class="skip-link" href="#search">Skip to search</a>
+    <header class="site-header">
+      <div class="header-content">
+        <a class="brand" href="./" aria-label="Kiti home">
+          <span class="brand-mark" aria-hidden="true">K</span>
+          <span><strong>Kiti</strong><small>RESOURCE DASHBOARD</small></span>
+        </a>
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="./">Overview</a>
+          <a href="./catalog.html" aria-current="page">Public catalog</a>
+          <a href="./documentation.html">Guide</a>
+          <a href="./contribute.html">Sources</a>
+          <a class="source-link" href="https://github.com/grasdouble/Kiti">GitHub <span aria-hidden="true">↗</span></a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">PUBLIC INDEX · DASHBOARD COMPANION</p>
+        <h1 id="page-title">Browse resource metadata.</h1>
+        <p class="intro-copy">Explore the public index, then connect the repositories you trust in Kiti’s local dashboard. Your own catalog list and installed resources stay on your machine.</p>
+        <div class="catalog-summary" aria-live="polite">
+          <span id="resource-count">Loading catalog…</span>
+          <span class="summary-separator" aria-hidden="true"></span>
+          <a href="https://github.com/grasdouble/Kiti/blob/main/catalogs/CATALOG.md">Markdown index</a>
+          <a href="./data/catalog.json">Public metadata</a>
+          <a href="./data/source-catalogs/catalogSources.json">Published source manifest</a>
+        </div>
+      </section>
+
+      <aside class="public-catalog-note" aria-label="Public catalog information">
+        <span>PUBLIC INDEX</span>
+        <p>This page lists published metadata only. Add your own external repositories from the local Kiti dashboard.</p>
+        <a href="./documentation.html#dashboard">How to connect catalogs <span aria-hidden="true">→</span></a>
+      </aside>
+
+      <section class="catalog-search" aria-label="Search resources">
+        <label class="search-label" for="search">Search</label>
+        <input id="search" type="search" placeholder="Search resources, tasks, or integrations…" autocomplete="off">
+        <div class="task-picker">
+          <div id="need-choices"></div>
+          <select id="need-filter" aria-label="Your task" hidden>
+            <option value="">All tasks</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="catalog-layout" aria-label="Catalog browser">
+        <aside class="filters" aria-label="Filters">
+          <button id="filter-toggle" class="filter-toggle" type="button" aria-expanded="false" aria-controls="filter-controls">Filters</button>
+          <div id="filter-controls" class="filter-controls" data-expanded="false">
+          <div class="filter-heading">
+            <h2>Filters</h2>
+            <button id="clear-filters" class="text-button" type="button">Clear</button>
+          </div>
+          <div id="kind-choices"></div>
+          <select id="kind-filter" aria-label="Resource type" hidden>
+            <option value="">All types</option>
+          </select>
+
+          <div id="runtime-choices"></div>
+          <select id="runtime-filter" aria-label="Runtime" hidden>
+            <option value="">Any</option>
+            <option value="claude">Claude</option>
+            <option value="copilot">Copilot</option>
+          </select>
+
+          <details id="advanced-filters" class="advanced-filters">
+            <summary>More filters</summary>
+            <label for="catalog-filter">Catalog</label>
+            <select id="catalog-filter">
+              <option value="">All catalogs</option>
+            </select>
+
+            <label for="compatibility-filter">Compatibility status</label>
+            <select id="compatibility-filter">
+              <option value="">Any status</option>
+              <option value="compatible">Compatible</option>
+              <option value="unverified">Unverified</option>
+              <option value="unsupported">Unsupported</option>
+              <option value="not-recorded">Not declared</option>
+            </select>
+
+            <p class="filter-note">“Compatible” is an indicative declaration by the resource author; “Unverified” means no compatibility claim has been made.</p>
+          </details>
+
+          <label class="demo-toggle" for="show-demos">
+            <input id="show-demos" type="checkbox" role="switch" aria-describedby="demo-note">
+            <span>Show demo resources</span>
+          </label>
+          <p id="demo-note" class="filter-note" aria-live="polite" hidden></p>
+          </div>
+        </aside>
+
+        <section class="results" aria-label="Matching resources">
+          <div class="results-heading">
+            <h2>Resources</h2>
+            <span id="result-count" class="result-count" role="status" aria-live="polite"></span>
+          </div>
+          <div id="active-filters" class="active-filters" role="group" aria-label="Active filters" hidden></div>
+          <p id="load-error" class="error-message" role="alert" hidden></p>
+          <div id="source-status" aria-live="polite"></div>
+          <div id="resource-list" class="resource-list"></div>
+          <p id="empty-state" class="empty-state" hidden>No resources match these filters.</p>
+          <button id="empty-reset" class="install-button" type="button" hidden>Clear all filters</button>
+          <div class="result-navigation">
+            <p id="result-progress" class="result-progress" role="status"></p>
+            <button id="load-more" class="load-more" type="button" hidden>Show more resources</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Catalog metadata is informational. Verify compatibility, access rights, costs and organizational approval before use.</p>
+      <nav aria-label="Catalog exports">
+        <a href="https://github.com/grasdouble/Kiti/blob/main/catalogs/CATALOG.md">Markdown catalog</a>
+        <a href="./data/catalog.json">Internal data</a>
+        <a href="./data/source-catalogs/catalogSources.json">Source manifest</a>
+      </nav>
+    </footer>
+  </body>
+</html>

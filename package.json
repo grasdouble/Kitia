@@ -1,74 +1,63 @@
 {
-  "name": "lufa-ai",
-  "version": "0.1.0",
-  "type": "module",
-  "description": "Catalogue local d’artefacts pour agents IA et CLI d’installation.",
+  "name": "kiti",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kiti — Your AI toolkit, in good hands.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/grasdouble/Lufa-AI.git"
+    "url": "https://github.com/grasdouble/Kiti.git"
   },
-  "homepage": "https://github.com/grasdouble/Lufa-AI#readme",
+  "homepage": "https://github.com/grasdouble/Kiti#readme",
   "bugs": {
-    "url": "https://github.com/grasdouble/Lufa-AI/issues"
+    "url": "https://github.com/grasdouble/Kiti/issues"
   },
-  "keywords": [
-    "ai",
-    "agents",
-    "skills",
-    "catalog"
-  ],
-  "engines": {
-    "node": ">=24"
+  "keywords": ["ai", "agents", "skills", "catalog"],
+  "bin": {
+    "kiti": "./bin/kiti.js"
   },
   "files": [
+    "catalogs/",
     "dist/",
+    "bin/kiti.js",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "docs/cli-contract.md",
+    "docs/bundles.md",
+    "docs/inventory-migrations.md",
+    "migrations/",
     "schemas/",
-    "generated/",
-    "catalog/",
-    "README.md"
+    "scripts/prepare-catalog.js"
   ],
-  "bin": {
-    "lufa": "./dist/lufa-command.js"
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
-    "format": "prettier --plugin prettier-plugin-astro --write \"src/**/*.{js,ts}\" \"tests/**/*.js\" \"scripts/**/*.js\" \"*.js\" \"*.json\" \"schemas/**/*.json\" \"catalog/**/*.{json,md}\" \"generated/**/*.json\" \"*.md\" \".github/**/*.yml\" \"docs/adr/**/*.md\" \"web/**/*.{astro,js,css,mjs}\"",
-    "format:check": "prettier --plugin prettier-plugin-astro --check \"src/**/*.{js,ts}\" \"tests/**/*.js\" \"scripts/**/*.js\" \"*.js\" \"*.json\" \"schemas/**/*.json\" \"catalog/**/*.{json,md}\" \"generated/**/*.json\" \"*.md\" \".github/**/*.yml\" \"docs/adr/**/*.md\" \"web/**/*.{astro,js,css,mjs}\"",
-    "lint": "eslint .",
-    "build": "node scripts/build.js",
-    "build:check": "node scripts/check-build.js",
-    "prepare": "husky",
-    "typecheck": "tsc --noEmit",
-    "smoke:git-source": "node scripts/git-source-smoke.js",
-    "test": "npm run web:build && npm run web:build:pages && npm run web:test-fixture && node --experimental-strip-types --test",
-    "catalog:validate": "npm run build && node dist/catalog-command.js validate",
-    "catalog:build": "npm run build && node dist/catalog-command.js build",
-    "catalog:check": "npm run build && node dist/catalog-command.js check",
-    "lufa": "npm run build --silent && node dist/lufa-command.js",
-    "pack:smoke": "node tests/pack-smoke.js",
-    "web:dev": "cd web && astro dev",
-    "registry:build": "node --experimental-strip-types scripts/export-registry.js",
-    "web:build": "npm run registry:build && cd web && astro build",
-    "web:build:pages": "npm run registry:build && node scripts/build-pages.js",
-    "web:test-fixture": "astro build --root tests/fixtures/web-security",
-    "check:quality": "npm run format:check && npm run lint && npm run typecheck",
-    "check:platform": "npm run build:check && npm run catalog:check && npm test && npm run pack:smoke",
-    "check": "npm run check:quality && npm run check:platform"
+    "build": "node scripts/clean-build.js && tsc -p tsconfig.json",
+    "prepare": "npm run build && node scripts/prepare-catalog.js && husky",
+    "postpack": "node scripts/prepare-catalog.js --clean",
+    "test": "npm run build && node --test tests/catalog.test.js tests/site.test.js tests/documentation.test.js tests/technical.test.js tests/contract.test.js tests/bundles.test.js tests/source-catalogs.test.js tests/migrations.test.js",
+    "test:contract": "npm run build && node --test tests/contract.test.js",
+    "test:browser": "playwright test",
+    "test:package": "node scripts/package-smoke.js",
+    "validate": "npm run build && node bin/kiti.js validate",
+    "catalog:build": "npm run build && node scripts/generate-catalog.js",
+    "catalog:check": "npm run build && node scripts/generate-catalog.js --check",
+    "catalog:sources-build": "npm run build && node scripts/build-source-catalogs.js",
+    "site:build": "npm run build && node scripts/build-site.js",
+    "site:dev": "npm run build && node scripts/serve-site.js"
   },
   "dependencies": {
-    "ajv": "^8.20.0",
-    "prettier": "^3.9.9",
-    "semver": "^7.8.5"
+    "ink": "8.0.0",
+    "react": "19.3.1",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.5",
-    "@types/semver": "^7.8.0",
-    "astro": "^7.3.8",
-    "eslint": "^10.12.0",
-    "globals": "^17.13.0",
+    "@playwright/test": "1.64.0",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "ajv": "8.20.0",
     "husky": "^9.1.7",
-    "prettier-plugin-astro": "^1.1.1",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.1"
+    "typescript": "5.9.3"
   }
 }
