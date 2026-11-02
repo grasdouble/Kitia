@@ -13,7 +13,7 @@ const {
 } = require("../entries.js");
 
 const CATALOG_ROOT = path.resolve(__dirname, "../../..");
-const CATALOG_NAME = "grasdouble/Kiti";
+const CATALOG_NAME = "grasdouble/Kitia";
 const TOOLS = new Set(["claude", "copilot", "both"]);
 const INSTALL_SCAN_DIRECTORIES = {
   claude: [".claude/skills", ".claude/agents", ".claude/rules"],
@@ -39,8 +39,8 @@ const PROVENANCE_FIELDS = [
   "catalog-content-sha256",
   "catalog-runtime",
 ];
-const LOCK_PATH = ".agents/kiti-lock.json";
-const MCP_DIRECTORY = ".agents/kiti-mcp";
+const LOCK_PATH = ".agents/kitia-lock.json";
+const MCP_DIRECTORY = ".agents/kitia-mcp";
 const SOURCE_SKILL_DIRECTORIES = {
   "github-copilot": ".agents/skills",
   "claude-code": ".claude/skills",

@@ -1,4 +1,4 @@
-name: Deploy Kiti catalog site
+name: Deploy Kitia catalog site
 
 on:
   push:
@@ -54,7 +54,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
       - run: npm run validate
         env:
-          KITI_SOURCE_CATALOGS: site-build/data/source-catalogs
+          KITIA_SOURCE_CATALOGS: site-build/data/source-catalogs
 
       - uses: actions/configure-pages@v5
 

@@ -394,7 +394,7 @@ function formatResource(
       "**Installation (preview, current catalog branch):**",
       "",
       "```sh",
-      `npx --yes github:grasdouble/Kiti install ${resource.kind} ${resource.id} --target . --tool ${tool} --dry-run`,
+      `npx --yes github:grasdouble/Kitia install ${resource.kind} ${resource.id} --target . --tool ${tool} --dry-run`,
       "```",
     );
     if (resource.kind === "bundle") {

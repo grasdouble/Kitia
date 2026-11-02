@@ -142,7 +142,7 @@ function createDashboardActionHandler(
           }
           if ([...protectedPaths].some((trackedPath) =>
             trackedPath === skillDirectory || trackedPath.startsWith(`${skillDirectory}/`))) {
-            throw new Error(`Refusing to remove ${skillDirectory}; it contains files managed by Kiti.`);
+            throw new Error(`Refusing to remove ${skillDirectory}; it contains files managed by Kitia.`);
           }
           const directoryPath = path.resolve(targetRoot, ...skillDirectory.split("/"));
           assertSafePath(entryPath, false);

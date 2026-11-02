@@ -8,7 +8,7 @@ const { createSiteServer } = require("../../scripts/serve-site.js");
 
 const test = base.extend({
   catalogServer: [async ({}, use) => {
-    const sourceDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-browser-test-"));
+    const sourceDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-browser-test-"));
     fs.writeFileSync(path.join(sourceDataDirectory, "catalogSources.json"),
       JSON.stringify({ catalog_version: 1, sources: [] }));
     const server = createSiteServer({ sourceDataDirectory });
@@ -83,7 +83,7 @@ test("quick installation keeps configured source catalogs in the command", async
   await card.getByRole("button", { name: "Copy install command", exact: true }).click();
   await expect(card.getByRole("status")).toHaveText("Installation command copied to clipboard.");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    "npx --yes github:grasdouble/Kiti install skill shared-skill --catalog community --tool both --scope user",
+    "npx --yes github:grasdouble/Kitia install skill shared-skill --catalog community --tool both --scope user",
   );
   await expect(card.locator(".resource-details")).not.toHaveAttribute("open", "");
 });

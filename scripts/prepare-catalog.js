@@ -33,7 +33,7 @@ fs.writeFileSync(
   buildFile,
   `${JSON.stringify(
     {
-      catalog: "grasdouble/Kiti",
+      catalog: "grasdouble/Kitia",
       commit,
       package_version: packageInfo.version,
       dirty,

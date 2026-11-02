@@ -57,7 +57,7 @@
       { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "planned" }
     ],
     "actions": [
-      { "action": "install", "path": ".agents/kiti-lock.json", "resource": null },
+      { "action": "install", "path": ".agents/kitia-lock.json", "resource": null },
       {
         "action": "install",
         "path": ".agents/skills/contract-skill/SKILL.md",
@@ -75,7 +75,7 @@
       { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "planned" }
     ],
     "actions": [
-      { "action": "overwrite", "path": ".agents/kiti-lock.json", "resource": null },
+      { "action": "overwrite", "path": ".agents/kitia-lock.json", "resource": null },
       {
         "action": "remove",
         "path": ".agents/skills/contract-skill/SKILL.md",

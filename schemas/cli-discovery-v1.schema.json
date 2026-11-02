@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:kiti:cli-discovery:1",
-  "title": "Kiti CLI legacy discovery array contract",
+  "$id": "urn:kitia:cli-discovery:1",
+  "title": "Kitia CLI legacy discovery array contract",
   "description": "The array has no embedded version. Aggregate list/search include catalog on each item; community entries retain their upstream-reference fields.",
   "type": "array",
   "items": {

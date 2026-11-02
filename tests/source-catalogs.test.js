@@ -37,6 +37,39 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+test("first Kitia use preserves existing Kiti catalog settings", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-config-migration-"));
+  const home = path.join(temporary, "home");
+  const legacy = path.join(home, ".config", "kiti");
+  const current = path.join(home, ".config", "kitia");
+  const manifest = {
+    catalog_version: 1,
+    sources: [{ name: "Test", repository: "https://github.com/grasdouble/AI-Kit" }],
+  };
+  writeJson(path.join(legacy, "catalogSources.json"), manifest);
+  writeJson(path.join(legacy, "source-catalogs", "Test.json"), { catalog_name: "Test" });
+
+  const previous = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    KITIA_CONFIG_DIR: process.env.KITIA_CONFIG_DIR,
+  };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  delete process.env.KITIA_CONFIG_DIR;
+  try {
+    assert.deepEqual(loadUserSourceConfiguration().map(({ name }) => name), ["Test"]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(current, "catalogSources.json"), "utf8")), manifest);
+    assert.equal(fs.existsSync(path.join(current, "source-catalogs", "Test.json")), true);
+    assert.equal(fs.existsSync(path.join(legacy, "catalogSources.json")), true);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 
 function createSource(name, repository) {
   const source = path.join(temporary, name);
@@ -63,7 +96,7 @@ function createSource(name, repository) {
   return source;
 }
 test("catalog refresh updates one or all configured user indexes", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-refresh-catalog-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-refresh-catalog-"));
   const repositoryUrls = [
     "https://github.com/example/refresh-alpha",
     "https://github.com/example/refresh-beta",
@@ -90,12 +123,12 @@ test("catalog refresh updates one or all configured user indexes", () => {
   ];
   const registry = { catalog_version: 1, sources };
   const envKeys = [
-    "KITI_CONFIG_DIR", "GIT_CONFIG_COUNT",
+    "KITIA_CONFIG_DIR", "GIT_CONFIG_COUNT",
     "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1",
   ];
   const previousEnvironment = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   try {
-    process.env.KITI_CONFIG_DIR = configDirectory;
+    process.env.KITIA_CONFIG_DIR = configDirectory;
     process.env.GIT_CONFIG_COUNT = "2";
     process.env.GIT_CONFIG_KEY_0 = `url.${pathToFileURL(alpha).href}.insteadOf`;
     process.env.GIT_CONFIG_VALUE_0 = repositoryUrls[0];
@@ -160,7 +193,7 @@ test("catalog refresh updates one or all configured user indexes", () => {
 
 
 test("configured repositories generate pinned metadata catalogs for root skills directories", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-catalogs-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-catalogs-"));
   const catalogRoot = path.join(temporary, "catalog");
   const outputDirectory = path.join(temporary, "site", "data");
   const sources = [
@@ -208,7 +241,7 @@ test("configured repositories generate pinned metadata catalogs for root skills 
 });
 
 test("Basic source indexing discovers categorized skills, agents, and instructions", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-categorized-source-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-categorized-source-"));
   const repository = "https://github.com/example/categorized";
   const source = createSource("categorized", repository);
   const skill = path.join(source, "skills", "engineering", "research");
@@ -268,7 +301,7 @@ test("Basic source indexing discovers categorized skills, agents, and instructio
     "skills/engineering/research");
 });
 test("custom catalog mappings index explicit paths and default unscoped instructions globally", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-custom-source-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-custom-source-"));
   const repository = "https://github.com/example/custom";
   const source = createSource("custom", repository);
   const skill = path.join(source, "custom-skills", "workflow", "review");
@@ -334,7 +367,7 @@ test("custom catalog mappings index explicit paths and default unscoped instruct
     ".claude/agents/release.md", ".github/agents/release.agent.md",
     ".claude/rules/checklist.md", ".github/instructions/checklist.instructions.md",
   ]);
-  assert.equal(fs.existsSync(path.join(target, ".agents/kiti-lock.json")), false);
+  assert.equal(fs.existsSync(path.join(target, ".agents/kitia-lock.json")), false);
   assert.throws(() => validateSourceConfiguration({
     catalog_version: 1,
     sources: [{
@@ -355,7 +388,7 @@ test("custom catalog mappings index explicit paths and default unscoped instruct
 
 
 test("source configuration rejects duplicate names and non-GitHub repositories", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-config-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-config-"));
   const catalogRoot = path.join(temporary, "catalog");
   fs.mkdirSync(path.join(catalogRoot, "catalogs"), { recursive: true });
   const file = path.join(catalogRoot, "catalogs/catalogSources.json");
@@ -383,7 +416,7 @@ test("source configuration rejects duplicate names and non-GitHub repositories",
 });
 
 test("user registries load metadata for multiple independently named catalogs", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-user-catalogs-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-user-catalogs-"));
   const indexDirectory = path.join(temporary, "source-catalogs");
   fs.mkdirSync(indexDirectory, { recursive: true });
   const sources = [
@@ -409,10 +442,10 @@ test("user registries load metadata for multiple independently named catalogs", 
     }));
   }
 
-  const originalConfig = process.env.KITI_CONFIG_DIR;
-  const originalSources = process.env.KITI_SOURCE_CATALOGS;
-  process.env.KITI_CONFIG_DIR = temporary;
-  delete process.env.KITI_SOURCE_CATALOGS;
+  const originalConfig = process.env.KITIA_CONFIG_DIR;
+  const originalSources = process.env.KITIA_SOURCE_CATALOGS;
+  process.env.KITIA_CONFIG_DIR = temporary;
+  delete process.env.KITIA_SOURCE_CATALOGS;
   try {
     const loaded = loadCommandCatalogs({ command: "list" }, path.resolve(__dirname, ".."));
     assert.deepEqual(loaded.sourceResources.map(({ catalog, id }) => `${catalog}:${id}`).sort(), [
@@ -420,15 +453,15 @@ test("user registries load metadata for multiple independently named catalogs", 
       "team-beta:demo-team-beta",
     ]);
   } finally {
-    if (originalConfig === undefined) delete process.env.KITI_CONFIG_DIR;
-    else process.env.KITI_CONFIG_DIR = originalConfig;
-    if (originalSources === undefined) delete process.env.KITI_SOURCE_CATALOGS;
-    else process.env.KITI_SOURCE_CATALOGS = originalSources;
+    if (originalConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = originalConfig;
+    if (originalSources === undefined) delete process.env.KITIA_SOURCE_CATALOGS;
+    else process.env.KITIA_SOURCE_CATALOGS = originalSources;
   }
 });
 
 test("published source catalogs are loaded as one pinned set and cached by source name", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-artifact-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-artifact-"));
   const sources = [
     { name: "team-alpha", repository: "https://github.com/example/team-alpha", repositoryId: "example/team-alpha" },
     { name: "team-beta", repository: "https://github.com/example/team-beta", repositoryId: "example/team-beta" },
@@ -459,7 +492,7 @@ test("published source catalogs are loaded as one pinned set and cached by sourc
         status: 0,
         stdout: JSON.stringify(endpoint.includes("/workflows/")
           ? { workflow_runs: [{
-            id: 10, head_branch: "main", head_repository: { full_name: "grasdouble/Kiti" },
+            id: 10, head_branch: "main", head_repository: { full_name: "grasdouble/Kitia" },
             path: ".github/workflows/pages.yml", status: "completed", conclusion: "success", event: "push",
           }] }
           : { artifacts: [{
@@ -497,7 +530,7 @@ test("published source catalogs are loaded as one pinned set and cached by sourc
 
 
 test("source skills can be uninstalled from inventory after their catalog is removed", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-removed-source-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-removed-source-"));
   const target = path.join(temporary, "target");
   const relativePath = ".agents/skills/retired-skill/SKILL.md";
   const skillFile = path.join(target, relativePath);
@@ -522,9 +555,9 @@ test("source skills can be uninstalled from inventory after their catalog is rem
     files: { [relativePath]: installedFingerprint(target, relativePath) },
   };
   fs.mkdirSync(path.join(target, ".agents"), { recursive: true });
-  fs.writeFileSync(path.join(target, ".agents/kiti-lock.json"), JSON.stringify({
+  fs.writeFileSync(path.join(target, ".agents/kitia-lock.json"), JSON.stringify({
     lock_version: 1,
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     resources: {},
     bundles: {},
     mcps: {},
@@ -543,7 +576,7 @@ test("source skills can be uninstalled from inventory after their catalog is rem
 });
 
 test("identical skill IDs from different sources cannot collide in one installation target", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-id-collision-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-id-collision-"));
   const target = path.join(temporary, "target");
   const relativePath = ".agents/skills/demo-skill/SKILL.md";
   const skillFile = path.join(target, relativePath);
@@ -556,9 +589,9 @@ test("identical skill IDs from different sources cannot collide in one installat
     files: { [relativePath]: installedFingerprint(target, relativePath) },
   };
   fs.mkdirSync(path.join(target, ".agents"), { recursive: true });
-  fs.writeFileSync(path.join(target, ".agents/kiti-lock.json"), JSON.stringify({
+  fs.writeFileSync(path.join(target, ".agents/kitia-lock.json"), JSON.stringify({
     lock_version: 1,
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     resources: {},
     bundles: {},
     mcps: {},
@@ -582,7 +615,7 @@ test("identical skill IDs from different sources cannot collide in one installat
 });
 
 test("configured source skills use the same pinned install, check, update and uninstall lifecycle", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-lifecycle-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-lifecycle-"));
   const target = path.join(temporary, "target");
   fs.mkdirSync(target);
   const sourceResource = {
@@ -651,16 +684,16 @@ test("configured source skills use the same pinned install, check, update and un
   assert.equal(readInstalledSourceSkills(target, []).length, 0);
 });
 test("uninstalling a managed internal skill removes its entire directory", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-managed-skill-uninstall-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-managed-skill-uninstall-"));
   const target = path.join(temporary, "project");
   const skillDirectory = path.join(target, ".agents/skills/managed-skill");
   fs.mkdirSync(skillDirectory, { recursive: true });
   const relativePath = ".agents/skills/managed-skill/SKILL.md";
   fs.writeFileSync(path.join(skillDirectory, "SKILL.md"), "Managed skill body.");
   fs.writeFileSync(path.join(skillDirectory, "local-note.txt"), "Additional file.");
-  writeJson(path.join(target, ".agents/kiti-lock.json"), {
+  writeJson(path.join(target, ".agents/kitia-lock.json"), {
     lock_version: 1,
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     resources: {
       "skill:managed-skill": {
         tool: "copilot",
@@ -800,15 +833,15 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
 });
 
 test("dashboard refreshes its source catalog set before rebuilding installed skills", async () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-dashboard-source-refresh-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-source-refresh-"));
   const configDirectory = path.join(temporary, "config");
   const catalogDirectory = path.join(configDirectory, "source-catalogs");
   const target = path.join(temporary, "project");
   const repository = "https://github.com/example/dashboard-skill";
   const source = createSource("upstream", repository);
   const registry = { catalog_version: 1, sources: [{ name: "Test", repository }] };
-  const previousConfigDirectory = process.env.KITI_CONFIG_DIR;
-  process.env.KITI_CONFIG_DIR = configDirectory;
+  const previousConfigDirectory = process.env.KITIA_CONFIG_DIR;
+  process.env.KITIA_CONFIG_DIR = configDirectory;
   try {
     const userTarget = path.join(temporary, "user");
     fs.mkdirSync(userTarget, { recursive: true });
@@ -854,12 +887,12 @@ test("dashboard refreshes its source catalog set before rebuilding installed ski
       entry.catalog === "Test" && entry.kind === "skill" && entry.id === "demo-skill"),
     JSON.stringify(result));
   } finally {
-    if (previousConfigDirectory === undefined) delete process.env.KITI_CONFIG_DIR;
-    else process.env.KITI_CONFIG_DIR = previousConfigDirectory;
+    if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
   }
 });
 test("dashboard lists unmanaged skills, agents, and instructions without a catalog", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-unmanaged-inventory-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-unmanaged-inventory-"));
   const target = path.join(temporary, "project");
   fs.mkdirSync(target, { recursive: true });
   const externalRepository = "https://github.com/example/external-skills";
@@ -881,7 +914,7 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
   writeArtifact(sourceSkillPath, [
     "---",
     "name: demo-skill",
-    "description: Installed outside Kiti.",
+    "description: Installed outside Kitia.",
     "metadata:",
     `  github-repo: "${externalResource.source_repository}"`,
     `  github-path: "${externalResource.source_path}"`,
@@ -897,16 +930,16 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
   assert.ok(findUnmanagedArtifacts(target).some((artifact) =>
     artifact.kind === "instruction" && artifact.id === "repo-rules"),
   JSON.stringify(findUnmanagedArtifacts(target)));
-  const trackedPath = ".agents/skills/kiti-tracked/SKILL.md";
-  writeArtifact(trackedPath, "Tracked through Kiti.");
+  const trackedPath = ".agents/skills/kitia-tracked/SKILL.md";
+  writeArtifact(trackedPath, "Tracked through Kitia.");
   const state = readInstallState(target);
-  state.sources.Tracked = { skills: { "kiti-tracked": {
+  state.sources.Tracked = { skills: { "kitia-tracked": {
     source_repository: "example/tracked",
-    source_path: "skills/kiti-tracked",
+    source_path: "skills/kitia-tracked",
     source_ref: "a".repeat(40),
     files: { [trackedPath]: installedFingerprint(target, trackedPath) },
   } } };
-  writeJson(path.join(target, ".agents/kiti-lock.json"), state);
+  writeJson(path.join(target, ".agents/kitia-lock.json"), state);
 
   const result = collectInstalledScopes(
     { project: target }, [], process.cwd(), { dirty: false }, [externalResource],
@@ -929,7 +962,7 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
   assert.match(rendered, /project\s+-\s+skill\s+demo-skill\s+unmanaged/);
   assert.deepEqual(result.errors, []);
   assert.ok(result.resources.some((resource) =>
-    resource.catalog === "Tracked" && resource.id === "kiti-tracked" && resource.managed !== false));
+    resource.catalog === "Tracked" && resource.id === "kitia-tracked" && resource.managed !== false));
 });
 
 test("unmanaged dashboard artifacts can be removed only after confirmation", async () => {
@@ -977,7 +1010,7 @@ test("unmanaged dashboard artifacts can be removed only after confirmation", asy
 });
 
 test("removing an unmanaged skill deletes its entire detected folder", async () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-dashboard-unmanaged-remove-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-unmanaged-remove-"));
   const target = path.join(temporary, "project");
   const userTarget = path.join(temporary, "user");
   const skillDirectory = path.join(target, ".agents/skills/manual-skill");

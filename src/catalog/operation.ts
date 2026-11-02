@@ -6,7 +6,7 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { CatalogError } = require("./resources/index.js");
 
-const OPERATION_LOCK = ".kiti-operation.lock";
+const OPERATION_LOCK = ".kitia-operation.lock";
 
 function inspectOperationLock(target) {
   const file = path.join(fs.realpathSync(target), OPERATION_LOCK);

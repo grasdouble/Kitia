@@ -1,24 +1,24 @@
 {
-  "name": "kiti",
+  "name": "kitia",
   "version": "1.0.0",
   "private": true,
-  "description": "Kiti — Your AI toolkit, in good hands.",
+  "description": "Kitia — Your AI toolkit, in good hands.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/grasdouble/Kiti.git"
+    "url": "https://github.com/grasdouble/Kitia.git"
   },
-  "homepage": "https://github.com/grasdouble/Kiti#readme",
+  "homepage": "https://github.com/grasdouble/Kitia#readme",
   "bugs": {
-    "url": "https://github.com/grasdouble/Kiti/issues"
+    "url": "https://github.com/grasdouble/Kitia/issues"
   },
   "keywords": ["ai", "agents", "skills", "catalog"],
   "bin": {
-    "kiti": "./bin/kiti.js"
+    "kitia": "./bin/kitia.js"
   },
   "files": [
     "catalogs/",
     "dist/",
-    "bin/kiti.js",
+    "bin/kitia.js",
     "README.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
@@ -40,7 +40,7 @@
     "test:contract": "npm run build && node --test tests/contract.test.js",
     "test:browser": "playwright test",
     "test:package": "node scripts/package-smoke.js",
-    "validate": "npm run build && node bin/kiti.js validate",
+    "validate": "npm run build && node bin/kitia.js validate",
     "catalog:build": "npm run build && node scripts/generate-catalog.js",
     "catalog:check": "npm run build && node scripts/generate-catalog.js --check",
     "catalog:sources-build": "npm run build && node scripts/build-source-catalogs.js",

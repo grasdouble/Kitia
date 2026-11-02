@@ -118,12 +118,12 @@ export function confirmationModal({
         : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
       : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
   const removalWarning = permanentRemoval
-    ? `This artifact is not managed by a Kiti catalog. This action is irreversible; ${
+    ? `This artifact is not managed by a Kitia catalog. This action is irreversible; ${
       confirmation.resource.kind === "skill" ? "all data in its skill directory" : "the artifact file"
     } will be permanently lost.`
     : confirmation.resource.kind === "skill"
-      ? "Kiti will remove the entire detected skill folder and all of its contents."
-      : "Kiti will remove the detected artifact file.";
+      ? "Kitia will remove the entire detected skill folder and all of its contents."
+      : "Kitia will remove the detected artifact file.";
   return modalFrame(
     permanentRemoval ? "CONFIRM PERMANENT REMOVAL" : `CONFIRM ${actionLabel.toUpperCase()}`,
     [
@@ -134,7 +134,7 @@ export function confirmationModal({
         : confirmation.action === "remove-unmanaged"
           ? [removalWarning]
           : confirmation.action === "uninstall" && confirmation.resource.kind === "skill"
-            ? ["Kiti removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
+            ? ["Kitia removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
             : ["The CLI safety checks apply; locally modified tracked files are protected."]),
       {
         text: `${selectedButton === 0 ? "> " : "  "}[ Cancel ]   ${selectedButton === 1 ? "> " : "  "}[ ${actionLabel} ]`,
@@ -179,7 +179,7 @@ export function inventoryMigrationModal({ scopes, columns }: { scopes: string[];
     "",
     "Run this from the current project directory:",
     {
-      text: "npx --yes github:grasdouble/Kiti migrate --apply",
+      text: "npx --yes github:grasdouble/Kitia migrate --apply",
       color: "cyan",
       bold: true,
     },

@@ -229,7 +229,7 @@ function readInstallState(targetRoot: string): InstallState {
   if (Number.isSafeInteger(state.lock_version) &&
       state.lock_version > 0 && state.lock_version < CURRENT_INVENTORY_VERSION) {
     throw new CatalogError(
-      `Installation inventory version ${state.lock_version} must be migrated before using this CLI. Run npx --yes github:grasdouble/Kiti migrate --apply; inventories already at the current version are skipped.`,
+      `Installation inventory version ${state.lock_version} must be migrated before using this CLI. Run npx --yes github:grasdouble/Kitia migrate --apply; inventories already at the current version are skipped.`,
       "INVENTORY_MIGRATION_REQUIRED",
     );
   }

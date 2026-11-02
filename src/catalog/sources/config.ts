@@ -100,7 +100,14 @@ function validateSourceConfiguration(configuration: unknown) {
 }
 
 function userCatalogDirectory() {
-  return process.env.KITI_CONFIG_DIR || path.join(os.homedir(), ".config", "kiti");
+  if (process.env.KITIA_CONFIG_DIR) return process.env.KITIA_CONFIG_DIR;
+  const current = path.join(os.homedir(), ".config", "kitia");
+  const previous = path.join(os.homedir(), ".config", "kiti");
+  if (!fs.existsSync(current) && fs.existsSync(previous)) {
+    fs.mkdirSync(path.dirname(current), { recursive: true });
+    fs.cpSync(previous, current, { recursive: true, errorOnExist: true, force: false });
+  }
+  return current;
 }
 
 function userCatalogSourcesFile() {

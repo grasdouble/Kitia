@@ -10,15 +10,15 @@ const { buildSite } = require("../scripts/build-site.js");
 const { createSiteServer } = require("../scripts/serve-site.js");
 
 const root = path.resolve(__dirname, "..");
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-site-test-"));
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-site-test-"));
 const output = path.join(temporary, "public");
-const originalConfigDir = process.env.KITI_CONFIG_DIR;
-process.env.KITI_CONFIG_DIR = path.join(temporary, "config");
+const originalConfigDir = process.env.KITIA_CONFIG_DIR;
+process.env.KITIA_CONFIG_DIR = path.join(temporary, "config");
 
 after(() => {
   fs.rmSync(temporary, { recursive: true, force: true });
-  if (originalConfigDir === undefined) delete process.env.KITI_CONFIG_DIR;
-  else process.env.KITI_CONFIG_DIR = originalConfigDir;
+  if (originalConfigDir === undefined) delete process.env.KITIA_CONFIG_DIR;
+  else process.env.KITIA_CONFIG_DIR = originalConfigDir;
 });
 
 test("site build publishes public source metadata without leaking user catalog configuration", () => {
@@ -71,13 +71,13 @@ test("local site server serves catalog data and pages without exposing arbitrary
     const publicCatalog = await get("/catalog.html");
     assert.equal(publicCatalog.status, 200);
     assert.match(publicCatalog.body, /PUBLIC INDEX/);
-    assert.match(publicCatalog.body, /local Kiti dashboard/);
+    assert.match(publicCatalog.body, /local Kitia dashboard/);
     const guide = await get("/documentation.html");
     assert.equal(guide.status, 200);
     assert.match(guide.body, /One dashboard for connected catalogs/);
     const sources = await get("/contribute.html");
     assert.equal(sources.status, 200);
-    assert.match(sources.body, /Kiti does not own an AI artifact catalog/);
+    assert.match(sources.body, /Kitia does not own an AI artifact catalog/);
     assert.equal((await get("/data/catalog.json")).status, 200);
     assert.equal(JSON.parse((await get("/data/catalog.json")).body).resources.length, 0);
     assert.equal((await get("/data/source-catalogs/catalogSources.json")).status, 200);

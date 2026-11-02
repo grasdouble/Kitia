@@ -1,6 +1,6 @@
 {
   "lock_version": 1,
-  "catalog": "grasdouble/Kiti",
+  "catalog": "grasdouble/Kitia",
   "resources": {
     "agent:user-agent": {
       "tool": "copilot",

@@ -51,7 +51,7 @@ function addAgent() {
 }
 
 beforeEach(() => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-contract-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-contract-"));
   catalog = path.join(temporary, "catalog");
   sourceData = path.join(catalog, "source-data");
   target = path.join(temporary, "target");
@@ -69,7 +69,7 @@ beforeEach(() => {
     }],
   });
   writeJson(path.join(catalog, "dist/catalog-build.json"), {
-    catalog: "grasdouble/Kiti", commit: "a".repeat(40), package_version: "0.2.0", dirty: false,
+    catalog: "grasdouble/Kitia", commit: "a".repeat(40), package_version: "0.2.0", dirty: false,
   });
   writeJson(path.join(catalog, "catalogs/catalog.json"), {
     catalog_version: 2,
@@ -104,10 +104,10 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(temporary, { recursive: true, force: true }));
 
 function run(args) {
-  const result = spawnSync(process.execPath, [path.join(catalog, "bin/kiti.js"), ...args], {
+  const result = spawnSync(process.execPath, [path.join(catalog, "bin/kitia.js"), ...args], {
     cwd: target, encoding: "utf8",
     env: { ...process.env, HOME: home, USERPROFILE: home,
-      KITI_SOURCE_CATALOGS: sourceData,
+      KITIA_SOURCE_CATALOGS: sourceData,
       NODE_PATH: path.join(root, "node_modules"), PATH: "", NO_COLOR: "1" },
   });
   if (result.error) throw result.error;
@@ -202,7 +202,7 @@ test("current reports preserve defaults, attention codes and dry-run action shap
   }
   assert.equal(run(["install", "contract-skill", "--catalog", "internal"]).status, 0);
   assert.equal(fs.existsSync(path.join(target, ".claude")), false);
-  validate("catalog-lock", JSON.parse(fs.readFileSync(path.join(target, ".agents/kiti-lock.json"), "utf8")));
+  validate("catalog-lock", JSON.parse(fs.readFileSync(path.join(target, ".agents/kitia-lock.json"), "utf8")));
   assertCompatible(report(["check", "--catalog", "internal", "--json"]), expectations.currentCheck);
   assertCompatible(report(["uninstall", "contract-skill", "--dry-run", "--json"]), expectations.uninstallPreview);
   const installed = path.join(target, ".agents/skills/contract-skill/SKILL.md");
@@ -255,7 +255,7 @@ test("user scope resolves a home with spaces and keeps project and personal life
   const projectBefore = snapshot(target);
   const installed = run([...install, ...scoped, "--tool", "both"]);
   assert.equal(installed.status, 0, installed.stderr);
-  const inventory = JSON.parse(fs.readFileSync(path.join(home, ".agents/kiti-lock.json"), "utf8"));
+  const inventory = JSON.parse(fs.readFileSync(path.join(home, ".agents/kitia-lock.json"), "utf8"));
   validate("catalog-lock", inventory);
   assert.equal(inventory.resources["skill:contract-skill"].tool, "both");
   assert.deepEqual(snapshot(target), projectBefore);
@@ -324,8 +324,8 @@ test("user-scope operations lock the home only and preserve unsupported inventor
   } finally {
     release();
   }
-  writeJson(path.join(home, ".agents/kiti-lock.json"), {
-    lock_version: 2, catalog: "grasdouble/Kiti", resources: {},
+  writeJson(path.join(home, ".agents/kitia-lock.json"), {
+    lock_version: 2, catalog: "grasdouble/Kitia", resources: {},
   });
   const before = snapshot(home);
   for (const args of [
@@ -503,13 +503,13 @@ test("personal agent conflicts, symlinks and operation locks fail before writes"
   const failed = run([...install, "--force"]);
   assert.equal(failed.status, 1);
   assert.match(failed.stderr, /symlink escapes target/);
-  assert.equal(fs.existsSync(path.join(home, ".kiti-operation.lock")), false);
+  assert.equal(fs.existsSync(path.join(home, ".kitia-operation.lock")), false);
   assert.deepEqual(snapshot(target), {});
 });
 
 test("version-1 inventories support personal agent ownership without rewriting on reads", () => {
   const original = readFixture("inventory-v1-with-user-agent.json");
-  writeJson(path.join(home, ".agents/kiti-lock.json"), original);
+  writeJson(path.join(home, ".agents/kitia-lock.json"), original);
   const inventory = readInstallState(home);
   assert.equal(inventory.lock_version, 1);
   validate("catalog-lock", inventory);
@@ -526,7 +526,7 @@ test("version-1 inventories support personal agent ownership without rewriting o
     invalid.resources["agent:user-agent"].files = {
       [relativePath]: original.resources["agent:user-agent"].files[".copilot/agents/user-agent.agent.md"],
     };
-    writeJson(path.join(home, ".agents/kiti-lock.json"), invalid);
+    writeJson(path.join(home, ".agents/kitia-lock.json"), invalid);
     const snapshotBefore = snapshot(home);
     assert.throws(() => readInstallState(home), /Invalid installation state/);
     assert.deepEqual(snapshot(home), snapshotBefore);
@@ -565,7 +565,7 @@ test("inventory schemas group source records by catalog and resource collection"
     },
   };
   const base = {
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     resources: {},
     sources: { community: { skills: { "sample-skill": sourceRecord } } },
     bundles: {},
@@ -580,7 +580,7 @@ test("inventory schemas group source records by catalog and resource collection"
 test("future inventory versions and unsupported resource shapes refuse mutations", () => {
   const original = {
     lock_version: 1,
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     resources: {},
     sources: {},
     bundles: {},
@@ -595,7 +595,7 @@ test("future inventory versions and unsupported resource shapes refuse mutations
     [{ ...original, lock_version: 2 }, "UNSUPPORTED_INVENTORY_VERSION", /compatible CLI version/],
     [unknownKind, "UNSUPPORTED_RESOURCE_KIND", /compatible CLI version/],
   ]) {
-    writeJson(path.join(target, ".agents/kiti-lock.json"), inventory);
+    writeJson(path.join(target, ".agents/kitia-lock.json"), inventory);
     fs.writeFileSync(path.join(target, "user-file.txt"), "Preserve user content.");
     const before = snapshot(target);
     const checked = report(["check", "--catalog", "internal", "--json"], 1);
@@ -619,14 +619,14 @@ test("future inventory versions and unsupported resource shapes refuse mutations
 test("malformed current inventories remain errors, not supported-format migrations", () => {
   const original = {
     lock_version: 1,
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     resources: {},
     sources: {},
     bundles: {},
     mcps: {},
   };
   for (const invalid of [{ ...original, lock_version: "1" }, { ...original, resources: [] }]) {
-    writeJson(path.join(target, ".agents/kiti-lock.json"), invalid);
+    writeJson(path.join(target, ".agents/kitia-lock.json"), invalid);
     const before = snapshot(target);
     assert.throws(() => readInstallState(target), /Invalid installation state/);
     assert.deepEqual(snapshot(target), before);

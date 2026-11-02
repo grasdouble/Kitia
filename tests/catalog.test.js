@@ -10,7 +10,7 @@ const { validateCatalog } = require("../dist/catalog/resources/files.js");
 
 const root = path.resolve(__dirname, "..");
 
-test("Kiti's internal catalog intentionally contains no AI resource bodies", () => {
+test("Kitia's internal catalog intentionally contains no AI resource bodies", () => {
   const generated = buildCatalog(root);
   const resources = validateCatalog(root);
   assert.deepEqual(generated.resources, []);
@@ -23,7 +23,7 @@ test("Kiti's internal catalog intentionally contains no AI resource bodies", () 
 
 
 test("skill distribution excludes nested dependency trees", () => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-skill-files-"));
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-skill-files-"));
   try {
     const realRoot = fs.realpathSync(temporary);
     const skillRoot = path.join(realRoot, "skills/demo-skill");

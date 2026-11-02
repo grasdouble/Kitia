@@ -35,9 +35,9 @@ test("local Markdown links resolve", () => {
 
 test("package, workflow, and docs agree on runtime and project identity", () => {
   const pkg = JSON.parse(read("package.json"));
-  assert.equal(pkg.name, "kiti");
+  assert.equal(pkg.name, "kitia");
   assert.equal(pkg.engines.node, ">=22");
-  assert.deepEqual(pkg.bin, { kiti: "./bin/kiti.js" });
-  assert.match(pkg.repository.url, /github\.com\/grasdouble\/Kiti\.git$/);
-  assert.match(read("README.md"), /^# Kiti/m);
+  assert.deepEqual(pkg.bin, { kitia: "./bin/kitia.js" });
+  assert.match(pkg.repository.url, /github\.com\/grasdouble\/Kitia\.git$/);
+  assert.match(read("README.md"), /^# Kitia/m);
 });

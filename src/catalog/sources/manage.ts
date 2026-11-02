@@ -175,7 +175,7 @@ function writeJson(file, value) {
 }
 
 function fetchSourceIndex(source) {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-catalog-"));
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-catalog-"));
   try {
     const checkout = path.join(temporaryRoot, "checkout");
     execFileSync("git", ["clone", "--quiet", "--depth", "1", source.repository, checkout], {
@@ -304,7 +304,7 @@ function manageCatalogCommand(options) {
     }
     return 0;
   }
-  throw new CatalogError("Usage: kiti catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>");
+  throw new CatalogError("Usage: kitia catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>");
 }
 
 module.exports = {

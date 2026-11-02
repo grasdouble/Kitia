@@ -180,7 +180,7 @@ export function InventoryScreen({
   ]);
   const description = selected?.description || "No description available.";
   const issues = selected?.managed === false
-    ? "Not managed by Kiti; removal requires two confirmations."
+    ? "Not managed by Kitia; removal requires two confirmations."
     : selected?.issues?.length
       ? selected.issues.map(issueLine).join(" · ")
       : "Healthy · no recorded issues";
@@ -299,7 +299,7 @@ export function InventoryScreen({
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
     h(Text, { bold: true, color: "cyan" }, fitText(
-      `KITI / DASHBOARD  ·  ${managedResources.length} managed  ·  ${unmanaged} unmanaged  ·  ${updates} updates  ·  ${attention} attention`,
+      `KITIA / DASHBOARD  ·  ${managedResources.length} managed  ·  ${unmanaged} unmanaged  ·  ${updates} updates  ·  ${attention} attention`,
       columns - 2,
     )),
     panels,

@@ -26,7 +26,7 @@ function sourceCacheFile() {
   if (!path.isAbsolute(directory)) {
     throw new CatalogError("The source catalog cache directory must be an absolute path");
   }
-  return path.join(directory, "kiti", "source-catalogs.json");
+  return path.join(directory, "kitia", "source-catalogs.json");
 }
 
 function readIndex(file, maxBytes = MAX_INDEX_BYTES) {
@@ -163,7 +163,7 @@ function downloadSourceCatalogs(spawn, sources) {
         matches[0].size_in_bytes > MAX_ARTIFACT_BYTES) {
       throw new CatalogError("The published source catalog artifact is ambiguous or too large");
     }
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-catalogs-"));
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-catalogs-"));
     try {
       gh([
         "run", "download", String(run.id), "--repo", `github.com/${CATALOG_NAME}`,
@@ -179,7 +179,7 @@ function downloadSourceCatalogs(spawn, sources) {
     }
   }
   throw new CatalogError(
-    "No unexpired source-catalogs artifact was found in the five most recent successful main site builds. Run the site publication workflow or provide KITI_SOURCE_CATALOGS.",
+    "No unexpired source-catalogs artifact was found in the five most recent successful main site builds. Run the site publication workflow or provide KITIA_SOURCE_CATALOGS.",
     "CATALOG_UNAVAILABLE",
   );
 }
@@ -233,7 +233,7 @@ function loadPublishedSourceCatalogs(
   if (offline) {
     if (!cached) {
       throw new CatalogError(
-        "No cached source catalogs are available offline. Fetch once while online or provide KITI_SOURCE_CATALOGS.",
+        "No cached source catalogs are available offline. Fetch once while online or provide KITIA_SOURCE_CATALOGS.",
         "CATALOG_UNAVAILABLE",
       );
     }

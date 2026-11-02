@@ -1,14 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:kiti:inventory:1",
-  "title": "Kiti installation inventory version 1",
+  "$id": "urn:kitia:inventory:1",
+  "title": "Kitia installation inventory version 1",
   "description": "Catalog-qualified source ownership, bundles and native MCP entry ownership. Secret values are never stored. The CLI additionally checks paths, references and ownership.",
   "type": "object",
   "required": ["lock_version", "catalog", "resources", "sources", "bundles", "mcps"],
   "additionalProperties": false,
   "properties": {
     "lock_version": { "const": 1 },
-    "catalog": { "enum": ["grasdouble/Kiti"] },
+    "catalog": { "enum": ["grasdouble/Kitia"] },
     "resources": {
       "type": "object",
       "patternProperties": {

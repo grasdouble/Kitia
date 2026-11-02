@@ -38,7 +38,7 @@ function migrateInventory(inventory) {
 }
 
 function validateCurrentInventory(inventory) {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-inventory-migration-"));
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-migration-"));
   try {
     const metadataDirectory = path.join(temporary, ".agents");
     fs.mkdirSync(metadataDirectory);
@@ -236,7 +236,7 @@ function migrateInstallations({
 }
 
 function printHelp() {
-  console.log(`Usage: npx --yes github:grasdouble/Kiti migrate [--dry-run | --apply]
+  console.log(`Usage: npx --yes github:grasdouble/Kitia migrate [--dry-run | --apply]
 
 Inspect and apply registered consecutive inventory migrations. The current
 format is version 1; no historical migrations are registered. --apply creates

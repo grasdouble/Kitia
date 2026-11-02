@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:kiti:cli-report:1",
-  "title": "Kiti CLI JSON report, version 1",
+  "$id": "urn:kitia:cli-report:1",
+  "title": "Kitia CLI JSON report, version 1",
   "type": "object",
   "required": ["schema_version", "command", "dry_run", "status", "resources", "actions", "warnings", "messages", "errors"],
   "properties": {

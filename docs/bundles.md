@@ -9,14 +9,14 @@ catalog.
 ## Preview and install
 
 ```sh
-npx --yes github:grasdouble/Kiti list --kind mcp --catalog internal
-npx --yes github:grasdouble/Kiti show mcp <server-id>
-npx --yes github:grasdouble/Kiti install mcp <server-id> --scope user --tool both --dry-run
-npx --yes github:grasdouble/Kiti install mcp <server-id> --scope user --tool both
+npx --yes github:grasdouble/Kitia list --kind mcp --catalog internal
+npx --yes github:grasdouble/Kitia show mcp <server-id>
+npx --yes github:grasdouble/Kitia install mcp <server-id> --scope user --tool both --dry-run
+npx --yes github:grasdouble/Kitia install mcp <server-id> --scope user --tool both
 
-npx --yes github:grasdouble/Kiti list --kind bundle --catalog internal
-npx --yes github:grasdouble/Kiti show bundle <bundle-id>
-npx --yes github:grasdouble/Kiti install bundle <bundle-id> --tool both --dry-run
+npx --yes github:grasdouble/Kitia list --kind bundle --catalog internal
+npx --yes github:grasdouble/Kitia show bundle <bundle-id>
+npx --yes github:grasdouble/Kitia install bundle <bundle-id> --tool both --dry-run
 ```
 
 MCP and bundle setup targets the supported CLI clients, not their desktop apps
@@ -31,7 +31,7 @@ MCP catalog entries declare typed inputs and map them to environment variables.
 Provide non-secret values explicitly:
 
 ```sh
-npx --yes github:grasdouble/Kiti install mcp <server-id> \
+npx --yes github:grasdouble/Kitia install mcp <server-id> \
   --input <server-id>.endpoint=https://api.example.com/mcp \
   --yes
 ```

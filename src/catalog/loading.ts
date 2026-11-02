@@ -86,11 +86,11 @@ function loadCommandCatalogs(options, root, warn) {
     if (sourceResources) return sourceResources;
     if (options.sourceResources) {
       sourceResources = options.sourceResources;
-    } else if (process.env.KITI_SOURCE_CATALOGS) {
+    } else if (process.env.KITIA_SOURCE_CATALOGS) {
       if (options.refreshCatalog) {
-        throw new CatalogError("--refresh-catalog cannot be combined with KITI_SOURCE_CATALOGS", "INVALID_ARGUMENT");
+        throw new CatalogError("--refresh-catalog cannot be combined with KITIA_SOURCE_CATALOGS", "INVALID_ARGUMENT");
       }
-      sourceResources = loadSourceCatalogsFromDirectory(process.env.KITI_SOURCE_CATALOGS, sources);
+      sourceResources = loadSourceCatalogsFromDirectory(process.env.KITIA_SOURCE_CATALOGS, sources);
     } else {
       const userSources = loadUserSourceConfiguration();
       const userNames = new Set(userSources.map(({ name }) => name));

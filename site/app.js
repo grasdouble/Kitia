@@ -4,7 +4,7 @@ const CATALOG_URL = "./data/catalog.json";
 const SOURCE_CONFIG_URL = "./data/source-catalogs/catalogSources.json";
 const SOURCE_TIMEOUT_MS = 10000;
 const RESULT_BATCH_SIZE = 12;
-const REPOSITORY_URL = "https://github.com/grasdouble/Kiti";
+const REPOSITORY_URL = "https://github.com/grasdouble/Kitia";
 const INSTALLABLE_KINDS = new Set(["skill", "agent", "instruction", "bundle", "mcp"]);
 const RUNTIMES = ["claude", "copilot"];
 const DISPLAY_WORDS = { readme: "README", github: "GitHub", mcp: "MCP", ai: "AI", cli: "CLI" };
@@ -211,7 +211,7 @@ function installCommand(resource, tool, scope = "project") {
   if (tool === "both" && RUNTIMES.some((runtime) =>
     resource.compatibility?.[runtime]?.status === "unsupported")) return null;
   if (tool !== "both" && resource.compatibility?.[tool]?.status === "unsupported") return null;
-  const reference = "github:grasdouble/Kiti";
+  const reference = "github:grasdouble/Kitia";
   const scopeOption = scope === "user" ? " --scope user" : "";
   if (resource.origin !== "internal") {
     return `npx --yes ${reference} install skill ${resource.id} --catalog ${resource.catalogId} --tool ${tool}${scopeOption}`;
@@ -408,9 +408,9 @@ function appendAdoptionSummary(parent, resource) {
   const route = makeElement("p", "installation-route");
   const externalReference = resource.origin === "external" && !INSTALLABLE_KINDS.has(resource.kind);
   const [label, requirements] = resource.origin === "internal"
-    ? ["Kiti CLI installation", "Requires Node.js 22+, npm, Git and access to this catalog."]
+    ? ["Kitia CLI installation", "Requires Node.js 22+, npm, Git and access to this catalog."]
     : externalReference
-      ? ["Not installed by the Kiti CLI", "Consult the official reference for access and setup requirements."]
+      ? ["Not installed by the Kitia CLI", "Consult the official reference for access and setup requirements."]
       : [`${capitalizeFirst(resource.catalogId)} via gh skill`,
       "Requires Node.js 22+, npm, GitHub CLI with gh skill support and upstream access."];
   route.append(makeElement("strong", "", label), makeElement("span", "", requirements));
@@ -573,7 +573,7 @@ function createCard(resource) {
   card.setAttribute("data-demo", isDemo(resource) ? "true" : "false");
   const heading = makeElement("div", "card-heading");
   const title = makeElement("h3", "resource-title");
-  const displayName = resource.id.replace(/^kiti-/, "").split("-")
+  const displayName = resource.id.replace(/^kitia-/, "").split("-")
     .map((word, index) => Object.hasOwn(DISPLAY_WORDS, word) ? DISPLAY_WORDS[word] : index === 0 ? capitalizeFirst(word) : word).join(" ");
   const permalink = makeElement("a", "resource-title-link", displayName);
   permalink.href = `#${card.id}`;

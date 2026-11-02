@@ -17,7 +17,7 @@ let fixture;
 let target;
 
 beforeEach(() => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-technical-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-technical-"));
   fixture = path.join(temporary, "catalog");
   target = path.join(temporary, "target");
   fs.mkdirSync(path.join(fixture, "dist"), { recursive: true });
@@ -53,7 +53,7 @@ beforeEach(() => {
     }],
   }, null, 2));
   fs.writeFileSync(path.join(fixture, "dist/catalog-build.json"), JSON.stringify({
-    catalog: "grasdouble/Kiti", commit: "a".repeat(40), package_version: "test", dirty: false,
+    catalog: "grasdouble/Kitia", commit: "a".repeat(40), package_version: "test", dirty: false,
   }));
 });
 
@@ -67,7 +67,7 @@ function run(args, expectedStatus) {
     fixture,
   ], { encoding: "utf8", cwd: fixture, env: {
     ...process.env, HOME: temporary, USERPROFILE: temporary,
-    KITI_CONFIG_DIR: path.join(temporary, "kiti-config"), KITI_SOURCE_CATALOGS: "", NO_COLOR: "1",
+    KITIA_CONFIG_DIR: path.join(temporary, "kitia-config"), KITIA_SOURCE_CATALOGS: "", NO_COLOR: "1",
   } });
   if (result.error) throw result.error;
   if (expectedStatus !== undefined) {
@@ -81,7 +81,7 @@ test("bare CLI invocation defaults to dashboard while explicit help stays help",
   assert.doesNotMatch(result.stdout, /Usage:/);
 
   const help = run(["--help"], 0);
-  assert.match(help.stdout, /Kiti \[dashboard\].*default command/);
+  assert.match(help.stdout, /Kitia \[dashboard\].*default command/);
 });
 
 test("JSON installation previews are structured and strictly read-only", () => {

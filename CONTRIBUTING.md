@@ -1,7 +1,7 @@
 # Contributing
 
-Contributions improve Kiti's CLI, catalog adapters, documentation, and site.
-Kiti does not maintain AI resource bodies; resources remain in their upstream
+Contributions improve Kitia's CLI, catalog adapters, documentation, and site.
+Kitia does not maintain AI resource bodies; resources remain in their upstream
 repositories. The generated internal catalog is intentionally empty.
 
 External skill catalogs can be tested with synthetic repositories in
@@ -45,11 +45,11 @@ user-selected repository-relative paths; instruction frontmatter must include
 The CLI's `catalog add <name> <https-github-url>` command performs Basic setup:
 
 ```sh
-kiti catalog add ai-kit https://github.com/grasdouble/AI-Kit
-kiti catalog add matt-skills https://github.com/mattpocock/skills
-kiti catalog list
+kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
+kitia catalog add matt-skills https://github.com/mattpocock/skills
+kitia catalog list
 ```
 
 The CLI stores each source, path mapping, and metadata-only index under
-`~/.config/kiti/` (override with `KITI_CONFIG_DIR`). It keeps artifact bodies
-out of Kiti and pins each entry to a source commit.
+`~/.config/kitia/` (override with `KITIA_CONFIG_DIR`). It keeps artifact bodies
+out of Kitia and pins each entry to a source commit.

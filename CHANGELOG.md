@@ -1,7 +1,8 @@
 # Changelog
 
 ## Unreleased
-- Reorient the public website around Kiti's local dashboard, external catalogs, and metadata-only public index.
+- Reorient the public website around Kitia's local dashboard, external catalogs, and metadata-only public index.
+- Rename the product and CLI to Kitia; preserve existing `~/.config/kiti` catalogs on first use.
 - Keep user-local catalog sources out of the public site build.
 
 - Preserve configured external catalog names in installation inventories and refresh dashboard catalog data after actions.
@@ -13,10 +14,10 @@
 - Show repository URLs while selecting a user catalog for dashboard removal; require confirmation and leave installed artifacts untouched.
 - Refresh one or all user catalog metadata indexes from the dashboard or CLI.
 - Treat instructions without scope metadata as global and report source-relative paths for metadata errors.
-- Open the dashboard when Kiti is invoked without a command.
+- Open the dashboard when Kitia is invoked without a command.
 - Install and manage pinned external skills, agents, and instructions while keeping artifact bodies upstream.
-- Leave Kiti's internal catalog empty; ship no first-party AI resource bodies.
+- Leave Kitia's internal catalog empty; ship no first-party AI resource bodies.
 - Add catalog browsing, lifecycle management, configurable external skill indexes, MCP and bundle support, and a static catalog website.
-- Reset the installation inventory to a Kiti-owned version 1 format.
+- Reset the installation inventory to a Kitia-owned version 1 format.
   Keep the adjacent-version migration runner for future format changes; no
   historical migrations are shipped.

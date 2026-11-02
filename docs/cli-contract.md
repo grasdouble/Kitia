@@ -80,7 +80,7 @@ not override MCP configuration conflicts.
 
 The interactive dashboard adds a user catalog with `N`, then asks for a name,
 HTTPS GitHub URL, and setup mode. Press `R` to choose a user catalog to remove;
-its repository URL appears beside its name. Confirm before Kiti deletes its
+its repository URL appears beside its name. Confirm before Kitia deletes its
 local definition and index. Installed artifacts from that source stay in place.
 
 - **Basic** discovers nested `skills/**/SKILL.md` entries and Markdown resources
@@ -96,29 +96,29 @@ local definition and index. Installed artifacts from that source stay in place.
 The dashboard inventory also scans known project and user install locations:
 `.agents/skills`, `.claude/skills`, `.agents/agents`, `.claude/agents`,
 `.github/agents`, `.copilot/agents`, `.agents/instructions`, `.claude/rules`,
-and `.github/instructions`. Files without a Kiti installation record appear
-with catalog `-` and status `unmanaged`; Kiti does not update or uninstall
+and `.github/instructions`. Files without a Kitia installation record appear
+with catalog `-` and status `unmanaged`; Kitia does not update or uninstall
 them. Their detected paths appear in the description.
 
-`kiti catalog add <name> <https-github-url>` performs Basic setup without the
+`kitia catalog add <name> <https-github-url>` performs Basic setup without the
 dashboard. Both paths clone the repository temporarily, pin the index to its
 current commit, then store only metadata and user path mappings under
-`~/.config/kiti/` (or `$KITI_CONFIG_DIR`). Artifact bodies remain upstream.
+`~/.config/kitia/` (or `$KITIA_CONFIG_DIR`). Artifact bodies remain upstream.
 Each source is independent; `catalog list` displays bundled and user sources,
 and `catalog remove <name>` removes only a user source definition/index. It
 does not remove already-installed artifacts; tracked installations can still
 be removed with `uninstall <kind> <id> --catalog <name>`.
 
 Use `G` in the dashboard to choose a single catalog or all user catalogs to
-refresh. `kiti catalog refresh <name>` refreshes one source, and
-`kiti catalog refresh --all` refreshes every user source. A refresh fetches the
+refresh. `kitia catalog refresh <name>` refreshes one source, and
+`kitia catalog refresh --all` refreshes every user source. A refresh fetches the
 current upstream commit and replaces that source's metadata index; configuration
 and already-installed artifacts remain unchanged. Bulk refresh continues after
 individual failures and exits nonzero if any source failed.
 
-Discovery reads user indexes locally and needs no Kiti Actions artifact. Skills
+Discovery reads user indexes locally and needs no Kitia Actions artifact. Skills
 install through `gh skill` at the refreshed pin; agents and instructions are
-fetched from that pinned commit and installed through Kiti's normal managed-file
+fetched from that pinned commit and installed through Kitia's normal managed-file
 inventory.
 
 Repository-configured catalogs continue to use the published Actions index
@@ -137,7 +137,7 @@ Source skill bodies are neither committed here nor bundled with the CLI.
 When source metadata is needed, the CLI reads a one-hour cache or retrieves the
 artifact through authenticated `gh`. It considers only completed successful
 `push`, `schedule` or `workflow_dispatch` runs of
-`.github/workflows/pages.yml` on `main` in `grasdouble/Kiti`. It
+`.github/workflows/pages.yml` on `main` in `grasdouble/Kitia`. It
 searches at most five successful runs, skipping missing or expired artifacts.
 Downloads and API requests have timeouts and size limits. PR/fork,
 alternate-workflow, unsuccessful and running builds are not trusted.
@@ -159,7 +159,7 @@ preview/install.
 | Default | Reuse a cache younger than one hour; otherwise fetch |
 | `--offline` | Read an existing cache without network access or rewriting it; fail explicitly if absent |
 | `--refresh-catalog` | Fetch even with a fresh cache; fail rather than fall back on a refresh error |
-| `KITI_SOURCE_CATALOGS` environment variable | Read a local directory containing `catalogSources.json` and the configured `<name>.json` indexes, without network/cache access; the previous `catalogs/<name>.json` layout remains supported |
+| `KITIA_SOURCE_CATALOGS` environment variable | Read a local directory containing `catalogSources.json` and the configured `<name>.json` indexes, without network/cache access; the previous `catalogs/<name>.json` layout remains supported |
 | `--catalog internal` | Do not load source indexes or require GitHub CLI |
 
 `--offline` and `--refresh-catalog` cannot be combined and are not doctor options.
@@ -184,9 +184,9 @@ The cache is stored at:
 
 | Platform | File |
 |---|---|
-| Linux | `$XDG_CACHE_HOME/kiti/source-catalogs.json`, or `~/.cache/kiti/source-catalogs.json` |
-| macOS | `~/Library/Caches/kiti/source-catalogs.json` |
-| Windows | `%LOCALAPPDATA%\\kiti\\source-catalogs.json`, or the equivalent below the user profile |
+| Linux | `$XDG_CACHE_HOME/kitia/source-catalogs.json`, or `~/.cache/kitia/source-catalogs.json` |
+| macOS | `~/Library/Caches/kitia/source-catalogs.json` |
+| Windows | `%LOCALAPPDATA%\\kitia\\source-catalogs.json`, or the equivalent below the user profile |
 
 The version-1 cache envelope records `fetched_at`, `run_id`, `artifact_id` and
 the configured source catalogs. It is replaced atomically with user-only
@@ -352,7 +352,7 @@ Within report version 1:
 The schema version covers the wire format; the package version covers the
 implementation. Pinning a full Git commit remains available when callers need the implementation
 and internal catalog content to be reproducible. Also provide
-`KITI_SOURCE_CATALOGS` with a retained source-data directory when source metadata
+`KITIA_SOURCE_CATALOGS` with a retained source-data directory when source metadata
 must be frozen.
 
 ## Catalog and inventory compatibility

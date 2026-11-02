@@ -22,11 +22,11 @@ afterEach(() => {
 });
 
 function createTarget(inventory) {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-inventory-migration-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-migration-"));
   const target = path.join(temporary, "target");
   const metadata = path.join(target, ".agents");
   fs.mkdirSync(metadata, { recursive: true });
-  const inventoryPath = path.join(metadata, "kiti-lock.json");
+  const inventoryPath = path.join(metadata, "kitia-lock.json");
   fs.writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
   return { target, inventoryPath };
 }
@@ -36,7 +36,7 @@ test("the sole inventory schema is the current version 1 format", () => {
   assert.equal(CURRENT_VERSION, 1);
   assert.equal(schema.properties.lock_version.const, CURRENT_VERSION);
   assert.equal(validateSchema(inventory), true, JSON.stringify(validateSchema.errors));
-  assert.equal(inventory.catalog, "grasdouble/Kiti");
+  assert.equal(inventory.catalog, "grasdouble/Kitia");
 });
 
 test("the future migration chain applies only consecutive pure transformations", () => {
@@ -71,15 +71,15 @@ test("current inventories are validated and skipped without rewriting or backup"
   assert.deepEqual(applied.migrations, []);
   assert.equal(applied.backup, null);
   assert.deepEqual(fs.readFileSync(inventoryPath), original);
-  assert.deepEqual(fs.readdirSync(path.dirname(inventoryPath)), ["kiti-lock.json"]);
+  assert.deepEqual(fs.readdirSync(path.dirname(inventoryPath)), ["kitia-lock.json"]);
 });
 
 test("migration command independently skips current and missing project and home inventories", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-inventory-migration-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-migration-"));
   const project = path.join(temporary, "project");
   const home = path.join(temporary, "home");
   const inventory = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-  const projectInventory = path.join(project, ".agents/kiti-lock.json");
+  const projectInventory = path.join(project, ".agents/kitia-lock.json");
   fs.mkdirSync(path.dirname(projectInventory), { recursive: true });
   fs.mkdirSync(home);
   fs.writeFileSync(projectInventory, `${JSON.stringify(inventory, null, 2)}\n`);

@@ -49,7 +49,7 @@ function sourceFileDestinations(resource, tool, scope = "project") {
 
 function readPinnedSourceFile(resource) {
   if (!/^[a-f0-9]{40}$/i.test(resource.source_ref)) throw new CatalogError("Source resource has no pinned commit SHA");
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-source-file-"));
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-file-"));
   try {
     const checkout = path.join(temporaryRoot, "repository");
     execFileSync("git", ["clone", "--quiet", "--no-checkout", `https://github.com/${resource.source_repository}.git`, checkout], {
@@ -511,12 +511,12 @@ function runSourceCommand(
   let sourceResources: CatalogResource[] = options.sourceResources || [];
   if (!options.resource && !sourceResources.length) {
     const configuredSources = loadSourceConfiguration(catalogRoot);
-    if (process.env.KITI_SOURCE_CATALOGS) {
+    if (process.env.KITIA_SOURCE_CATALOGS) {
       if (options.refreshCatalog) {
-        throw new CatalogError("--refresh-catalog cannot be combined with KITI_SOURCE_CATALOGS", "INVALID_ARGUMENT");
+        throw new CatalogError("--refresh-catalog cannot be combined with KITIA_SOURCE_CATALOGS", "INVALID_ARGUMENT");
       }
       sourceResources = loadSourceCatalogsFromDirectory(
-        process.env.KITI_SOURCE_CATALOGS,
+        process.env.KITIA_SOURCE_CATALOGS,
         configuredSources,
       );
     } else {

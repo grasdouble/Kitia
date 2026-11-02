@@ -36,7 +36,7 @@ function writeJson(file, value) {
 }
 
 beforeEach(() => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kiti-bundle-test-"));
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-bundle-test-"));
   catalog = path.join(temporary, "catalog");
   target = path.join(temporary, "target");
   home = path.join(temporary, "home");
@@ -104,7 +104,7 @@ beforeEach(() => {
     resources: [skill, mcp, bundle],
   });
   writeJson(path.join(catalog, "dist/catalog-build.json"), {
-    catalog: "grasdouble/Kiti",
+    catalog: "grasdouble/Kitia",
     commit: "a".repeat(40),
     package_version: "test",
     dirty: false,
@@ -147,7 +147,7 @@ test("bundle install tracks ownership, protects secrets, and retains promoted MC
     "install", "bundle", "demo-bundle", "--target", target, "--yes",
     "--input", "demo-mcp.endpoint=https://api.example.com/custom",
   ], 0, { DEMO_TOKEN: "synthetic-secret" });
-  const lockPath = path.join(target, ".agents/kiti-lock.json");
+  const lockPath = path.join(target, ".agents/kitia-lock.json");
   const installed = JSON.parse(fs.readFileSync(lockPath, "utf8"));
   assert.equal(installed.bundles["demo-bundle"].scope, "project");
   assert.equal(installed.resources["skill:demo-skill"].standalone, false);
@@ -185,7 +185,7 @@ test("pre-existing MCP entries are not overwritten by bundle installation", () =
   assert.equal(JSON.parse(fs.readFileSync(path.join(target, ".mcp.json"), "utf8"))
     .mcpServers["demo-server"].command, "user-owned");
   assert.equal(fs.existsSync(path.join(target, ".agents/skills/demo-skill/SKILL.md")), true);
-  assert.ok(JSON.parse(fs.readFileSync(path.join(target, ".agents/kiti-lock.json"), "utf8"))
+  assert.ok(JSON.parse(fs.readFileSync(path.join(target, ".agents/kitia-lock.json"), "utf8"))
     .bundles["demo-bundle"]);
 });
 
@@ -216,17 +216,17 @@ test("project and user lifecycles preserve another catalog's inventory, launcher
     const scopeArgs = scope === "project" ? ["--target", directory] : ["--scope", "user"];
     const args = ["bundle", "demo-bundle", ...scopeArgs];
     const preview = JSON.parse(run(["install", ...args, "--tool", "both", "--dry-run", "--json"]).stdout);
-    assert.ok(preview.actions.some(({ path: file }) => file === ".agents/kiti-lock.json"));
+    assert.ok(preview.actions.some(({ path: file }) => file === ".agents/kitia-lock.json"));
     assert.ok(preview.actions.every(({ path: file }) => file !== ".agents/other-lock.json" &&
       !file?.startsWith(".agents/other-mcp/")));
-    assert.equal(fs.existsSync(path.join(directory, ".agents/kiti-lock.json")), false);
+    assert.equal(fs.existsSync(path.join(directory, ".agents/kitia-lock.json")), false);
 
     run(["install", ...args, "--tool", "both", "--yes"]);
-    const inventory = JSON.parse(fs.readFileSync(path.join(directory, ".agents/kiti-lock.json"), "utf8"));
+    const inventory = JSON.parse(fs.readFileSync(path.join(directory, ".agents/kitia-lock.json"), "utf8"));
     for (const config of Object.values(inventory.mcps["demo-mcp"].configurations)) {
       assert.equal(config.managed, false);
     }
-    assert.equal(fs.existsSync(path.join(directory, ".agents/kiti-mcp")), false);
+    assert.equal(fs.existsSync(path.join(directory, ".agents/kitia-mcp")), false);
     run(["check", ...scopeArgs, "--catalog", "internal", "--json"]);
     run(["update", ...scopeArgs, "--catalog", "internal", "--yes"]);
     run(["uninstall", ...args, "--non-interactive"]);
@@ -245,8 +245,8 @@ test("historical MCP launcher paths are confined to this catalog's directory", (
   const { readInstallState, resourceOwnsPath } = require("../dist/catalog/inventory/index.js");
   const { LOCK_PATH, MCP_DIRECTORY } = require("../dist/catalog/resources/index.js");
   const { installedFingerprint } = require("../dist/catalog/inventory/files.js");
-  assert.equal(LOCK_PATH, ".agents/kiti-lock.json");
-  assert.equal(MCP_DIRECTORY, ".agents/kiti-mcp");
+  assert.equal(LOCK_PATH, ".agents/kitia-lock.json");
+  assert.equal(MCP_DIRECTORY, ".agents/kitia-mcp");
   assert.equal(resourceOwnsPath("mcp:demo-mcp", `${MCP_DIRECTORY}/demo-mcp.cjs`), true);
   assert.equal(resourceOwnsPath("mcp:demo-mcp", ".agents/other-mcp/demo-mcp.cjs"), false);
   run(["install", "mcp", "demo-mcp", "--target", target, "--yes"]);

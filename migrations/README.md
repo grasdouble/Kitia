@@ -1,4 +1,4 @@
-# Kiti inventory migrations
+# Kitia inventory migrations
 
 User-facing format details and runner instructions live in
 [`docs/inventory-migrations.md`](../docs/inventory-migrations.md).

@@ -102,7 +102,7 @@ function parseCommandArguments(args: string[]): CliOptions {
   const [command, ...remaining] = args;
   if (command === "catalog") {
     const [action, name, repository, ...extra] = remaining;
-    const usage = "Usage: kiti catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>";
+    const usage = "Usage: kitia catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>";
     if (extra.length) throw new CatalogError(usage);
     if (action === "list" && name === undefined) return { command, action };
     if (action === "remove" && name && !repository) return { command, action, name };
@@ -123,7 +123,7 @@ function parseCommandArguments(args: string[]): CliOptions {
   }
   if (command === "dashboard") {
     if (remaining.length) {
-      throw new CatalogError("Usage: Kiti dashboard [--non-interactive]");
+      throw new CatalogError("Usage: Kitia dashboard [--non-interactive]");
     }
     return { command, target: "." };
   }
@@ -131,7 +131,7 @@ function parseCommandArguments(args: string[]): CliOptions {
     const options: CliOptions = { command, query: "" };
     if (command === "search") {
       if (!remaining[0] || remaining[0].startsWith("--")) {
-        throw new CatalogError('Usage: Kiti search "<query>" [--catalog <catalog>] [--kind <kind>] [--group <group>] [--tag <tag>] [--status <status>] [--json]');
+        throw new CatalogError('Usage: Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--group <group>] [--tag <tag>] [--status <status>] [--json]');
       }
       options.query = remaining.shift();
     }
@@ -170,7 +170,7 @@ function parseCommandArguments(args: string[]): CliOptions {
       KINDS.has(remaining[0]) && RESOURCE_ID.test(remaining[1]);
     const [kind, id] = typed ? remaining : [null, remaining[0]];
     if ((!typed && remaining.length !== 1) || typeof id !== "string" || !RESOURCE_ID.test(id)) {
-      throw new CatalogError("Usage: Kiti show [<kind>] <id>");
+      throw new CatalogError("Usage: Kitia show [<kind>] <id>");
     }
     return { command, kind, id };
   }
@@ -181,7 +181,7 @@ function parseCommandArguments(args: string[]): CliOptions {
       ? remaining
       : [null, remaining[0], ...remaining.slice(1)];
     if (typeof id !== "string" || !RESOURCE_ID.test(id)) {
-      throw new CatalogError("Usage: Kiti preview [<kind>] <id> [--file <path>]");
+      throw new CatalogError("Usage: Kitia preview [<kind>] <id> [--file <path>]");
     }
     let file = null;
     for (let index = 0; index < options.length; index += 1) {
@@ -226,7 +226,7 @@ function parseCommandArguments(args: string[]): CliOptions {
     : typed ? remaining : [null, remaining[0]];
   const options = updateAll ? remaining : remaining.slice(typed ? 2 : 1);
   if (!updateAll && (typeof id !== "string" || !RESOURCE_ID.test(id))) {
-    throw new CatalogError(`Usage: kiti ${command} [<kind>] <id> [--target <dir>]`);
+    throw new CatalogError(`Usage: kitia ${command} [<kind>] <id> [--target <dir>]`);
   }
   const result = { command, kind, id, tool: command === "install" ? "copilot" : null, target: ".", dryRun: false, force: false };
   for (let index = 0; index < options.length; index += 1) {
@@ -258,23 +258,23 @@ function parseCommandArguments(args: string[]): CliOptions {
 
 function printHelp() {
   console.log(`Usage:
-  Kiti [dashboard] [--non-interactive] (dashboard is the default command)
-  Kiti list [--catalog <catalog>] [--kind <kind>] [--group <group>] [--tag <tag>] [--status <status>] [--json]
-  Kiti search "<query>" [--catalog <catalog>] [--kind <kind>] [--group <group>] [--tag <tag>] [--status <status>] [--json]
-  Kiti show [<kind>] <id>
-  Kiti preview [<kind>] <id> [--file <path>]
-  Kiti validate [--catalog <catalog>]
-  Kiti check [--target <dir>] [--catalog <catalog>] [--json]
-  Kiti doctor [--target <dir>] [--network] [--json]
-  Kiti install [<kind>] <id> [--target <dir>] [options]
-  Kiti update [<kind> <id>] [--target <dir>] [--dry-run] [--force]
-  Kiti uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force] [--cascade]
-  Kiti migrate [--dry-run | --apply]
-  Kiti catalog add <name> <https-github-url>
-  Kiti catalog refresh <name>
-  Kiti catalog refresh --all
-  Kiti catalog list
-  Kiti catalog remove <name>
+  Kitia [dashboard] [--non-interactive] (dashboard is the default command)
+  Kitia list [--catalog <catalog>] [--kind <kind>] [--group <group>] [--tag <tag>] [--status <status>] [--json]
+  Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--group <group>] [--tag <tag>] [--status <status>] [--json]
+  Kitia show [<kind>] <id>
+  Kitia preview [<kind>] <id> [--file <path>]
+  Kitia validate [--catalog <catalog>]
+  Kitia check [--target <dir>] [--catalog <catalog>] [--json]
+  Kitia doctor [--target <dir>] [--network] [--json]
+  Kitia install [<kind>] <id> [--target <dir>] [options]
+  Kitia update [<kind> <id>] [--target <dir>] [--dry-run] [--force]
+  Kitia uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force] [--cascade]
+  Kitia migrate [--dry-run | --apply]
+  Kitia catalog add <name> <https-github-url>
+  Kitia catalog refresh <name>
+  Kitia catalog refresh --all
+  Kitia catalog list
+  Kitia catalog remove <name>
 
 Kinds: skill, agent, instruction, bundle, mcp
 MCPs and bundles target Copilot CLI and Claude Code CLI only; desktop apps and IDEs are outside their managed support scope.
