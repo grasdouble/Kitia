@@ -6,7 +6,7 @@ Kitia is a CLI for connecting AI-resource catalogs to Claude Code and GitHub
 Copilot. Kitia stores no skill, agent, or instruction bodies: resources stay in
 their source repositories, while Kitia keeps user-managed catalog metadata.
 
-**[CLI contract](docs/cli-contract.md)**
+**[Project website](https://grasdouble.github.io/Kitia/)** · **[CLI contract](docs/cli-contract.md)**
 
 ## Browse
 

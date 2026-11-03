@@ -25,6 +25,7 @@ const {
 } = require("../dist/cli/main.js");
 const { uninstallResource } = require("../dist/catalog/lifecycle.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
+const { cycleFilter, filterInventory, inventoryCatalogLabel } = require("../dist/dashboard/helpers.mjs");
 
 let temporary;
 
@@ -449,6 +450,58 @@ test("custom catalog mappings index explicit paths and default unscoped instruct
     /example\/custom:policies\/checklist\.instructions\.md must define a non-empty/);
 });
 
+test("inventory labels custom catalogs from the most specific configured source folders", () => {
+  const resource = (kind, id, source_path, catalog = "MattPucock") => ({
+    catalog, kind, id, source_path, source_repository: "example/resources", managed: true,
+  });
+  const resources = [
+    resource("skill", "review", "skills/engineering/review"),
+    resource("skill", "review-special", "skills/engineering/review"),
+    resource("skill", "writing", "skills/productivity/writing"),
+    resource("agent", "release-bot", "agents/release.agent.md"),
+    resource("instruction", "policy", "policies/checklist.instructions.md"),
+    resource("agent", "first-release", "one/engineering/release.agent.md"),
+    resource("agent", "second-release", "two/engineering/release.agent.md"),
+    resource("skill", "basic", "skills/basic", "BasicCatalog"),
+    resource("skill", "unmapped", "elsewhere/unmapped"),
+    { ...resource("skill", "unmanaged", "skills/engineering/unmanaged"), managed: false },
+  ];
+  const catalogs = [
+    {
+      name: "MattPucock",
+      mode: "custom",
+      entries: [
+        { kind: "skill", path: "skills" },
+        { kind: "skill", id: "review-special", path: "skills/engineering/review/SKILL.md" },
+        { kind: "skill", path: "skills/productivity" },
+        { kind: "agent", id: "release-bot", path: "agents/release.agent.md" },
+        { kind: "instruction", path: "policies/checklist.instructions.md" },
+        { kind: "agent", path: "one/engineering" },
+        { kind: "agent", path: "two/engineering" },
+      ],
+    },
+    { name: "BasicCatalog", mode: "basic", entries: [] },
+  ];
+
+  const labels = resources.map((entry) => inventoryCatalogLabel(entry, catalogs, resources));
+  assert.deepEqual(labels, [
+    "MattPucock[engineering]",
+    "MattPucock[engineering]",
+    "MattPucock[productivity]",
+    "MattPucock[agents]",
+    "MattPucock[policies]",
+    "MattPucock[one/engineering]",
+    "MattPucock[two/engineering]",
+    "BasicCatalog",
+    "MattPucock",
+    "-",
+  ]);
+  assert.deepEqual(filterInventory(resources, "", "MattPucock[engineering]", "all", catalogs)
+    .map(({ id }) => id), ["review", "review-special"]);
+  assert.equal(cycleFilter("all", resources.filter((entry) => entry.managed !== false),
+    "catalog", "kind", "all", catalogs), "BasicCatalog");
+});
+
 test("custom catalog directory mappings discover nested skills, agents, and instructions", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-custom-directories-"));
   const repository = "https://github.com/example/custom-directories";
@@ -798,6 +851,7 @@ test("uninstalling a locally managed skill removes its entire directory", () => 
   assert.match(messages.join("\n"), /Removed skill directory: \.agents\/skills\/managed-skill/);
 });
 
+
 test("dashboard manages user catalogs and refreshes one or all catalogs", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
@@ -1029,6 +1083,109 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.ok(failedRefresh.renderedOutput.includes("Test: Repository not found."));
   assert.equal(failedRefresh.renderedOutput.includes("Refreshed Test · 0 resources indexed."), false);
 });
+test("catalog browser renders custom source folders in SOURCE and detail labels", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const candidates = [
+    { catalog: "MattPucock", kind: "skill", id: "engineering-skill", source_repository: "matt/skills", source_path: "engineering/engineering-skill", managed: true },
+    { catalog: "MattPucock", kind: "skill", id: "productivity-skill", source_repository: "matt/skills", source_path: "productivity/productivity-skill", managed: true },
+    { catalog: "Basic", kind: "skill", id: "basic-skill", source_repository: "basic/skills", source_path: "skills/basic-skill", managed: true },
+    { catalog: "MattPucock", kind: "skill", id: "unmapped-skill", source_repository: "matt/skills", source_path: "misc/unmapped-skill", managed: true },
+  ];
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 140;
+  output.rows = 50;
+  let renderedOutput = "";
+  output.on("data", (chunk) => { renderedOutput += chunk.toString(); });
+  const done = runDashboard([], input, output, [], {
+    catalogResources: candidates,
+    userCatalogs: [{
+      name: "MattPucock",
+      repository: "matt/skills",
+      mode: "custom",
+      entries: [
+        { kind: "skill", path: "engineering" },
+        { kind: "skill", path: "productivity" },
+      ],
+    }, { name: "Basic", repository: "basic/skills", mode: "basic", entries: [] }],
+  });
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+  assert.match(renderedOutput, /MattPucock\[engineering\]/);
+  assert.match(renderedOutput, /MattPucock\[productivity\]/);
+  assert.match(renderedOutput, /Basic/);
+  assert.match(renderedOutput, /unmapped-skill/);
+  assert.doesNotMatch(renderedOutput, /MattPucock\[misc\]/);
+});
+test("catalog browser renders mapped source folders and keeps repository-less names", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const candidates = [
+    {
+      catalog: "MattPucock", kind: "skill", id: "grill-me",
+      source_repository: "matt/skills", source_path: "skills/productivity/grill-me",
+      description: "Interview practice", managed: true,
+    },
+    {
+      catalog: "BasicCatalog", kind: "skill", id: "basic-skill",
+      source_path: "skills/basic-skill", managed: true,
+    },
+    { catalog: "Kitia", kind: "skill", id: "local-skill", source_path: "skills/local-skill", managed: true },
+  ];
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 160;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const done = runDashboard([], input, output, [], {
+    catalogResources: candidates,
+    userCatalogs: [{
+      name: "MattPucock",
+      repository: "matt/skills",
+      mode: "custom",
+      entries: [{ kind: "skill", path: "skills/productivity" }],
+    }],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  assert.ok(plain().split(/\r?\n/).some((line) =>
+    line.includes("MattPucock[productivity]") && line.includes("grill-me")));
+  assert.ok(plain().split(/\r?\n/).some((line) => line.includes("basic-skill") && line.includes("BasicCatalog")));
+  assert.ok(plain().split(/\r?\n/).some((line) => line.includes("local-skill") && line.includes("Kitia")));
+  assert.match(plain(), /CATALOG[^\n]*\n[^\n]*MattPucock\[productivity\]/);
+
+  input.write("f");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (const character of "MattPucock[productivity]") input.write(character);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(plain(), /AVAILABLE\s+1\/3/);
+  assert.ok(plain().split(/\r?\n/).some((line) =>
+    line.includes("MattPucock[productivity]") && line.includes("grill-me")));
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
 
 test("dashboard refreshes its source catalog set before rebuilding installed skills", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-source-refresh-"));
@@ -1183,6 +1340,154 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
     resource.catalog === "Tracked" && resource.id === "kitia-tracked" && resource.managed !== false));
 });
 
+test("inventory TUI labels a tracked user skill with its custom source folder", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-source-label-"));
+  const target = path.join(temporary, "project");
+  fs.mkdirSync(target, { recursive: true });
+  const sourceResource = {
+    catalog: "MattPucock",
+    id: "grill-me",
+    kind: "skill",
+    description: "A relentless interview to sharpen a plan or design.",
+    source_repository: "mattpocock/skills",
+    source_path: "skills/productivity/grill-me",
+    source_ref: "a".repeat(40),
+    license_status: "MIT",
+  };
+  const writeArtifact = (relativePath, lines) => {
+    const file = path.join(target, relativePath);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, lines.join("\n"));
+  };
+  const sourceMetadata = [
+    `  github-repo: "https://github.com/${sourceResource.source_repository}"`,
+    `  github-path: "${sourceResource.source_path}"`,
+    `  github-ref: "${sourceResource.source_ref}"`,
+    `  github-pinned: "${sourceResource.source_ref}"`,
+  ];
+  const invokeInstall = (args) => {
+    assert.deepEqual(args.slice(0, 4), [
+      "skill", "install", sourceResource.source_repository, sourceResource.source_path,
+    ]);
+    writeArtifact(`.agents/skills/${sourceResource.id}/SKILL.md`, [
+      "---", `name: ${sourceResource.id}`, `description: ${sourceResource.description}`, "metadata:",
+      ...sourceMetadata, "---", "", "Tracked source content.", "",
+    ]);
+    return 0;
+  };
+  assert.equal(runSourceCommand({
+    action: "install", id: sourceResource.id, catalog: sourceResource.catalog,
+    resource: sourceResource, target, tool: "copilot",
+  }, temporary, invokeInstall), 0);
+  writeArtifact(".agents/skills/manual-skill/SKILL.md", [
+    "---", "name: manual-skill", "description: Installed outside Kitia.", "metadata:",
+    ...sourceMetadata, "---", "", "Untracked source content.", "",
+  ]);
+
+  const result = collectInstalledScopes(
+    { user: target }, [], process.cwd(), { dirty: false }, [sourceResource],
+  );
+  const tracked = result.resources.find((resource) => resource.id === "grill-me");
+  assert.equal(tracked.catalog, "MattPucock");
+  assert.equal(tracked.source_repository, sourceResource.source_repository);
+  assert.equal(tracked.source_path, sourceResource.source_path);
+  const untracked = result.resources.find((resource) => resource.id === "manual-skill");
+  assert.equal(untracked.managed, false);
+  assert.equal(untracked.catalog, "-");
+
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const done = runDashboard(formatDashboardRows(result.resources, [sourceResource]), input, output, [], {
+    userCatalogs: [{
+      name: "MattPucock",
+      mode: "custom",
+      entries: [
+        { kind: "skill", path: "skills/productivity" },
+        { kind: "skill", path: "skills/engineering" },
+        { kind: "skill", path: "skills/misc" },
+        { kind: "skill", path: "skills/in-progress" },
+      ],
+    }],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+  const plain = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  assert.match(plain, /grill-me\s+MattPucock\[productivity\]/);
+  assert.match(plain, /UNMANAGED\s+USER\s+skill\s+manual-skill\s+-/);
+});
+
+test("inventory TUI renders multiple configured custom folders and preserves other catalog labels", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const resource = (catalog, id, source_path, managed = true) => ({
+    catalog,
+    id,
+    kind: "skill",
+    description: id,
+    managed,
+    scope: "project",
+    status: managed ? "current" : "unmanaged",
+    source_repository: catalog === "-" ? undefined : `example/${catalog.toLowerCase()}`,
+    source_path,
+  });
+  const resources = [
+    resource("MattPucock", "engineering-skill", "custom/engineering/engineering-skill"),
+    resource("MattPucock", "productivity-skill", "custom/productivity/productivity-skill"),
+    resource("BasicCatalog", "basic-skill", "skills/basic-skill"),
+    resource("MattPucock", "unmapped-skill", "other/unmapped-skill"),
+    resource("-", "manual-skill", "", false),
+  ];
+  const userCatalogs = [
+    {
+      name: "MattPucock",
+      repository: "https://github.com/example/mattpucock",
+      mode: "custom",
+      entries: [
+        { kind: "skill", path: "custom/engineering" },
+        { kind: "skill", path: "custom/productivity" },
+      ],
+    },
+    { name: "BasicCatalog", repository: "https://github.com/example/basic", mode: "basic", entries: [] },
+  ];
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 160;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const done = runDashboard(resources, input, output, [], { userCatalogs });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+  const plain = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  assert.match(plain, /engineering-skill\s+MattPucock\[engineering\]/);
+  assert.match(plain, /productivity-skill\s+MattPucock\[productivity\]/);
+  assert.match(plain, /basic-skill\s+BasicCatalog/);
+  assert.match(plain, /unmapped-skill\s+MattPucock/);
+  assert.match(plain, /UNMANAGED\s+PROJECT\s+skill\s+manual-skill\s+-/);
+});
+
 test("unmanaged dashboard artifacts can be removed only after confirmation", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
@@ -1272,7 +1577,7 @@ test("dashboard renders the resource list and selection panel at wide and narrow
     let rendered = "";
     output.on("data", (chunk) => { rendered += chunk.toString(); });
     const done = runDashboard([{
-      catalog: "sample-catalog",
+      catalog: "a-very-long-external-catalog-name-for-layout-smoke-testing",
       kind: "skill",
       id: "manual-skill",
       scope: "project",
@@ -1289,14 +1594,22 @@ test("dashboard renders the resource list and selection panel at wide and narrow
     assert.match(rendered, /RESOURCES/);
     assert.match(rendered, /SKILL - manual-skill/);
     assert.match(rendered, /VERSION/);
-    const selectedPanel = rendered.slice(rendered.indexOf("SKILL - manual-skill"));
-    const orderedLabels = ["CATALOG", "SCOPE", "STATUS", "VERSION", "LOCATIONS", "DESCRIPTION"];
-    assert.ok(orderedLabels.every((label, index) =>
-      index === 0 || selectedPanel.indexOf(label) > selectedPanel.indexOf(orderedLabels[index - 1])));
+    const inventoryRow = rendered.split(/\r?\n/).find((line) => line.includes("manual-skill"));
+    assert.ok(inventoryRow, "inventory row is rendered");
+    assert.doesNotMatch(inventoryRow, /A manually maintained skill/);
+    assert.doesNotMatch(rendered, /DESC\s/);
+    assert.match(rendered, /STATUS[\s\S]*SCOPE[\s\S]*KIND[\s\S]*ID[\s\S]*CATALOG/);
+    const header = rendered.split(/\r?\n/).find((line) => /STATUS/.test(line) && /CATALOG/.test(line));
+    assert.ok(header, "inventory header is rendered");
+    const column = (label) => header.indexOf(label);
+    assert.ok(column("STATUS") < column("SCOPE") && column("SCOPE") < column("KIND") &&
+      column("KIND") < column("ID") && column("ID") < column("CATALOG"));
+    assert.ok(column("CATALOG") - column("ID") > 12, "catalog receives flexible width after the ID column");
+    const selectedPanel = rendered.slice(rendered.lastIndexOf("SKILL - manual-skill"));
     const catalogLabel = selectedPanel.indexOf("CATALOG");
-    const catalogValue = selectedPanel.indexOf("sample-catalog");
+    const catalogValue = selectedPanel.indexOf("a-very-long-external-catalog-name");
     assert.ok(selectedPanel.slice(catalogLabel, catalogValue).includes("\n"));
-    assert.match(selectedPanel, /sample-catalog/);
+    assert.match(selectedPanel, /a-very-long-external-catalog-name-for-layout(?:\.\.\.|-smoke-testing)/);
     assert.match(selectedPanel, /abcdef0/);
     assert.match(selectedPanel, /https:\/\/github\.com\/example\/manual-skill/);
     assert.match(selectedPanel, /A manually maintained skill\./);
@@ -1305,6 +1618,56 @@ test("dashboard renders the resource list and selection panel at wide and narrow
       assert.match(rendered, /DESCRIPTION/);
       assert.match(rendered, /STATUS/);
     }
+    input.destroy();
+    output.destroy();
+  }
+});
+test("catalog browser renders ordered columns without list descriptions at wide and narrow widths", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  for (const columns of [160, 100]) {
+    const input = new PassThrough();
+    input.isTTY = true;
+    input.setRawMode = () => {};
+    input.ref = () => {};
+    input.unref = () => {};
+    const output = new PassThrough();
+    output.isTTY = true;
+    output.columns = columns;
+    output.rows = 40;
+    let rendered = "";
+    output.on("data", (chunk) => { rendered += chunk.toString(); });
+    const sourceName = "MattPucock";
+    const kind = "instruction";
+    const done = runDashboard([], input, output, [], { catalogResources: [{
+      catalog: sourceName,
+      kind,
+      id: "catalog-skill",
+      description: "Catalog panel toggle behavior.",
+    }] });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    input.write("a");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const plainRendered = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+    const header = plainRendered.split(/\r?\n/).find((line) => /INSTALLED/.test(line) && /SOURCE/.test(line));
+    assert.ok(header, "catalog header is rendered");
+    assert.ok(header.indexOf("INSTALLED") < header.indexOf("SOURCE") &&
+      header.indexOf("SOURCE") < header.indexOf("KIND") && header.indexOf("KIND") < header.indexOf("ID"));
+    assert.ok(header.indexOf("KIND") - header.indexOf("SOURCE") >= 12, "Source allocation fits MattPucock");
+    assert.ok(header.indexOf("ID") - header.indexOf("KIND") >= 12, "ID column remains usable");
+    const row = plainRendered.split(/\r?\n/).find((line) =>
+      line.includes(sourceName) && line.includes("catalog-skill"));
+    assert.ok(row, "catalog row is rendered");
+    const sourcePosition = row.indexOf(sourceName);
+    const kindPosition = row.indexOf("instruction");
+    const idPosition = row.indexOf("catalog-skill");
+    assert.ok(sourcePosition >= 0 && kindPosition > sourcePosition && idPosition > kindPosition,
+      `source, kind, and ID values render in order: ${JSON.stringify({ sourcePosition, kindPosition, idPosition, row })}`);
+    assert.doesNotMatch(row, /Catalog panel toggle behavior\./);
+    assert.doesNotMatch(header, /DESC/);
+    assert.match(rendered, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
+    input.write("q");
+    assert.equal(await done, true);
     input.destroy();
     output.destroy();
   }
@@ -1440,6 +1803,20 @@ test("dashboard toggles catalog management details with D", async () => {
   output.destroy();
 });
 
+
+test("inventory columns reserve usable ID space and expose custom Catalog suffixes at 120 columns", async () => {
+  const { detailPanelLayout, tableColumns } = await import("../dist/dashboard/helpers.mjs");
+  const listWidth = detailPanelLayout(120).listWidth;
+  const columns = tableColumns(listWidth);
+  const wide = tableColumns(160);
+  const narrower = tableColumns(100);
+  assert.equal(columns.id >= 12, true);
+  assert.equal(columns.catalog >= "MattPucock[productivity]".length, true);
+  assert.equal(wide.id >= 12, true);
+  assert.equal(narrower.id >= 12, true);
+  assert.equal(wide.catalog > narrower.catalog, true);
+  assert.equal(tableColumns(60).catalog, 0);
+});
 
 test("dashboard uses a shared list/details split at wide terminal widths", async () => {
   const { detailPanelLayout } = await import("../dist/dashboard/helpers.mjs");

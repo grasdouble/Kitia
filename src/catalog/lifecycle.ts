@@ -147,6 +147,8 @@ function checkInstalledResources(
     if (!tracked) continue;
     const sourceName = resource.catalog || "source";
     const result = resultFor(sourceName, resource.kind, resource.id);
+    result.source_repository = resource.source_repository;
+    result.source_path = resource.source_path;
     result.version = [...new Set(installations.map(({ ref }) => ref?.slice(0, 7)).filter(Boolean))]
       .join(", ") || resource.source_ref?.slice(0, 7) || "-";
     for (const [flag, label] of [["missing", "Missing installed files"], ["modified", "Locally modified"]]) {

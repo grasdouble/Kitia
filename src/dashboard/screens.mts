@@ -6,8 +6,10 @@ import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
 import {
   catalogLabel, catalogTableColumns, colorForStatus, dashboardStatus, filterCatalogResources,
-  filterInventory, fitColumn, fitText, detailPanelLayout, issueLine, tableColumns, tableLine, wrapText,
+  inventoryCatalogLabels, filterInventory, fitColumn, fitText, detailPanelLayout, issueLine,
+  tableColumns, tableLine, wrapText,
 } from "./helpers.mjs";
+import type { InventoryCatalogConfiguration } from "./helpers.mjs";
 
 const h = React.createElement;
 
@@ -111,6 +113,8 @@ export function InventoryScreen({
   showDetails,
   columns,
   rows,
+  userCatalogs = [],
+  inventoryLabels: suppliedInventoryLabels,
 }: {
   resources: CatalogResource[];
   errors: ScanError[];
@@ -125,8 +129,11 @@ export function InventoryScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
+  userCatalogs?: InventoryCatalogConfiguration[];
+  inventoryLabels?: Map<CatalogResource, string>;
 }) {
-  const visible = filterInventory(resources, query, catalogFilter, kindFilter);
+  const inventoryLabels = suppliedInventoryLabels || inventoryCatalogLabels(resources, userCatalogs);
+  const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
   const managedResources = resources.filter((resource) => resource.managed !== false);
@@ -181,12 +188,11 @@ export function InventoryScreen({
   const columnsByField = tableColumns(inventorySideBySide ? inventoryListWidth : columns);
   const tableHeader = tableLine([
     ["", columnsByField.marker],
+    ["STATUS", columnsByField.status],
     ["SCOPE", columnsByField.scope],
     ["KIND", columnsByField.kind],
     ["ID", columnsByField.id],
     ["CATALOG", columnsByField.catalog],
-    ["STATUS", columnsByField.status],
-    ["DESC", columnsByField.description],
   ]);
   const description = selected?.description || "No description available.";
   const sourceLocation = selected?.source_repository
@@ -208,7 +214,7 @@ export function InventoryScreen({
     : "-";
   const detailRows = selected
     ? [
-      { label: "CATALOG", value: catalogLabel(selected), maxLines: 1 },
+      { label: "CATALOG", value: inventoryLabels.get(selected) || "-", maxLines: 1 },
       { label: "SCOPE", value: selected.scope?.toUpperCase() || "-", maxLines: 1 },
       { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
       { label: "", value: issues, maxLines: 2 },
@@ -253,12 +259,11 @@ export function InventoryScreen({
       const status = dashboardStatus(resource);
       const row = tableLine([
         [selectedRow ? ">" : "", columnsByField.marker],
+        [status.toUpperCase(), columnsByField.status],
         [resource.scope.toUpperCase(), columnsByField.scope],
         [resource.kind === "instruction" ? "instr" : resource.kind, columnsByField.kind],
         [resource.id, columnsByField.id],
-        [catalogLabel(resource), columnsByField.catalog],
-        [status.toUpperCase(), columnsByField.status],
-        [resource.description, columnsByField.description],
+        [inventoryLabels.get(resource) || "-", columnsByField.catalog],
       ]);
       return h(Text, {
         key: `${resource.managed === false ? "unmanaged" : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
@@ -326,6 +331,7 @@ export function InventoryScreen({
 export function CatalogScreen({
   candidates,
   resources,
+  catalogs,
   query,
   filterMode,
   catalogFilter,
@@ -337,6 +343,7 @@ export function CatalogScreen({
 }: {
   candidates: CatalogResource[];
   resources: CatalogResource[];
+  catalogs: InventoryCatalogConfiguration[];
   query: string;
   filterMode: boolean;
   catalogFilter: string;
@@ -346,7 +353,12 @@ export function CatalogScreen({
   columns: number;
   rows: number;
 }) {
-  const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter);
+  const candidateLabels = inventoryCatalogLabels(candidates, catalogs);
+  const candidateLabel = (resource: CatalogResource) =>
+    resource.managed === false || !resource.source_repository
+      ? resource.catalog
+      : candidateLabels.get(resource) || resource.catalog;
+  const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter, catalogs);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
   const panelLayout = detailPanelLayout(columns);
@@ -363,7 +375,7 @@ export function CatalogScreen({
     : "none";
   const detailRows = selected
     ? [
-      { label: "CATALOG", value: selected.catalog, maxLines: 1 },
+      { label: "CATALOG", value: candidateLabel(selected), maxLines: 1 },
       { label: "DESCRIPTION", value: selected.description || "No description available.", maxLines: 2 },
       { label: "INSTALLED IN", value: installedScopes, maxLines: 1 },
       { label: "LICENSE", value: selected.license_status || "not declared", maxLines: 1 },
@@ -382,11 +394,10 @@ export function CatalogScreen({
   const pageRange = visible.length ? `${first + 1}-${first + page.length}` : "0-0";
   const tableHeader = tableLine([
     ["", columnsByField.marker],
+    ["INSTALLED", columnsByField.installed],
     ["SOURCE", columnsByField.source],
     ["KIND", columnsByField.kind],
     ["ID", columnsByField.id],
-    ["INSTALLED", columnsByField.installed],
-    ["DESCRIPTION", columnsByField.description],
   ]);
   const tableRows = page.length
     ? page.map((resource, index) => {
@@ -398,12 +409,10 @@ export function CatalogScreen({
         ? "both"
         : scopes[0] || "no";
       const row = tableLine([
-        [selectedRow ? ">" : "", columnsByField.marker],
-        [resource.catalog.toUpperCase(), columnsByField.source],
+        [installed, columnsByField.installed],
+        [candidateLabel(resource), columnsByField.source],
         [resource.kind, columnsByField.kind],
         [resource.id, columnsByField.id],
-        [installed, columnsByField.installed],
-        [resource.description, columnsByField.description],
       ]);
       return h(Text, {
         key: `${resource.catalog}:${resource.kind}:${resource.id}`,

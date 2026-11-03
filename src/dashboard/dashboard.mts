@@ -2,7 +2,9 @@ import React, { useRef, useState } from "react";
 import { render, useInput, useWindowSize } from "ink";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
-import { cycleFilter, cycleIndex, filterCatalogResources, filterInventory } from "./helpers.mjs";
+import {
+  cycleFilter, cycleIndex, filterCatalogResources, filterInventory, inventoryCatalogLabels,
+} from "./helpers.mjs";
 import {
   CatalogManagementScreen, CatalogScreen, InventoryScreen, ScreenFrame,
   type CatalogFreshnessStatus,
@@ -157,14 +159,15 @@ export function Dashboard({
     }
   };
 
+  const inventoryLabels = inventoryCatalogLabels(installedResources, userCatalogs);
   const visibleInventory = filterInventory(
-    installedResources, query, inventoryCatalogFilter, inventoryKindFilter,
+    installedResources, query, inventoryCatalogFilter, inventoryKindFilter, userCatalogs, inventoryLabels,
   );
   const activeInventoryIndex = Math.min(selectedIndex, Math.max(0, visibleInventory.length - 1));
   const selectedResource = visibleInventory[activeInventoryIndex];
   const candidates = catalogCandidates;
   const visibleCatalog = filterCatalogResources(
-    candidates, catalogQuery, catalogSourceFilter, catalogKindFilter,
+    candidates, catalogQuery, catalogSourceFilter, catalogKindFilter, userCatalogs,
   );
   const activeCatalogIndex = Math.min(catalogIndex, Math.max(0, visibleCatalog.length - 1));
 
@@ -627,12 +630,12 @@ export function Dashboard({
         setCatalogFilterMode(true);
       } else if (character === "c") {
         setCatalogSourceFilter(cycleFilter(
-          catalogSourceFilter, candidates, "catalog", "kind", catalogKindFilter,
+          catalogSourceFilter, candidates, "catalog", "kind", catalogKindFilter, userCatalogs,
         ));
         setCatalogIndex(0);
       } else if (character === "k") {
         setCatalogKindFilter(cycleFilter(
-          catalogKindFilter, candidates, "kind", "catalog", catalogSourceFilter,
+          catalogKindFilter, candidates, "kind", "catalog", catalogSourceFilter, userCatalogs,
         ));
         setCatalogIndex(0);
       } else if (key.upArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, -1));
@@ -720,12 +723,12 @@ export function Dashboard({
     }
     else if (character === "c") {
       setInventoryCatalogFilter(cycleFilter(
-        inventoryCatalogFilter, installedResources, "catalog", "kind", inventoryKindFilter,
+        inventoryCatalogFilter, installedResources, "catalog", "kind", inventoryKindFilter, userCatalogs,
       ));
       setSelectedIndex(0);
     } else if (character === "k") {
       setInventoryKindFilter(cycleFilter(
-        inventoryKindFilter, installedResources, "kind", "catalog", inventoryCatalogFilter,
+        inventoryKindFilter, installedResources, "kind", "catalog", inventoryCatalogFilter, userCatalogs,
       ));
       setSelectedIndex(0);
     } else if (character === "a" && candidates.length) {
@@ -824,6 +827,7 @@ export function Dashboard({
     baseScreen = h(CatalogScreen, {
       candidates,
       resources: installedResources,
+      catalogs: userCatalogs,
       query: catalogQuery,
       filterMode: catalogFilterMode,
       catalogFilter: catalogSourceFilter,
@@ -848,6 +852,8 @@ export function Dashboard({
       canExecute: typeof actions.execute === "function" && Boolean(selectedResource),
       columns,
       rows,
+      userCatalogs,
+      inventoryLabels,
     });
   }
   const overlay = modal && h(ModalOverlay, { modal, columns, rows });

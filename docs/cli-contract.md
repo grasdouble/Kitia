@@ -59,6 +59,12 @@ New installations can choose project/user scope and Copilot/Claude/both
 clients; instructions remain project-scoped. Press `F` to enter filter mode and
 `D` to toggle the selected resource's details panel in inventory and catalog
 browsing or catalog management.
+The inventory's Catalog column shows the configured source-catalog name for a
+tracked artifact with source-repository metadata. For a custom user catalog, it
+adds the folder selected by the saved path mapping, such as
+`MattPucock[engineering]`. Untracked artifacts and managed records without a
+source association display `-`.
+
 From inventory, uppercase `A`/`U` install or update resources, and `Delete`
 uninstalls the selection. Press `M` for catalog management; there, `A` adds a
 catalog, `Delete` removes the selected catalog, `E` edits its name, repository,
@@ -77,6 +83,23 @@ mapping can point to one skill directory containing `SKILL.md` or to a parent
 directory containing multiple nested skills. Agent and instruction mappings can
 point to a Markdown file or a directory of Markdown artifacts. Resource IDs are
 derived from skill directory names or Markdown filenames.
+
+Inventory labels use the saved mapping path, not the resource ID. A directory
+mapping uses its basename when it directly contains resource folders; if a
+mapping covers skills nested at least two folders below it, each resource is
+grouped by the first folder below the mapped directory (so a `skills` mapping
+labels `skills/engineering/review` as `Catalog[engineering]`). A skill
+directory mapping uses that directory's name; a mapping ending in `SKILL.md`
+uses the containing category folder for a nested skill, falling back to the
+skill folder when there is no category level. An agent or instruction file
+mapping uses the file's containing directory. The most-specific path mapping
+for the resource kind wins. An explicit mapping ID matches only resources with
+that ID, even when other resources share its source path; it does not rename
+the folder label. If configured folders share a basename, the shortest
+trailing path that distinguishes them is shown inside the brackets within the
+same resource kind. Basic catalogs, custom resources without a matching saved
+mapping, and catalogs whose saved custom configuration is unavailable retain
+the plain catalog name.
 
 
 For automation, specify the kind and source catalog when selecting a user-managed
