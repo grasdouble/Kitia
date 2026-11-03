@@ -1,7 +1,5 @@
 "use strict";
 
-const { matchesSearch } = require("./search.js");
-import type { CatalogResource, JsonRecord, McpInput, McpServer } from "../types.js";
 // File-backed kinds use the filesystem planner; MCPs and bundles use declarative plans.
 const INSTALLABLE_KINDS = new Set(["skill", "agent", "instruction"]);
 const LOCAL_KINDS = new Set([...INSTALLABLE_KINDS, "bundle", "mcp"]);
@@ -14,39 +12,136 @@ const COMMON_FIELDS = [
   "deprecation_reason", "replacement",
 ];
 
+export type CatalogName = string;
+export type ResourceKind = "skill" | "agent" | "instruction" | "mcp" | "bundle";
+type EntryObject = Record<string, unknown>;
+
+function isEntryObject(value: unknown): value is EntryObject {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBundleMember(value: unknown): value is BundleMember {
+  if (!isEntryObject(value) || Object.keys(value).sort().join(",") !== "catalog,id,kind") return false;
+  const id = value.id;
+  const kind = value.kind;
+  return typeof id === "string" && GROUP_ID.test(id) &&
+    value.catalog === "internal" && typeof kind === "string" &&
+    (INSTALLABLE_KINDS.has(kind) || kind === "mcp");
+}
+
+export interface ResourceIssue {
+  code: string;
+  paths?: string[];
+}
+
+export interface BundleMember {
+  catalog: string;
+  kind: ResourceKind;
+  id: string;
+}
+
+export interface McpInput {
+  type: string;
+  required?: boolean;
+  secret?: boolean;
+  target_env: string;
+  default?: unknown;
+  description?: string;
+}
+
+export interface McpServer {
+  command?: string;
+  args?: string[];
+  type?: string;
+  url?: string;
+  env?: Record<string, string>;
+}
+
+export interface CatalogResource {
+  id: string;
+  kind: ResourceKind;
+  catalog?: CatalogName;
+  catalogId?: string;
+  description?: string;
+  owner?: string;
+  category?: string;
+  tags?: string[];
+  status?: string;
+  use_when?: string;
+  example?: string;
+  expected_output?: string;
+  prerequisites?: string[];
+  limitations?: string[];
+  deprecation_reason?: string;
+  replacement?: string;
+  group?: string;
+  compatibility?: Record<string, { status: string }>;
+  apply_to?: string[];
+  applyTo?: string[];
+  source?: string | null;
+  source_repository?: string;
+  source_path?: string;
+  source_ref?: string | null;
+  license_status?: string;
+  url?: string;
+  access?: string;
+  data_policy?: string;
+  last_reviewed?: string;
+  mcp_config?: { mcpServers: Record<string, McpServer> };
+  inputs?: Record<string, McpInput>;
+  installation?: Array<{
+    id: string;
+    title: string;
+    steps: string[];
+    command?: string;
+    config?: Record<string, unknown>;
+    include_mcp_config?: true;
+    note?: string;
+  }>;
+  resources?: BundleMember[];
+  scope?: string;
+  managed?: boolean;
+  issues?: ResourceIssue[];
+  paths?: string[];
+  version?: string;
+  commit?: string;
+  unsupported_runtimes?: string[];
+  removed?: boolean;
+}
+
 function validateEntry(
-  entry: JsonRecord,
+  value: unknown,
   label: string,
   ErrorType: new (message: string) => Error = Error,
 ): void {
-  const fail = (message) => { throw new ErrorType(`${label}: ${message}`); };
-  const local = LOCAL_KINDS.has(entry.kind);
+  const fail = (message: string): never => { throw new ErrorType(`${label}: ${message}`); };
+  if (!isEntryObject(value)) fail("entry must be an object");
+  const entry: EntryObject = value as EntryObject;
+  const local = typeof entry.kind === "string" && LOCAL_KINDS.has(entry.kind);
   const allowed = new Set([
     ...COMMON_FIELDS,
     ...(local
       ? ["group", "compatibility", "apply_to", ...(entry.kind === "bundle" ? ["resources"] : []),
         ...(entry.kind === "mcp" ? ["url", "access", "data_policy", "last_reviewed", "mcp_config", "installation", "inputs"] : [])]
-      : [
-        "url", "access", "data_policy", "last_reviewed",
-      ]),
+      : ["url", "access", "data_policy", "last_reviewed"]),
   ]);
   const unknown = Object.keys(entry).filter((key) => !allowed.has(key));
-  if (unknown.length) {
-    fail(`unsupported fields: ${unknown.sort().join(", ")}`);
-  }
+  if (unknown.length) fail(`unsupported fields: ${unknown.sort().join(", ")}`);
   for (const field of ["owner", "category", "use_when", "example", "expected_output"]) {
-    if (typeof entry[field] !== "string" || !entry[field].trim()) {
+    const fieldValue = entry[field];
+    if (typeof fieldValue !== "string" || !fieldValue.trim()) {
       fail(`${field} must be a non-empty string`);
     }
   }
   for (const field of ["tags", "prerequisites", "limitations"]) {
-    if (!Array.isArray(entry[field]) || !entry[field].length ||
-        entry[field].some((value) => typeof value !== "string" || !value.trim()) ||
-        new Set(entry[field]).size !== entry[field].length) {
+    const fieldValue = entry[field];
+    if (!Array.isArray(fieldValue) || !fieldValue.length ||
+        fieldValue.some((item: unknown) => typeof item !== "string" || !item.trim()) ||
+        new Set(fieldValue).size !== fieldValue.length) {
       fail(`${field} must be a non-empty array of unique strings`);
     }
   }
-  if (!STATUSES.has(entry.status)) {
+  if (typeof entry.status !== "string" || !STATUSES.has(entry.status)) {
     fail(`status must be one of: ${[...STATUSES].join(", ")}`);
   }
   if (entry.status === "deprecated") {
@@ -60,12 +155,10 @@ function validateEntry(
     fail("replacement must be a kind:id reference");
   }
   if (entry.kind === "bundle") {
-    if (!Array.isArray(entry.resources) || !entry.resources.length ||
-        entry.resources.some((member) => !member || Array.isArray(member) ||
-          Object.keys(member).sort().join(",") !== "catalog,id,kind" ||
-          typeof member.id !== "string" || !GROUP_ID.test(member.id) ||
-          !(member.catalog === "internal" && (INSTALLABLE_KINDS.has(member.kind) || member.kind === "mcp"))) ||
-        new Set(entry.resources.map((member) => `${member.catalog}:${member.kind}:${member.id}`)).size !== entry.resources.length) {
+    const resources = entry.resources;
+    const members = Array.isArray(resources) ? resources.filter(isBundleMember) : [];
+    if (!Array.isArray(resources) || !resources.length || members.length !== resources.length ||
+        new Set(members.map((member) => `${member.catalog}:${member.kind}:${member.id}`)).size !== resources.length) {
       fail("resources must contain unique internal skill/agent/instruction/MCP identities");
     }
   }
@@ -73,39 +166,41 @@ function validateEntry(
     if (typeof entry.group !== "string" || !GROUP_ID.test(entry.group)) {
       fail("group must be a lowercase kebab-case identifier");
     }
-    const compatibility = entry.compatibility as Record<string, { status: string }>;
-    if (!compatibility || Array.isArray(compatibility) ||
-        typeof compatibility !== "object" ||
+    const compatibility = entry.compatibility;
+    if (!isEntryObject(compatibility) ||
         Object.keys(compatibility).some((key) => !["claude", "copilot"].includes(key))) {
       fail("compatibility must describe claude and copilot");
     }
+    const statuses: string[] = [];
     for (const runtime of ["claude", "copilot"]) {
       const declaration = compatibility[runtime];
-      if (!declaration || typeof declaration !== "object" || Array.isArray(declaration) ||
+      if (!isEntryObject(declaration) || typeof declaration.status !== "string" ||
           !["unverified", "compatible", "unsupported"].includes(declaration.status)) {
         fail(`compatibility.${runtime}.status must be unverified, compatible or unsupported`);
       }
       if (Object.keys(declaration).some((key) => key !== "status")) {
         fail(`unsupported compatibility fields for ${runtime}`);
       }
+      statuses.push(declaration.status);
     }
-    const supported = Object.values(compatibility).filter((value) => value.status !== "unsupported");
-    if (!supported.length) {
-      fail("at least one runtime must be supported");
-    }
-    if (entry.status === "stable" && supported.some((value) => value.status !== "compatible")) {
+    const supported = statuses.filter((status) => status !== "unsupported");
+    if (!supported.length) fail("at least one runtime must be supported");
+    if (entry.status === "stable" && supported.some((status) => status !== "compatible")) {
       fail("stable resources require compatible status for every supported runtime");
     }
   }
   if (!local || entry.kind === "mcp") {
     for (const field of ["url", "access", "data_policy", "last_reviewed"]) {
-      if (typeof entry[field] !== "string" || !entry[field].trim()) {
+      const fieldValue = entry[field];
+      if (typeof fieldValue !== "string" || !fieldValue.trim()) {
         fail(`${field} must be a non-empty string`);
       }
     }
-    let url;
+    const urlValue = entry.url;
+    let url: URL;
     try {
-      url = new URL(entry.url);
+      if (typeof urlValue !== "string") throw new TypeError();
+      url = new URL(urlValue);
     } catch {
       fail("url must be an absolute HTTPS URL");
     }
@@ -113,23 +208,19 @@ function validateEntry(
       fail("url must use HTTPS without embedded credentials");
     }
     validateDate(entry.last_reviewed, "last_reviewed", fail);
-    if (entry.mcp_config !== undefined) {
-      validateMcpConfig(entry.mcp_config, fail);
-    }
+    if (entry.mcp_config !== undefined) validateMcpConfig(entry.mcp_config, fail);
     if (entry.kind === "mcp" && (entry.mcp_config === undefined || entry.inputs === undefined)) {
       fail("MCP entries require mcp_config and an explicit inputs object");
     }
     if (entry.inputs !== undefined) validateMcpInputs(entry, fail);
     if (entry.installation !== undefined) {
-      if (entry.kind !== "mcp") {
-        fail("installation instructions are only valid for MCP entries");
-      }
+      if (entry.kind !== "mcp") fail("installation instructions are only valid for MCP entries");
       validateMcpInstallation(entry.installation, entry.mcp_config !== undefined, fail);
     }
   }
 }
 
-function validInputValue(input: McpInput, value: unknown): boolean {
+function validInputValue(input: Pick<McpInput, "type">, value: unknown): value is string {
   if (typeof value !== "string" || !value.trim()) return false;
   if (input.type === "json") {
     try {
@@ -148,55 +239,61 @@ function validInputValue(input: McpInput, value: unknown): boolean {
   }
 }
 
-function validateMcpInputs(entry: JsonRecord, fail: (message: string) => never): void {
-  const servers = Object.values(entry.mcp_config?.mcpServers || {}) as McpServer[];
-  if (servers.length !== 1 ||
-      !entry.inputs || typeof entry.inputs !== "object" || Array.isArray(entry.inputs)) {
+function validateMcpInputs(entry: EntryObject, fail: (message: string) => never): void {
+  const config = entry.mcp_config;
+  const servers = isEntryObject(config) && isEntryObject(config.mcpServers)
+    ? Object.values(config.mcpServers) : [];
+  const inputs = entry.inputs;
+  if (servers.length !== 1 || !isEntryObject(inputs) || !isEntryObject(servers[0])) {
     fail("inputs require exactly one MCP server and an input object");
   }
-  const inputs = entry.inputs as Record<string, McpInput>;
-  if (servers[0].type === "http" && Object.keys(inputs).length) fail("HTTP OAuth MCPs require an empty inputs object");
-  const targets = new Set();
-  for (const [name, input] of Object.entries(inputs)) {
-    if (!/^[a-z][a-z0-9_]*$/.test(name) || !input || Array.isArray(input) ||
+  const server = servers[0];
+  if (server.type === "http" && Object.keys(inputs).length) fail("HTTP OAuth MCPs require an empty inputs object");
+  const targets = new Set<string>();
+  for (const [name, rawInput] of Object.entries(inputs)) {
+    const input = rawInput;
+    if (!isEntryObject(input)) fail(`invalid MCP input '${name}': use a typed environment binding; secrets cannot have defaults`);
+    const inputType = input.type;
+    const required = input.required;
+    const secret = input.secret;
+    const targetEnv = input.target_env;
+    if (!/^[a-z][a-z0-9_]*$/.test(name) ||
         Object.keys(input).some((key) => !["type", "required", "secret", "default", "target_env", "description"].includes(key)) ||
-        !["string", "url", "json"].includes(input.type) || typeof input.required !== "boolean" ||
+        typeof inputType !== "string" || !["string", "url", "json"].includes(inputType) || typeof required !== "boolean" ||
         (input.description !== undefined && (typeof input.description !== "string" || !input.description.trim())) ||
-        (input.secret !== undefined && typeof input.secret !== "boolean") ||
-        !/^[A-Z_][A-Z0-9_]*$/.test(input.target_env) ||
-        targets.has(input.target_env) ||
-        (input.secret && (!["string", "json"].includes(input.type) || input.default !== undefined)) ||
-        (input.default !== undefined && !validInputValue(input, input.default))) {
+        (secret !== undefined && typeof secret !== "boolean") ||
+        typeof targetEnv !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(targetEnv) || targets.has(targetEnv) ||
+        (secret && (! ["string", "json"].includes(inputType) || input.default !== undefined)) ||
+        (input.default !== undefined && !validInputValue({ type: inputType }, input.default))) {
       fail(`invalid MCP input '${name}': use a typed environment binding; secrets cannot have defaults`);
     }
-    targets.add(input.target_env);
-    const reference = `\${${input.target_env}${input.required ? "" : ":-"}}`;
-    if (Object.hasOwn(servers[0].env || {}, input.target_env) && servers[0].env[input.target_env] !== reference) {
+    targets.add(targetEnv);
+    const reference = `\${${targetEnv}${required ? "" : ":-"}}`;
+    const env = isEntryObject(server.env) ? server.env : {};
+    if (Object.hasOwn(env, targetEnv) && env[targetEnv] !== reference) {
       fail(`MCP input '${name}' must not also have a literal env value`);
     }
   }
 }
 
-function validateMcpConfig(config: JsonRecord, fail: (message: string) => never): void {
-  if (!config || Array.isArray(config) || typeof config !== "object" ||
-      Object.keys(config).length !== 1 || !config.mcpServers ||
-      Array.isArray(config.mcpServers) || typeof config.mcpServers !== "object" ||
-      !Object.keys(config.mcpServers).length) {
+function validateMcpConfig(value: unknown, fail: (message: string) => never): void {
+  if (!isEntryObject(value) || Object.keys(value).length !== 1 ||
+      !isEntryObject(value.mcpServers) || !Object.keys(value.mcpServers).length) {
     fail("mcp_config must contain a non-empty mcpServers object");
   }
-  for (const [name, server] of Object.entries(config.mcpServers as Record<string, McpServer>)) {
-    if (!/^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/.test(name) ||
-        !server || Array.isArray(server) || typeof server !== "object") {
+  for (const [name, rawServer] of Object.entries(value.mcpServers)) {
+    if (!/^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/.test(name) || !isEntryObject(rawServer)) {
       fail(`mcp_config server '${name}' must define a supported stdio or HTTP server`);
     }
+    const server = rawServer;
     if (server.type === "http") {
-      if (Object.keys(server).some((key) => !["type", "url"].includes(key)) ||
-          typeof server.url !== "string") {
+      const urlValue = server.url;
+      if (Object.keys(server).some((key) => !["type", "url"].includes(key)) || typeof urlValue !== "string") {
         fail(`mcp_config server '${name}' must define only an HTTP type and URL`);
       }
-      let url;
+      let url: URL;
       try {
-        url = new URL(server.url);
+        url = new URL(urlValue);
       } catch {
         fail(`mcp_config server '${name}' URL must be an absolute HTTPS URL without credentials`);
       }
@@ -205,16 +302,16 @@ function validateMcpConfig(config: JsonRecord, fail: (message: string) => never)
       }
       continue;
     }
+    const command = server.command;
+    const args = server.args;
     if ((server.type !== undefined && server.type !== "stdio") ||
-      Object.keys(server).some((key) => !["type", "command", "args", "env"].includes(key)) ||
-        typeof server.command !== "string" || !server.command.trim() ||
-        !Array.isArray(server.args) ||
-        server.args.some((argument) => typeof argument !== "string" || !argument.trim())) {
+        Object.keys(server).some((key) => !["type", "command", "args", "env"].includes(key)) ||
+        typeof command !== "string" || !command.trim() || !Array.isArray(args) ||
+        args.some((argument: unknown) => typeof argument !== "string" || !argument.trim())) {
       fail(`mcp_config server '${name}' must define a command and string args or an HTTPS HTTP URL`);
     }
     if (server.env !== undefined &&
-        (!server.env || Array.isArray(server.env) || typeof server.env !== "object" ||
-         Object.entries(server.env as Record<string, string>).some(([key, value]) => !key.trim() || typeof value !== "string"))) {
+        (!isEntryObject(server.env) || Object.entries(server.env).some(([key, item]) => !key.trim() || typeof item !== "string"))) {
       fail(`mcp_config server '${name}' env must be an object with non-empty keys and string values`);
     }
   }
@@ -225,37 +322,34 @@ function validateMcpInstallation(
   hasMcpConfig: boolean,
   fail: (message: string) => never,
 ): void {
-  if (!Array.isArray(installation) || !installation.length) {
-    fail("installation must be a non-empty array");
-  }
-  const ids = new Set();
-  for (const method of installation) {
-    if (!method || Array.isArray(method) || typeof method !== "object" ||
-        Object.keys(method).some((key) =>
-          !["id", "title", "steps", "command", "config", "include_mcp_config", "note"].includes(key)) ||
-        typeof method.id !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(method.id) ||
-        ids.has(method.id) ||
-        typeof method.title !== "string" || !method.title.trim() ||
-        !Array.isArray(method.steps) || !method.steps.length ||
-        method.steps.some((step) => typeof step !== "string" || !step.trim())) {
+  if (!Array.isArray(installation) || !installation.length) fail("installation must be a non-empty array");
+  const ids = new Set<string>();
+  for (const rawMethod of installation) {
+    const method = rawMethod;
+    if (!isEntryObject(method) ||
+        Object.keys(method).some((key) => !["id", "title", "steps", "command", "config", "include_mcp_config", "note"].includes(key))) {
       fail("installation methods must have unique kebab-case ids, titles and non-empty steps");
     }
-    ids.add(method.id);
-    if (method.command !== undefined &&
-        (typeof method.command !== "string" || !method.command.trim())) {
-      fail(`installation method '${method.id}' command must be a non-empty string`);
+    const id = method.id;
+    const title = method.title;
+    const steps = method.steps;
+    if (typeof id !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || ids.has(id) ||
+        typeof title !== "string" || !title.trim() || !Array.isArray(steps) || !steps.length ||
+        steps.some((step: unknown) => typeof step !== "string" || !step.trim())) {
+      fail("installation methods must have unique kebab-case ids, titles and non-empty steps");
     }
-    if (method.note !== undefined &&
-        (typeof method.note !== "string" || !method.note.trim())) {
-      fail(`installation method '${method.id}' note must be a non-empty string`);
+    ids.add(id);
+    if (method.command !== undefined && (typeof method.command !== "string" || !method.command.trim())) {
+      fail(`installation method '${id}' command must be a non-empty string`);
     }
-    if (method.config !== undefined &&
-        (!method.config || Array.isArray(method.config) || typeof method.config !== "object")) {
-      fail(`installation method '${method.id}' config must be an object`);
+    if (method.note !== undefined && (typeof method.note !== "string" || !method.note.trim())) {
+      fail(`installation method '${id}' note must be a non-empty string`);
     }
-    if (method.include_mcp_config !== undefined &&
-        (method.include_mcp_config !== true || !hasMcpConfig)) {
-      fail(`installation method '${method.id}' may include mcp_config only when it is defined`);
+    if (method.config !== undefined && !isEntryObject(method.config)) {
+      fail(`installation method '${id}' config must be an object`);
+    }
+    if (method.include_mcp_config !== undefined && (method.include_mcp_config !== true || !hasMcpConfig)) {
+      fail(`installation method '${id}' may include mcp_config only when it is defined`);
     }
     const contentCount = [
       method.command !== undefined,
@@ -264,7 +358,7 @@ function validateMcpInstallation(
       method.note !== undefined,
     ].filter(Boolean).length;
     if (contentCount !== 1) {
-      fail(`installation method '${method.id}' must define exactly one command, config snippet or note`);
+      fail(`installation method '${id}' must define exactly one command, config snippet or note`);
     }
   }
 }
@@ -276,25 +370,6 @@ function validateDate(value: unknown, label: string, fail: (message: string) => 
       date.toISOString().slice(0, 10) !== value) {
     fail(`${label} must be a valid YYYY-MM-DD date`);
   }
-}
-
-function filterResources(
-  resources: CatalogResource[],
-  { query = "", kind, tag, status, group }: {
-    query?: string;
-    kind?: string;
-    tag?: string;
-    status?: string;
-    group?: string;
-  } = {},
-): CatalogResource[] {
-  return resources.filter((resource) => {
-    return (!kind || resource.kind === kind) &&
-      (!tag || resource.tags.includes(tag)) &&
-      (!status || resource.status === status) &&
-      (!group || resource.group === group) &&
-      matchesSearch(resource, query);
-  });
 }
 
 function renderMcpInstallation(resource: CatalogResource): string[] {
@@ -421,4 +496,4 @@ function formatResource(
   return `${lines.join("\n")}\n`;
 }
 
-module.exports = { KINDS, INSTALLABLE_KINDS, LOCAL_KINDS, STATUSES, validateEntry, validInputValue, filterResources, formatResource };
+module.exports = { KINDS, INSTALLABLE_KINDS, LOCAL_KINDS, STATUSES, validateEntry, validInputValue, formatResource };

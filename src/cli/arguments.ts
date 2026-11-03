@@ -1,13 +1,56 @@
 "use strict";
 
-import type { CliOptions } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+import type { CascadeSummary } from "../catalog/bundles/removal.js";
+import type { PlanAction, InstallationTool, InventoryScope } from "../catalog/inventory/files.js";
+export interface CliOptions {
+  command?: string;
+  action?: string;
+  target?: string;
+  userTarget?: string;
+  catalog?: string;
+  kind?: string;
+  id?: string;
+  scope?: InventoryScope;
+  tool?: InstallationTool | null;
+  nonInteractive?: boolean;
+  yes?: boolean;
+  cascade?: boolean;
+  inputs?: Record<string, string>;
+  offline?: boolean;
+  json?: boolean;
+  network?: boolean;
+  dryRun?: boolean;
+  force?: boolean;
+  allCatalogs?: boolean;
+  query?: string;
+  tag?: string;
+  status?: string;
+  group?: string;
+  file?: string;
+  name?: string;
+  repository?: string;
+  standaloneTool?: InstallationTool | null;
+  bundle?: boolean;
+  extraResources?: CatalogResource[];
+  sourceResources?: CatalogResource[];
+  resource?: CatalogResource;
+  output?: { log(message: string): void; error(message: string): void };
+  onAction?: (action: PlanAction) => void;
+  onResource?: (resource: { catalog: string; kind: string; id: string; status?: string; source?: boolean }) => void;
+  confirm?: (summary: CascadeSummary, plan: string[]) => boolean | Promise<boolean>;
+}
 const os = require("node:os");
 const path = require("node:path");
 const { CatalogError, RESOURCE_ID, TOOLS, KINDS, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
-const { loadSourceConfiguration, catalogNameKey } = require("../catalog/sources/config.js");
+const { loadUserSourceConfiguration, catalogNameKey } = require("../catalog/sources/config.js");
+
+function isInstallationTool(value: string): value is InstallationTool {
+  return value === "claude" || value === "copilot" || value === "both";
+}
 
 function catalogNames(): string[] {
-  return ["internal", ...loadSourceConfiguration().map((source) => source.name)];
+  return loadUserSourceConfiguration().map((source) => source.name);
 }
 
 function resolveCatalogName(value: string): string | undefined {
@@ -33,13 +76,12 @@ function parseArguments(args: string[]): CliOptions {
       extras.inputs ||= {};
       extras.inputs[match[1]] = match[2];
     } else if (argument === "--offline") extras.offline = true;
-    else if (argument === "--refresh-catalog") extras.refreshCatalog = true;
     else if (argument === "--json" && !discovery) extras.json = true;
     else if (argument === "--network" && command === "doctor") extras.network = true;
     else if (argument === "--scope") {
       if (extras.scope) throw new CatalogError("--scope may only be specified once", "INVALID_ARGUMENT");
       const scope = args[++index];
-      if (!["project", "user"].includes(scope)) {
+      if (scope !== "project" && scope !== "user") {
         throw new CatalogError("--scope must be project or user", "INVALID_ARGUMENT");
       }
       extras.scope = scope;
@@ -51,12 +93,6 @@ function parseArguments(args: string[]): CliOptions {
     } else remaining.push(argument);
   }
   try {
-    if (extras.offline && extras.refreshCatalog) {
-      throw new CatalogError("--offline cannot be combined with --refresh-catalog");
-    }
-    if ((extras.offline || extras.refreshCatalog) && ["doctor", "--help", "-h"].includes(command)) {
-      throw new CatalogError("--offline and --refresh-catalog apply to catalog commands only");
-    }
     const options: CliOptions = command === "doctor"
       ? { ...parseCommandArguments(["check", ...remaining.slice(1)]), command: "doctor" }
       : parseCommandArguments(remaining);
@@ -85,7 +121,7 @@ function parseArguments(args: string[]): CliOptions {
       }
     }
     if (extras.json && !["check", "doctor"].includes(action) &&
-        !(["install", "update", "uninstall"].includes(action) && options.dryRun)) {
+        !( ["install", "update", "uninstall"].includes(action) && options.dryRun)) {
       throw new CatalogError("--json is supported for discovery, check, doctor and lifecycle --dry-run only");
     }
     if (extras.catalog && !["show", "preview", "install", "update", "uninstall", "check", "validate"].includes(command)) {
@@ -154,14 +190,22 @@ function parseCommandArguments(args: string[]): CliOptions {
       if (option === "--group" && !RESOURCE_ID.test(value)) {
         throw new CatalogError("--group must be a lowercase kebab-case identifier");
       }
-      const resolvedCatalog = resolveCatalogName(value);
+      const resolvedCatalog = option === "--catalog" ? resolveCatalogName(value) : undefined;
       if (option === "--catalog" && !resolvedCatalog) {
-        throw new CatalogError(`Unknown catalog: ${value}. Choose one of: ${catalogNames().join(", ")}`);
+        const configured = catalogNames();
+        const hint = configured.length ? `Choose one of: ${configured.join(", ")}` : "No user catalogs are configured; add one with 'kitia catalog add'.";
+        throw new CatalogError(`Unknown catalog: ${value}. ${hint}`);
       }
       if (option === "--status" && !["experimental", "stable", "deprecated"].includes(value)) {
         throw new CatalogError(`Unknown status: ${value}`);
       }
-      options[option.slice(2)] = option === "--catalog" ? resolvedCatalog : value;
+      switch (option) {
+        case "--kind": options.kind = value; break;
+        case "--tag": options.tag = value; break;
+        case "--status": options.status = value; break;
+        case "--group": options.group = value; break;
+        case "--catalog": options.catalog = resolvedCatalog; break;
+      }
     }
     return options;
   }
@@ -228,7 +272,7 @@ function parseCommandArguments(args: string[]): CliOptions {
   if (!updateAll && (typeof id !== "string" || !RESOURCE_ID.test(id))) {
     throw new CatalogError(`Usage: kitia ${command} [<kind>] <id> [--target <dir>]`);
   }
-  const result = { command, kind, id, tool: command === "install" ? "copilot" : null, target: ".", dryRun: false, force: false };
+  const result: CliOptions = { command, kind, id, tool: command === "install" ? "copilot" : null, target: ".", dryRun: false, force: false };
   for (let index = 0; index < options.length; index += 1) {
     const option = options[index];
     if (option === "--dry-run") {
@@ -243,8 +287,8 @@ function parseCommandArguments(args: string[]): CliOptions {
       if (option === "--target") {
         result.target = value;
       } else {
-        if (!TOOLS.has(value)) {
-          throw new CatalogError(`--tool must be one of: ${[...TOOLS].join(", ")}`);
+        if (!isInstallationTool(value)) {
+          throw new CatalogError(`--tool must be one of: claude, copilot, both`);
         }
         result.tool = value;
       }
@@ -280,7 +324,7 @@ Kinds: skill, agent, instruction, bundle, mcp
 MCPs and bundles target Copilot CLI and Claude Code CLI only; desktop apps and IDEs are outside their managed support scope.
 
 Options:
-  --catalog <catalog>           Select internal or a configured source catalog
+  --catalog <catalog>           Select a user-managed catalog
   --kind <kind>                 Filter by resource type
   --group <group>               Filter by local resource group
   --tag <tag>                   Filter by tag
@@ -291,11 +335,9 @@ Options:
   --input <mcp-id>.<name>=value  MCP/bundle setup: a non-secret parameter (repeatable)
   --yes                         Confirm an MCP/bundle installation/update plan non-interactively
   F / A / U / Delete            Dashboard only: filter / install / update / uninstall resources
-  --network                     Doctor only: check GitHub auth and repository access
-  --offline                     Use cached source metadata without network access
-  --refresh-catalog             Refresh source metadata now (no stale-cache fallback)
+  --offline                     Refuse network-dependent source preview or installation
   --target <dir>                Installation target (default: current directory)
-  --scope <project|user>        Skills/agents/MCPs/bundles: project (default) or user home; also maintenance/doctor
+  --scope <project|user>        Skills/agents/MCPs/bundles: project or user home; also maintenance/doctor
                                 User scope cannot be combined with --target
   --tool <claude|copilot|both>  Install only: desired runtimes (default: copilot)
   --dry-run                     Preview files without writing

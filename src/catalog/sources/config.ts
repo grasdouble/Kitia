@@ -2,14 +2,14 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { CATALOG_ROOT, CatalogError, readUtf8 } = require("../resources/index.js");
+const { CatalogError, readUtf8 } = require("../resources/index.js");
 const os = require("node:os");
 
 const CATALOG_NAME_FORBIDDEN = /[\/\\:\u0000-\u001f\u007f-\u009f]/u;
 function catalogNameKey(name: string): string { return name.toUpperCase(); }
 function isValidCatalogName(name: unknown): name is string {
   return typeof name === "string" && name.length > 0 && name === name.trim() &&
-    !CATALOG_NAME_FORBIDDEN.test(name) && catalogNameKey(name) !== "INTERNAL";
+    !CATALOG_NAME_FORBIDDEN.test(name);
 }
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -55,7 +55,7 @@ function validateSourceConfiguration(configuration: unknown) {
     }
     let mode: "basic" | "custom" = entry.mode === undefined ? "basic" : entry.mode as "basic" | "custom";
     if (mode !== "basic" && mode !== "custom") throw new CatalogError(`${label}.mode must be basic or custom`);
-    let entries: Array<{ kind: string; id: string; path: string }> = [];
+    let entries: Array<{ kind: string; id?: string; path: string }> = [];
     if (entry.entries !== undefined) {
       if (!Array.isArray(entry.entries)) throw new CatalogError(`${label}.entries must be an array`);
       entries = entry.entries.map((item: unknown, itemIndex) => {
@@ -64,31 +64,39 @@ function validateSourceConfiguration(configuration: unknown) {
         const mapping = item as Record<string, unknown>;
         if (Object.keys(mapping).some((key) => !["kind", "id", "path"].includes(key)) ||
             !["skill", "agent", "instruction"].includes(String(mapping.kind)) ||
-            typeof mapping.path !== "string" || !mapping.path || mapping.path.startsWith("/") ||
-            mapping.path.includes("\\") || mapping.path.split("/").some((part) => !part || part === "." || part === "..")) {
+            typeof mapping.path !== "string") {
+          throw new CatalogError(`${itemLabel} must define a supported kind and safe repository-relative path`);
+        }
+        const sourcePath = mapping.path.replace(/\/+$/, "");
+        if (!sourcePath || sourcePath.startsWith("/") || sourcePath.includes("\\") ||
+            sourcePath.split("/").some((part) => !part || part === "." || part === "..")) {
           throw new CatalogError(`${itemLabel} must define a supported kind and safe repository-relative path`);
         }
         let id = mapping.id;
         if (id === undefined) {
-          const parts = mapping.path.split("/");
-          const basename = parts.at(-1);
-          id = mapping.kind === "skill"
-            ? (basename === "SKILL.md" ? parts.at(-2) : basename)
-            : basename.replace(mapping.kind === "agent" ? /\.agent\.md$/i : /(?:\.instructions)?\.md$/i, "");
+          const parts = sourcePath.split("/");
+          const basename = parts.at(-1) || "";
+          if (mapping.kind === "skill" && basename.toLowerCase() === "skill.md") {
+            id = parts.at(-2);
+          } else if (mapping.kind !== "skill" && /\.md$/i.test(basename)) {
+            id = basename.replace(mapping.kind === "agent" ? /(?:\.agent)?\.md$/i : /(?:\.instructions)?\.md$/i, "");
+          }
         }
-        if (typeof id !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) ||
-            id.length > 64 || id.includes("--")) throw new CatalogError(`${itemLabel}.id must be a valid kebab-case identifier`);
+        if (id !== undefined &&
+            (typeof id !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) ||
+              id.length > 64 || id.includes("--"))) {
+          throw new CatalogError(`${itemLabel}.id must be a valid kebab-case identifier`);
+        }
         const kind = mapping.kind as string;
-        if (entries.some((existing) => `${existing.kind}:${existing.id}` === `${kind}:${id}`)) {
-          throw new CatalogError(`${label} contains duplicate resource identities`);
+        if (entries.some((existing) => existing.kind === kind &&
+            (existing.path === sourcePath || (id !== undefined && existing.id === id)))) {
+          throw new CatalogError(`${label} contains duplicate resource mappings`);
         }
-        return { kind, id, path: mapping.path };
+        return { kind, ...(id === undefined ? {} : { id: id as string }), path: sourcePath };
       });
     }
     if (mode === "custom" && entry.entries === undefined) throw new CatalogError(`${label} custom mode requires entries`);
     if (mode === "basic" && entries.length) throw new CatalogError(`${label} basic mode cannot define entries`);
-    const identities = new Set(entries.map(({ kind, id }) => `${kind}:${id}`));
-    if (identities.size !== entries.length) throw new CatalogError(`${label} contains duplicate resource identities`);
     const repository = repositoryId(entry.repository);
     const nameKey = catalogNameKey(entry.name);
     if (names.has(nameKey)) throw new CatalogError(`Duplicate catalog source name: ${entry.name}`);
@@ -124,33 +132,9 @@ function loadUserSourceConfiguration() {
   return validateSourceConfiguration(JSON.parse(readUtf8(file, "User catalog source configuration")));
 }
 
-function loadSourceConfiguration(catalogRoot = CATALOG_ROOT, { includeUserSources = true } = {}) {
-  const file = path.join(fs.realpathSync(catalogRoot), "catalogs", "catalogSources.json");
-  let configuration;
-  try {
-    configuration = JSON.parse(readUtf8(file, "Catalog source configuration"));
-  } catch (error) {
-    if (error instanceof CatalogError) throw error;
-    throw new CatalogError(`Cannot read catalog source configuration ${file}: ${error.message}`);
-  }
-  const configured = validateSourceConfiguration(configuration);
-  if (path.resolve(catalogRoot) !== path.resolve(CATALOG_ROOT) || !includeUserSources) return configured;
-  const userSources = loadUserSourceConfiguration();
-  const names = new Set(configured.map(({ name }) => catalogNameKey(name)));
-  const repositories = new Set(configured.map(({ repositoryId }) => repositoryId));
-  for (const source of userSources) {
-    const nameKey = catalogNameKey(source.name);
-    if (names.has(nameKey)) throw new CatalogError(`Duplicate catalog source name: ${source.name}`);
-    if (repositories.has(source.repositoryId)) throw new CatalogError(`Duplicate catalog source repository: ${source.repositoryId}`);
-    names.add(nameKey);
-    repositories.add(source.repositoryId);
-  }
-  return [...configured, ...userSources];
-}
 
 module.exports = {
   catalogNameKey, isValidCatalogName, repositoryId, validateSourceConfiguration,
-  loadSourceConfiguration, userCatalogDirectory, userCatalogSourcesFile,
-  userCatalogIndexDirectory, loadUserSourceConfiguration,
+  userCatalogDirectory, userCatalogSourcesFile, userCatalogIndexDirectory, loadUserSourceConfiguration,
 };
 

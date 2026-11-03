@@ -8,9 +8,25 @@ const {
   targetPath, readInstallState, installedFingerprint, sameFingerprint, writeInstallPlan,
   addInventoryStateToPlan,
 } = require("../inventory/index.js");
-import type {
-  CatalogResource, InstallState, InstalledSourceResource, JsonRecord, SourceResourceInstallation,
-} from "../../types.js";
+import type { CatalogResource } from "../entries.js";
+import type { InstallState, SourceResourceInventoryRecord } from "../inventory/files.js";
+import type { InstallPlanEntry } from "../plan.js";
+
+export interface SourceResourceInstallation {
+  agent: string;
+  path: string;
+  ref: string | null;
+  missing: boolean;
+  modified: boolean;
+  provenanceMatches: boolean;
+}
+
+export interface InstalledSourceResource {
+  resource: CatalogResource;
+  installations: SourceResourceInstallation[];
+  removed: boolean;
+  tracked?: boolean;
+}
 
 function sourceCatalogName(resource: CatalogResource): string {
   return resource.catalog || "source";
@@ -24,8 +40,8 @@ function sourceSkillKey(resource: CatalogResource): string {
   return `${resource.catalog || "source"}:${resource.id}`;
 }
 
-function sourceResourceRecords(state: InstallState): Map<string, JsonRecord> {
-  const records = new Map<string, JsonRecord>();
+function sourceResourceRecords(state: InstallState): Map<string, SourceResourceInventoryRecord> {
+  const records = new Map<string, SourceResourceInventoryRecord>();
   for (const [catalog, collections] of Object.entries(state.sources || {})) {
     for (const kind of ["skill", "agent", "instruction"]) {
       const collection = collections[`${kind}s`] || {};
@@ -37,7 +53,7 @@ function sourceResourceRecords(state: InstallState): Map<string, JsonRecord> {
   return records;
 }
 
-function sourceSkillRecords(state: InstallState): Map<string, JsonRecord> {
+function sourceSkillRecords(state: InstallState): Map<string, SourceResourceInventoryRecord> {
   return new Map([...sourceResourceRecords(state)].filter(([key]) => key.split(":")[1] === "skill")
     .map(([key, record]) => {
       const [, , id] = key.split(":");
@@ -45,11 +61,11 @@ function sourceSkillRecords(state: InstallState): Map<string, JsonRecord> {
     }));
 }
 
-function sourceResourceRecord(state: InstallState, catalog: string, kind: string, id: string): JsonRecord | undefined {
+function sourceResourceRecord(state: InstallState, catalog: string, kind: string, id: string): SourceResourceInventoryRecord | undefined {
   return sourceResourceRecords(state).get(`${catalog}:${kind}:${id}`);
 }
 
-function sourceSkillRecord(state: InstallState, catalog: string, id: string): JsonRecord | undefined {
+function sourceSkillRecord(state: InstallState, catalog: string, id: string): SourceResourceInventoryRecord | undefined {
   return sourceResourceRecord(state, catalog, "skill", id);
 }
 
@@ -57,7 +73,7 @@ function inventorySourceNames(state: InstallState): string[] {
   return [...new Set([...sourceResourceRecords(state).keys()].map((key) => key.split(":")[0]))];
 }
 
-function sameSourceRecord(record: JsonRecord, resource: CatalogResource): boolean {
+function sameSourceRecord(record: SourceResourceInventoryRecord, resource: CatalogResource): boolean {
   return record.source_repository === resource.source_repository &&
     record.source_path === resource.source_path;
 }
@@ -157,7 +173,7 @@ function recordSourceResourceInstallation(resource, target, files) {
     license_status: resource.license_status,
     files: trackedFiles,
   };
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   addInventoryStateToPlan(plan, state);
   writeInstallPlan(plan, targetRoot, { force: true });
 }
@@ -276,7 +292,7 @@ function recordSourceInstallation(resource: CatalogResource, target: string, age
     source_ref: resource.source_ref,
     files,
   };
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   addInventoryStateToPlan(plan, state);
   writeInstallPlan(plan, targetRoot, { force: true });
 }

@@ -1,20 +1,19 @@
 # MCP servers and bundles
 
-The catalog engine can manage MCP server configurations on behalf of Copilot
-CLI and Claude Code CLI. A bundle is a declared set of internal resources and
-MCP servers installed as one operation. The catalog currently contains no MCP
-or bundle entries; use these commands with IDs that appear in your configured
-catalog.
+Kitia can manage MCP server configurations for Copilot CLI and Claude Code CLI.
+A bundle combines locally managed resources and MCP servers in one operation.
+This distribution ships no local MCP or bundle metadata, so its discovery results
+are empty until such resources are supplied by a future package build.
 
 ## Preview and install
 
+For a package build that includes these resource definitions:
+
 ```sh
-npx --yes github:grasdouble/Kitia list --kind mcp --catalog internal
 npx --yes github:grasdouble/Kitia show mcp <server-id>
 npx --yes github:grasdouble/Kitia install mcp <server-id> --scope user --tool both --dry-run
 npx --yes github:grasdouble/Kitia install mcp <server-id> --scope user --tool both
 
-npx --yes github:grasdouble/Kitia list --kind bundle --catalog internal
 npx --yes github:grasdouble/Kitia show bundle <bundle-id>
 npx --yes github:grasdouble/Kitia install bundle <bundle-id> --tool both --dry-run
 ```

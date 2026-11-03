@@ -40,18 +40,23 @@ const { acquireOperationLock } = require("../catalog/operation.js");
 const { loadCommandCatalogs } = require("../catalog/loading.js");
 const { diagnose } = require("../catalog/doctor.js");
 const { parseArguments, printHelp } = require("./arguments.js");
-const { manageCatalogCommand, addCatalog, refreshCatalogs, removeCatalog } = require("../catalog/sources/manage.js");
+const {
+  manageCatalogCommand, addCatalog, updateCatalog, refreshCatalogs, checkCatalogFreshness, removeCatalog,
+} = require("../catalog/sources/manage.js");
 const { loadUserSourceConfiguration } = require("../catalog/sources/config.js");
 const { catalogEntries, listCatalogResources, formatDashboardRows } = require("./catalog.js");
 const { createDashboardActionHandler } = require("./dashboard.js");
-import type { CliOptions, InstallState, JsonRecord } from "../types.js";
+import type { CliOptions } from "./arguments.js";
+import type { InstallState } from "../catalog/inventory/files.js";
+import type { CliReport } from "./report.js";
+import type { CascadeSummary } from "../catalog/bundles/removal.js";
 
 const executeDashboardAction = createDashboardActionHandler(
   (options, root, report) => executeCommand(options, root, report),
 );
 
 async function confirmCascade(
-  summary: JsonRecord,
+  summary: CascadeSummary,
   plan: string[],
   output: { log(message: string): void },
 ): Promise<boolean> {
@@ -68,14 +73,16 @@ async function confirmCascade(
 async function executeCommand(
   options: CliOptions,
   catalogRoot: string,
-  report: JsonRecord | null,
+  report: CliReport | null,
 ): Promise<number> {
   const output = options.output || console;
   if (options.scope === "user") output.log(`User scope: ${options.target}`);
   const resolve = (resources, id, kind) => resolveCatalogResource(resources, id, kind,
     options.nonInteractive ? (candidates) => {
-      throw new CatalogError(`Resource '${id}' is ambiguous: ${candidates.map((entry) =>
-        `${entry.catalog}:${entry.kind}:${entry.id}`).join(", ")}. Specify a kind and --catalog.`, "AMBIGUOUS_RESOURCE");
+      const candidatesList = candidates.map((entry) =>
+        entry.catalog === "internal" && !entry.source_repository
+          ? `local:${entry.kind}:${entry.id}` : `${entry.catalog}:${entry.kind}:${entry.id}`);
+      throw new CatalogError(`Resource '${id}' is ambiguous: ${candidatesList.join(", ")}. Specify a kind and a source catalog where needed.`, "AMBIGUOUS_RESOURCE");
     } : selectCatalogResource);
   if (options.command === "help") {
     printHelp();
@@ -101,16 +108,16 @@ async function executeCommand(
   if (options.command === "uninstall") {
     const target = fs.realpathSync(options.target);
     const state: InstallState = readInstallState(target);
-    const bundleRecords: Record<string, JsonRecord> = state.bundles || {};
+    const bundleRecords = state.bundles || {};
     const hasSourceInstallation = (resourceId: string) =>
       [...sourceResourceRecords(state).keys()].some((key) => key.endsWith(`:${resourceId}`));
     const matchingBundle = (!options.kind || options.kind === "bundle") &&
-      (!options.catalog || options.catalog === "internal") && Object.hasOwn(state.bundles || {}, options.id) &&
+      !options.catalog && Object.hasOwn(state.bundles || {}, options.id) &&
       (options.scope !== "user" || state.bundles[options.id].scope === "user");
     if (matchingBundle) {
       const ambiguous = !options.kind && (Object.keys(state.resources).some((key) =>
         key.split(":")[1] === options.id) || Object.hasOwn(state.mcps || {}, options.id) ||
-        options.catalog !== "internal" && hasSourceInstallation(options.id));
+        hasSourceInstallation(options.id));
       if (ambiguous) throw new CatalogError(`Resource '${options.id}' is ambiguous; specify bundle as the kind.`, "AMBIGUOUS_RESOURCE");
       if (options.cascade) {
         throw new CatalogError("--cascade applies when uninstalling a resource required by bundles; uninstall a bundle directly without it.", "INVALID_ARGUMENT");
@@ -119,12 +126,12 @@ async function executeCommand(
       return 0;
     }
     const matchingMcp = (!options.kind || options.kind === "mcp") &&
-      (!options.catalog || options.catalog === "internal") && Object.hasOwn(state.mcps || {}, options.id) &&
+      !options.catalog && Object.hasOwn(state.mcps || {}, options.id) &&
       (options.scope !== "user" || isUserMcp(state.mcps[options.id]));
     if (matchingMcp) {
       const ambiguous = !options.kind && (Object.keys(state.resources).some((key) =>
         key.split(":")[1] === options.id) || Object.hasOwn(state.bundles || {}, options.id) ||
-        options.catalog !== "internal" && hasSourceInstallation(options.id));
+        hasSourceInstallation(options.id));
       if (ambiguous) throw new CatalogError(`Resource '${options.id}' is ambiguous; specify mcp as the kind.`, "AMBIGUOUS_RESOURCE");
       const dependents = Object.entries(bundleRecords).filter(([, bundle]) =>
         bundle.resources.some((member) => member.kind === "mcp" && member.id === options.id));
@@ -151,13 +158,13 @@ async function executeCommand(
       for (const message of uninstallMcp(options.id, target, options)) output.log(message);
       return 0;
     }
-    const installedSourceResources = options.catalog === "internal" ? [] : [
+    const installedSourceResources = [
       ...readInstalledSourceSkills(target, sourceResources, { catalog: options.catalog }),
       ...readInstalledSourceResources(target, sourceResources, { catalog: options.catalog }),
     ].filter(({ resource }) =>
       resource.id === options.id && (!options.kind || resource.kind === options.kind),
     );
-    let keys = (options.catalog && options.catalog !== "internal" ? [] : Object.keys(state.resources)).filter((key) => {
+    let keys = (options.catalog ? [] : Object.keys(state.resources)).filter((key) => {
       const [kind, id] = key.split(":");
       return id === options.id && (!options.kind || kind === options.kind) &&
         (options.scope !== "user" || isUserResource(key, state.resources[key]));
@@ -175,11 +182,11 @@ async function executeCommand(
     }
     if (installedSourceResources.length) {
       if (options.cascade) {
-        throw new CatalogError("--cascade applies only to internal resources used by bundles.", "INVALID_ARGUMENT");
+        throw new CatalogError("--cascade applies only to locally managed resources used by bundles.", "INVALID_ARGUMENT");
       }
       options.onResource?.({
         catalog: installedSourceResources[0].resource.catalog || "source",
-        kind: installedSourceResources[0].resource.kind, id: options.id, status: "planned",
+        kind: installedSourceResources[0].resource.kind, id: options.id, status: "planned", source: true,
       });
       for (const message of uninstallSourceResource(
         installedSourceResources[0].resource, target, options,
@@ -235,9 +242,7 @@ async function executeCommand(
     if (resources.some((resource) => resource.kind === "bundle")) {
       validateBundleReferences(resources);
     }
-    console.log(
-      `Catalogs are valid (${resources.length} internal resources, ${sourceResources.length} source resources).`,
-    );
+    console.log(`Validated ${sourceResources.length} resources across configured user catalogs.`);
     return unavailable.length ? 1 : 0;
   }
   if (options.command === "list" || options.command === "search") {
@@ -265,7 +270,15 @@ async function executeCommand(
       options,
     );
     if (report) {
-      report.resources = result.resources;
+      const sourceIdentities = new Set(sourceResources.map((resource) =>
+        `${resource.catalog}:${resource.kind}:${resource.id}`));
+      report.resources = result.resources.map((resource) => {
+        if (resource.catalog !== "internal" || sourceIdentities.has(`${resource.catalog}:${resource.kind}:${resource.id}`)) {
+          return resource;
+        }
+        const { catalog: _catalog, ...localResource } = resource;
+        return localResource;
+      });
       report.messages = result.messages;
       return result.updateAvailable || unavailable.length ? 2 : 0;
     }
@@ -290,6 +303,9 @@ async function executeCommand(
     const rows = formatDashboardRows(result.resources, allResources);
     if (!options.nonInteractive && process.stdin.isTTY && process.stdout.isTTY &&
         typeof process.stdin.setRawMode === "function") {
+      const userCatalogState = () => loadUserSourceConfiguration().map(({
+        name, repository, mode, entries,
+      }) => ({ name, repository, mode, entries }));
       const catalogResources = allResources.filter((resource) =>
         LOCAL_KINDS.has(resource.kind));
       const completed = await browseInstalledResources(rows, process.stdin, process.stdout, result.errors, {
@@ -303,19 +319,32 @@ async function executeCommand(
           return {
             catalog: request.name,
             count: catalog.resources.length,
-            catalogs: loadUserSourceConfiguration().map(({ name, repository }) => ({ name, repository })),
+            catalogs: userCatalogState(),
             resources: catalogEntries(resources, refreshed.sourceResources)
               .filter((resource) => LOCAL_KINDS.has(resource.kind)),
           };
         },
-        userCatalogs: loadUserSourceConfiguration().map(({ name, repository }) => ({ name, repository })),
+        updateCatalog: async (originalName, request) => {
+          const catalog = updateCatalog(originalName, request.name, request.repository, {
+            mode: request.mode,
+            entries: request.entries,
+          });
+          const refreshed = loadCommandCatalogs({ command: "list" }, catalogRoot, () => {});
+          return {
+            catalog: request.name,
+            count: catalog.resources.length,
+            catalogs: userCatalogState(),
+            resources: catalogEntries(resources, refreshed.sourceResources)
+              .filter((resource) => LOCAL_KINDS.has(resource.kind)),
+          };
+        },
+        userCatalogs: userCatalogState(),
+        checkCatalogFreshness,
         removeCatalog: async (name) => {
           removeCatalog(name);
           const refreshed = loadCommandCatalogs({ command: "list" }, catalogRoot, () => {});
           return {
-            catalogs: loadUserSourceConfiguration().map(({ name: catalogName, repository }) => ({
-              name: catalogName, repository,
-            })),
+            catalogs: userCatalogState(),
             resources: catalogEntries(resources, refreshed.sourceResources)
               .filter((resource) => LOCAL_KINDS.has(resource.kind)),
           };
@@ -325,9 +354,7 @@ async function executeCommand(
           const refreshed = loadCommandCatalogs({ command: "list" }, catalogRoot, () => {});
           return {
             ...result,
-            catalogs: loadUserSourceConfiguration().map(({ name: catalogName, repository }) => ({
-              name: catalogName, repository,
-            })),
+            catalogs: userCatalogState(),
             resources: catalogEntries(resources, refreshed.sourceResources)
               .filter((resource) => LOCAL_KINDS.has(resource.kind)),
           };
@@ -355,7 +382,7 @@ async function executeCommand(
       throw new CatalogError(`Target must be an existing directory: ${options.target}`);
     }
     const state = readInstallState(fs.realpathSync(options.target));
-    const installedSourceResources = options.catalog === "internal" ? [] : [
+    const installedSourceResources = [
       ...readInstalledSourceSkills(options.target, sourceResources, { catalog: options.catalog }),
       ...readInstalledSourceResources(options.target, sourceResources, { catalog: options.catalog }),
     ];
@@ -371,7 +398,7 @@ async function executeCommand(
     if (options.scope === "user") keys = keys.filter((key) => key.startsWith("bundle:")
       ? state.bundles[key.slice(7)].scope === "user"
       : key.startsWith("mcp:") ? isUserMcp(state.mcps[key.slice(4)]) : isUserResource(key, state.resources[key]));
-    if (options.catalog && options.catalog !== "internal") keys = [];
+    if (options.catalog) keys = [];
     sourceToUpdate = options.id
       ? installedSourceResources.filter(({ resource }) =>
         resource.id === options.id && (!options.kind || options.kind === resource.kind))
@@ -425,7 +452,7 @@ async function executeCommand(
       return 0;
     }
     if (options.command === "show") {
-      if (resource.catalog !== "internal") {
+      if (resource.source_repository) {
         console.log(formatSourceResource(resource));
       } else {
         console.log(formatResource(resource));
@@ -438,9 +465,9 @@ async function executeCommand(
         output.log(formatResource(resource));
         return 0;
       }
-      if (resource.catalog !== "internal") {
+      if (resource.source_repository) {
         if (options.file) {
-          throw new CatalogError("--file is only available for local catalog resources");
+          throw new CatalogError("--file is only available for locally packaged resources");
         }
         return runSourceCommand(
           { ...options, action: "preview", id: resource.id, resource },
@@ -460,7 +487,7 @@ async function executeCommand(
     if (!["bundle", "mcp"].includes(resource.kind) && (options.inputs || options.yes)) {
       throw new CatalogError("--input and --yes require an MCP/bundle installation/update", "INVALID_ARGUMENT");
     }
-    if (resource.catalog !== "internal") {
+    if (resource.source_repository) {
       return runSourceCommand({
         ...options,
         action: "install",
@@ -519,7 +546,7 @@ async function executeCommand(
   }
   if (options.command === "update" && sourceToUpdate.length) {
     for (const { resource } of sourceToUpdate) {
-      options.onResource?.({ catalog: resource.catalog, kind: resource.kind, id: resource.id, status: "planned" });
+      options.onResource?.({ catalog: resource.catalog, kind: resource.kind, id: resource.id, status: "planned", source: true });
     }
     const messages = updateSourceResources(
       sourceToUpdate,

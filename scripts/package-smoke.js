@@ -24,9 +24,6 @@ try {
   for (const file of [
     "package.json",
     "README.md",
-    "catalogs/catalog.json",
-    "catalogs/catalogSources.json",
-    "catalogs/CATALOG.md",
     "bin/kitia.js",
     "dist/cli/main.js",
     "dist/catalog/resources/install-plan.js",
@@ -37,10 +34,8 @@ try {
     assert.ok(packed.has(file), `Missing package file: ${file}`);
   }
   assert.equal([...packed].some((file) => file.startsWith("tests/")), false);
-  assert.equal([...packed].some((file) => file.startsWith("site-build/")), false);
+  assert.equal([...packed].some((file) => file.startsWith("catalogs/")), false);
   assert.deepEqual([...packed].filter((file) => file.startsWith("bin/")), ["bin/kitia.js"]);
-
-  const catalog = JSON.parse(fs.readFileSync(path.join(root, "catalogs/catalog.json"), "utf8"));
 
   const consumer = path.join(temporary, "consumer");
   fs.mkdirSync(consumer);
@@ -52,9 +47,12 @@ try {
 
   const cli = path.join(consumer, "node_modules/.bin/kitia");
   const listed = JSON.parse(execFileSync(cli, [
-    "list", "--catalog", "internal", "--json",
-  ], { cwd: consumer, encoding: "utf8" }));
-  assert.deepEqual(catalog.resources, []);
+    "list", "--json",
+  ], {
+    cwd: consumer,
+    encoding: "utf8",
+    env: { ...process.env, KITIA_CONFIG_DIR: path.join(temporary, "config") },
+  }));
   assert.deepEqual(listed, []);
 } finally {
   if (previousBuild) fs.writeFileSync(buildFile, previousBuild);

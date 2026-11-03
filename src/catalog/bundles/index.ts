@@ -13,24 +13,28 @@ const {
 const { prepareResourceInstall } = require("../lifecycle.js");
 const bundleUtils = require("./utils.js");
 const {
-  digest, identity, conflict, tools, unionTool, bundleDigest, readMcpConfig, addConfigPlan,
-  registeredMcpTool,
+  digest, identity, conflict, tools, unionTool, bundleDigest, readMcpConfig, mcpConfigServers,
+  addConfigPlan, registeredMcpTool,
 } = bundleUtils;
-import type {
-  BundleMember, CatalogResource, CliOptions, InstallState, JsonRecord,
-  McpConfiguration, McpFileConfig, McpServer,
-} from "../../types.js";
+import type { BundleMember, CatalogResource, McpServer } from "../entries.js";
+import type { JsonObject } from "../json.js";
+import { isJsonObject } from "../json.js";
+import type { CliOptions } from "../../cli/arguments.js";
+import type { BundleInventoryRecord, InstallState, InstallationTool, InventoryScope, McpInventoryRecord } from "../inventory/files.js";
+import type { InstallPlanEntry } from "../plan.js";
+import type { BuildInfo } from "../resources/files.js";
+import type { McpFileConfig } from "./utils.js";
 
 async function configureInputs(
   mcps: CatalogResource[],
   state: InstallState,
   options: CliOptions,
   ask?: (question: string) => Promise<string>,
-): Promise<JsonRecord> {
+): Promise<Record<string, Record<string, string>>> {
   const supplied = options.inputs || {};
-  const mcpRecords: Record<string, JsonRecord> = state.mcps || {};
+  const mcpRecords: Record<string, McpInventoryRecord> = state.mcps || {};
   const known = new Set();
-  const values = Object.create(null);
+  const values: Record<string, Record<string, string>> = Object.create(null);
   const missing = [];
   for (const mcp of mcps) {
     values[mcp.id] = Object.create(null);
@@ -49,13 +53,15 @@ async function configureInputs(
         continue;
       }
       const previous = Object.hasOwn(mcpRecords, mcp.id) ? mcpRecords[mcp.id].values : {};
-      let value = supplied[key] ?? (Object.hasOwn(previous, name) ? previous[name] : undefined) ?? input.default;
-      if (!options.dryRun && ask && value === undefined) value = (await ask(`${key}${input.required ? " (required)" : " (optional)"}: `)) || undefined;
-      if (value !== undefined && !validInputValue(input, value)) {
-        throw new CatalogError(`Invalid ${input.type} input ${key}${input.type === "url" ? ": use HTTPS without credentials" : ""}`, "INVALID_ARGUMENT");
+      let value: unknown = supplied[key] ?? (Object.hasOwn(previous, name) ? previous[name] : undefined) ?? input.default;
+      if (value !== undefined) {
+        if (typeof value !== "string" || !validInputValue(input, value)) {
+          throw new CatalogError(`Invalid ${input.type} input ${key}${input.type === "url" ? ": use HTTPS without credentials" : ""}`, "INVALID_ARGUMENT");
+        }
+        values[mcp.id][name] = value;
+      } else if (input.required) {
+        missing.push(key);
       }
-      if (value === undefined && input.required) missing.push(key);
-      if (value !== undefined) values[mcp.id][name] = value;
     }
   }
   for (const key of Object.keys(supplied)) {
@@ -69,31 +75,37 @@ async function configureInputs(
   return values;
 }
 
-function nativeMcpConfig(mcp: CatalogResource, values: JsonRecord): McpServer {
-  const server = Object.values(mcp.mcp_config.mcpServers)[0] as McpServer;
-  if (server.type === "http") return { ...server };
+function nativeMcpConfig(mcp: CatalogResource, values: Record<string, string>): JsonObject {
+  const server = Object.values(mcp.mcp_config.mcpServers)[0];
+  if (server.type === "http") {
+    if (typeof server.url !== "string") throw new CatalogError(`MCP ${mcp.id} has an invalid HTTP server URL`);
+    return { type: "http", url: server.url };
+  }
+  if (typeof server.command !== "string" || !Array.isArray(server.args)) {
+    throw new CatalogError(`MCP ${mcp.id} has an invalid stdio server`);
+  }
   const env = { ...server.env };
   for (const [name, input] of Object.entries(mcp.inputs)) {
     if (input.secret) env[input.target_env] = `\${${input.target_env}${input.required ? "" : ":-"}}`;
     else if (Object.hasOwn(values, name)) env[input.target_env] = values[name];
   }
-  return { ...server, type: "stdio", args: [...server.args], env };
+  return { type: "stdio", command: server.command, args: [...server.args], env };
 }
 
 function prepareMcp(
   mcp: CatalogResource,
-  values: JsonRecord,
+  values: Record<string, string>,
   state: InstallState,
   root: string,
-  tool: string,
-  scope: string,
-  plan: Map<string, JsonRecord>,
+  tool: InstallationTool,
+  scope: InventoryScope,
+  plan: Map<string, InstallPlanEntry>,
   configurations: Map<string, McpFileConfig>,
   remove: Set<string>,
   options: CliOptions,
 ) {
-  const mcpRecords: Record<string, JsonRecord> = state.mcps || {};
-  const bundles: Record<string, JsonRecord> = state.bundles || {};
+  const mcpRecords: Record<string, McpInventoryRecord> = state.mcps || {};
+  const bundles: Record<string, BundleInventoryRecord> = state.bundles || {};
   const previous = Object.hasOwn(mcpRecords, mcp.id) ? mcpRecords[mcp.id] : undefined;
   const otherUsers = Object.entries(bundles).filter(([id, bundle]) => id !== options.id &&
     bundle.resources.some((member) => member.kind === "mcp" && member.id === mcp.id));
@@ -102,7 +114,9 @@ function prepareMcp(
   }
   const [serverName] = Object.keys(mcp.mcp_config.mcpServers);
   if (previous && previous.server !== serverName) conflict(`MCP ${mcp.id}: server name changed; uninstall its bundles before reconfiguring.`);
-  const record: JsonRecord = previous || { server: serverName, configurations: {}, files: {} };
+  const record: McpInventoryRecord = previous || {
+    server: serverName, digest: "", values: {}, configurations: {}, files: {},
+  };
   const registeredTool = previous ? registeredMcpTool(state, mcp.id) : tool;
   record.standalone ??= false;
   if (options.standaloneTool) {
@@ -117,7 +131,7 @@ function prepareMcp(
     }
   }
   const desired = nativeMcpConfig(mcp, values);
-  const recordConfigurations = record.configurations as Record<string, McpConfiguration>;
+  const recordConfigurations = record.configurations;
   const paths = new Set([...mcpConfigPaths(tool, scope), ...Object.keys(recordConfigurations)]);
   for (const relativePath of paths) {
     if (Object.entries(mcpRecords).some(([id, record]) => id !== mcp.id &&
@@ -126,13 +140,14 @@ function prepareMcp(
     }
     const config = configurations.get(relativePath) || readMcpConfig(root, relativePath);
     configurations.set(relativePath, config);
-    const servers = config.data.mcpServers || {};
+    const servers = mcpConfigServers(config.data);
     const existing = Object.hasOwn(servers, serverName) ? servers[serverName] : undefined;
-    if (existing !== undefined && (!existing || typeof existing !== "object" || Array.isArray(existing))) {
+    if (existing !== undefined && !isJsonObject(existing)) {
       throw new CatalogError(`Invalid MCP server entry ${serverName} in ${relativePath}; repair it before retrying.`);
     }
+    const existingObject = isJsonObject(existing) ? existing : {};
     const tracked = recordConfigurations[relativePath];
-    if (tracked && !tracked.managed && Array.isArray(existing?.args) && existing.args.some((argument) =>
+    if (tracked && !tracked.managed && Array.isArray(existingObject.args) && existingObject.args.some((argument) =>
       Object.keys(record.files).some((file) => argument === path.join(root, ...file.split("/"))))) {
       conflict(`User-managed MCP ${serverName} in ${relativePath} still references a tracked legacy launcher. Update that entry manually before removing the launcher.`);
     }
@@ -150,8 +165,8 @@ function prepareMcp(
     if (tracked && !tracked.managed && existing === undefined) {
       conflict(`Previously reused MCP ${serverName} is missing from ${relativePath}. Restore it or uninstall the bundle before configuring it again.`);
     }
-    config.data.mcpServers ||= {};
-    Object.defineProperty(config.data.mcpServers, serverName, { value: desired, enumerable: true, configurable: true, writable: true });
+    if (!isJsonObject(config.data.mcpServers)) config.data.mcpServers = servers;
+    Object.defineProperty(servers, serverName, { value: desired, enumerable: true, configurable: true, writable: true });
     recordConfigurations[relativePath] = { managed: true, sha256: digest(desired) };
     config.changed = true;
   }
@@ -162,7 +177,7 @@ function prepareMcp(
       if (!options.dryRun) throw new CatalogError(message, "MISSING_PREREQUISITE");
       (options.output || console).error(message);
     }
-    for (const [relativePath, expected] of Object.entries(record.files as Record<string, JsonRecord>)) {
+    for (const [relativePath, expected] of Object.entries(record.files)) {
       const actual = installedFingerprint(root, relativePath);
       if (actual && !sameFingerprint(actual, expected)) {
         conflict(`Legacy MCP launcher ${relativePath} has local changes. Back them up and restore the tracked version before migration; --force does not delete a modified launcher during migration.`);
@@ -197,23 +212,23 @@ async function installConfiguredResources(
   resources: CatalogResource[],
   root: string,
   catalogRoot: string,
-  buildInfo: JsonRecord,
+  buildInfo: BuildInfo,
   options: CliOptions = {},
 ) {
   validateBundleReferences(resources);
   const bundles = selected.filter((resource) => resource.kind === "bundle");
   const state = readInstallState(root);
   const inventoryFingerprint = installedFingerprint(root, LOCK_PATH);
-  const local = new Map<string, { resource: CatalogResource; tool: string }>((options.extraResources || []).map((resource) => [
+  const local = new Map<string, { resource: CatalogResource; tool: InstallationTool }>((options.extraResources || []).map((resource) => [
     `${resource.kind}:${resource.id}`, { resource, tool: state.resources[`${resource.kind}:${resource.id}`].tool },
   ]));
   const mcps = new Map<string, {
     mcp: CatalogResource;
-    tool: string;
+    tool: InstallationTool;
     bundleId: string | null;
-    standaloneTool?: string | null;
+    standaloneTool?: InstallationTool | null;
   }>();
-  const scope = options.scope || "project";
+  const scope: InventoryScope = options.scope || "project";
   for (const bundle of bundles) {
     const previous = Object.hasOwn(state.bundles, bundle.id) ? state.bundles[bundle.id] : undefined;
     if (previous && previous.scope !== scope) conflict(`Bundle ${bundle.id} is already installed with ${previous.scope} scope in this target.`);
@@ -264,7 +279,7 @@ async function installConfiguredResources(
     }
     const values = await configureInputs([...mcps.values()].map(({ mcp }) => mcp), state, options,
       terminal ? (question) => terminal.question(question) : null);
-    const plan = new Map();
+    const plan = new Map<string, InstallPlanEntry>();
     const configurations = new Map<string, McpFileConfig>();
     const remove = new Set<string>();
     for (const { resource, tool } of local.values()) {

@@ -6,7 +6,6 @@ Kitia is a CLI for connecting AI-resource catalogs to Claude Code and GitHub
 Copilot. Kitia stores no skill, agent, or instruction bodies: resources stay in
 their source repositories, while Kitia keeps user-managed catalog metadata.
 
-**[Browse Kitia's catalog index](catalogs/CATALOG.md)** ·
 **[CLI contract](docs/cli-contract.md)**
 
 ## Browse
@@ -22,9 +21,6 @@ npx --yes github:grasdouble/Kitia show skill create-readme --catalog ai-kit
 npx --yes github:grasdouble/Kitia preview skill create-readme --catalog ai-kit
 ```
 
-
-Use `--json` for machine-readable discovery. User catalogs are independent of
-Kitia's published site index; their metadata is read from the local registry.
 
 ## Install and maintain resources
 
@@ -43,14 +39,14 @@ locally modified content, and supports `update`, `uninstall`, `dashboard`, and
 read-only `doctor` diagnostics. Use `--dry-run --json` to inspect a lifecycle
 plan without changing files.
 
-
 ## Manage external catalogs
 
 Use `dashboard` and press `N` to add a catalog. Choose **Basic** to discover
 skills recursively under `skills/**/SKILL.md`, or **Custom** to register only
 the paths you choose: skills, agents, and instructions can live in any
 repository-relative location. Add multiple paths in one catalog. Instructions
-must declare `apply_to` in their frontmatter.
+without scope frontmatter apply globally; `apply_to`, `applyTo`, or `paths` can
+narrow their scope.
 
 The CLI also supports `catalog add <name> <https-github-url>` for Basic setup.
 Catalog definitions and metadata-only indexes live under `~/.config/kitia/`
@@ -62,15 +58,11 @@ repositories. Multiple catalogs can be managed independently with
 
 ```sh
 npm ci
-npm run catalog:build
 npm run validate
 npm test
 npm run test:package
-npm run site:build
 ```
 
-Kitia does not maintain AI resource bodies. The checked-in catalog manifest is
-empty by design; connect external repositories from the dashboard or with
-`catalog add`.
+Kitia does not maintain AI resource bodies. Connect external repositories from the dashboard or with `catalog add`; catalog metadata is stored in your local user registry.
 See [contribution guidance](CONTRIBUTING.md), the [CLI contract](docs/cli-contract.md),
 and [catalog setup](docs/bundles.md).

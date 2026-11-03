@@ -2,12 +2,48 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { CatalogResource, PendingDashboardAction, ScanError } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+import type { ScanError } from "../catalog/lifecycle.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
+
+export interface PendingDashboardAction {
+  action: "install" | "update" | "uninstall" | "remove-unmanaged";
+  resource: CatalogResource;
+  scope?: string;
+  tool?: string;
+}
 
 const h = React.createElement;
 const MODAL_BACKGROUND = "#111827";
 const MODAL_FOREGROUND = "#f9fafb";
+
+function choiceLabel(choice, selected) {
+  return selected ? `‹ ${choice.toUpperCase()} ›` : `[ ${choice.toUpperCase()} ]`;
+}
+
+function choiceGroup(label, choices, selectedIndex, focused = true) {
+  const options = choices.map((choice) => typeof choice === "string" ? { label: choice } : choice);
+  const prefix = label ? `${label.padEnd(8)} ` : "";
+  const text = `${prefix}${options.map((choice, index) =>
+    choiceLabel(choice.label, index === selectedIndex)).join("  ")}`;
+  return {
+    type: "choice-group",
+    text,
+    label: prefix,
+    options,
+    selectedIndex,
+    focused,
+  };
+}
+
+function selectableOption(label, selected) {
+  return {
+    type: "selectable-option",
+    text: `${selected ? "› " : "  "}${label}`,
+    label,
+    selected,
+  };
+}
 
 function modalFrame(title, content, columns, accent, maxWidth = 64) {
   const width = Math.max(20, Math.min(maxWidth, columns - 4));
@@ -16,8 +52,16 @@ function modalFrame(title, content, columns, accent, maxWidth = 64) {
   const top = `┌─${label}${"─".repeat(Math.max(0, width - label.length - 3))}┐`;
   const body = content.flatMap((entry) => {
     const row = typeof entry === "string" ? { text: entry } : entry;
-    return wrapText(row.text, innerWidth).map((line) => ({
+    const wrapped = wrapText(row.text, innerWidth);
+    return wrapped.map((line, index) => ({
       text: `│ ${fitColumn(line, innerWidth)} │`,
+      bodyText: line,
+      component: wrapped.length === 1 ? row.type : undefined,
+      label: row.label,
+      options: row.options,
+      selectedIndex: row.selectedIndex,
+      focused: row.focused,
+      selected: row.selected,
       color: row.color,
       bold: row.bold,
       dimColor: row.dimColor,
@@ -30,14 +74,6 @@ function modalFrame(title, content, columns, accent, maxWidth = 64) {
       ...body,
       { text: `└${"─".repeat(width - 2)}┘`, color: accent, bold: true },
     ],
-  };
-}
-
-function renderChoiceLine(label, choices, selected, focused) {
-  return {
-    text: `${label.padEnd(8)} ${choices.map((choice) =>
-      `${choice === selected ? "> " : "  "}[ ${choice.toUpperCase()} ]`).join("  ")}`,
-    color: focused ? "cyan" : "#d1d5db",
   };
 }
 
@@ -58,7 +94,8 @@ export function optionsModal({
   errors: ScanError[];
   columns: number;
 }) {
-  const source = resource.catalog === "internal" ? "INTERNAL" : resource.catalog.toUpperCase();
+  const source = resource.catalog === "internal" && !resource.source_repository
+    ? "-" : (resource.catalog || "-").toUpperCase();
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
   const contentWidth = Math.max(1, modalWidth - 8);
   const scopeChoices = resource.kind === "instruction" ? ["project"] : ["project", "user"];
@@ -70,7 +107,7 @@ export function optionsModal({
 
   return modalFrame("INSTALL OPTIONS", [
     `${source} / ${resource.kind}:${resource.id}`,
-    ...wrapText(resource.description || "No description available.", contentWidth, 2),
+    ...wrapText(resource.description || "No description available.", contentWidth, 3),
     { text: `License: ${resource.license_status || "not declared"}`, dimColor: true },
     ...(["bundle", "mcp"].includes(resource.kind)
       ? [{ text: "Clients: Copilot CLI / Claude Code CLI only.", dimColor: true }]
@@ -85,8 +122,8 @@ export function optionsModal({
       : []),
     "",
     { text: "DESTINATION", bold: true },
-    renderChoiceLine("SCOPE", scopeChoices, scope, focus === 0),
-    renderChoiceLine("CLIENT", toolChoices, tool, focus === 1),
+    choiceGroup("SCOPE", scopeChoices, scopeChoices.indexOf(scope), focus === 0),
+    choiceGroup("CLIENT", toolChoices, toolChoices.indexOf(tool), focus === 1),
     scopeError || alreadyInstalled
       ? "↑↓ FIELD · ←→ CHOOSE · ESC BACK"
       : "↑↓ FIELD · ←→ CHOOSE · ENTER REVIEW · ESC BACK",
@@ -136,12 +173,12 @@ export function confirmationModal({
           : confirmation.action === "uninstall" && confirmation.resource.kind === "skill"
             ? ["Kitia removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
             : ["The CLI safety checks apply; locally modified tracked files are protected."]),
-      {
-        text: `${selectedButton === 0 ? "> " : "  "}[ Cancel ]   ${selectedButton === 1 ? "> " : "  "}[ ${actionLabel} ]`,
-        color: "cyan",
-        bold: true,
-      },
-      "←/→ CHOOSE · ENTER SELECT · Y/N SHORTCUTS",
+      "",
+      choiceGroup("", [
+        { label: "CANCEL" },
+        { label: actionLabel, color: confirmation.action !== "install" ? "redBright" : "cyan" },
+      ], selectedButton),
+      "←/→ CHOOSE · ENTER CONFIRM · Y/N SHORTCUTS",
     ],
     columns,
     "yellow",
@@ -192,24 +229,26 @@ export function inventoryMigrationModal({ scopes, columns }: { scopes: string[];
 }
 export function addCatalogModal({
   step,
+  intent = "add",
+  entryIndex = 0,
   name,
   repository,
   mode,
   kind,
-  id,
   path,
   entries,
   message,
   columns,
 }: {
   step: string;
+  intent?: "add" | "edit";
+  entryIndex?: number;
   name: string;
   repository: string;
   mode: "basic" | "custom";
   kind: "skill" | "agent" | "instruction";
-  id: string;
   path: string;
-  entries: Array<{ kind: string; id: string; path: string }>;
+  entries: Array<{ kind: string; id?: string; path: string }>;
   message: string;
   columns: number;
 }) {
@@ -224,7 +263,7 @@ export function addCatalogModal({
       ? [field("HTTPS GitHub URL", repository), ...(message ? [{ text: message, color: "yellow" }] : []), "", "ENTER CONTINUES · ESC CANCEL"]
       : step === "mode"
         ? [
-          `Choose catalog setup:  ${mode === "basic" ? "> BASIC" : "  BASIC"}    ${mode === "custom" ? "> CUSTOM" : "  CUSTOM"}`,
+          choiceGroup("Choose catalog setup:", ["BASIC", "CUSTOM"], mode === "basic" ? 0 : 1),
           "Basic detects skills, agents, and instructions in common repository paths.",
           "Custom lets you specify other paths explicitly.",
           "",
@@ -239,27 +278,30 @@ export function addCatalogModal({
           ? [
             field("Repository-relative source path", path),
             kind === "skill"
-              ? "Use the skill directory containing SKILL.md; ID is its directory name."
-              : "Use the Markdown file path; ID is derived from its filename.",
+              ? "Enter a skill folder with SKILL.md or a parent folder containing multiple skills."
+              : "Enter a Markdown file or a folder containing multiple artifacts of this kind.",
             ...(message ? [{ text: message, color: "yellow" }] : []),
             "ENTER ADDS ENTRY · ESC CANCEL",
           ]
               : step === "entries"
                 ? [
                   `Entries configured: ${entries.length}`,
-                  ...entries.map((entry) => `• ${entry.kind}:${entry.id} ← ${entry.path}`),
+                  ...entries.map((entry, index) =>
+                    selectableOption(`${entry.kind} ← ${entry.path}`, index === entryIndex)),
                   ...(message ? [{ text: message, color: "yellow" }] : []),
-                  "", "[ A ] ADD ANOTHER ENTRY    [ ENTER ] FINISH    [ ESC ] CANCEL",
+                  "", "[ A ] ADD ENTRY · [ DELETE ] REMOVE SELECTED · [ ENTER ] SAVE · [ ESC ] CANCEL",
                 ]
                 : [
                   message,
                   "", "ENTER / ESC CLOSE",
                 ];
   return modalFrame(
-    step === "result" ? "ADD CATALOG RESULT" : "ADD CATALOG",
+    step === "result"
+      ? `${intent === "edit" ? "EDIT" : "ADD"} CATALOG RESULT`
+      : `${intent === "edit" ? "EDIT" : "ADD"} CATALOG`,
     content,
     columns,
-    step === "result" && message.startsWith("Catalog added") ? "green" : "cyan",
+    step === "result" && /Catalog (?:added|updated):/.test(message) ? "green" : "cyan",
     80,
   );
 }
@@ -278,7 +320,7 @@ export function removeCatalogModal({
     ? [
       "Choose a user catalog to remove:",
       ...catalogs.map(({ name, repository }, index) =>
-        `${index === state.index ? "> " : "  "}${name} (${repository})`),
+        selectableOption(`${name} (${repository})`, index === state.index)),
       "",
       "↑↓ SELECT · ENTER CONTINUE · ESC CANCEL",
     ]
@@ -315,7 +357,7 @@ export function refreshCatalogModal({
   const content = state.step === "scope"
     ? [
       "Choose catalog refresh scope:",
-      `  ${state.scope === "one" ? "> ONE CATALOG" : "  ONE CATALOG"}    ${state.scope === "all" ? "> ALL CATALOGS" : "  ALL CATALOGS"}`,
+      choiceGroup("", ["ONE CATALOG", "ALL CATALOGS"], state.scope === "one" ? 0 : 1),
       "Refresh updates the local index; installed artifacts stay unchanged.",
       "",
       "← → CHOOSE · ENTER CONTINUE · ESC CANCEL",
@@ -324,7 +366,7 @@ export function refreshCatalogModal({
       ? [
         "Choose a user catalog to refresh:",
         ...catalogs.map(({ name, repository }, index) =>
-          `${index === state.index ? "> " : "  "}${name} (${repository})`),
+          selectableOption(`${name} (${repository})`, index === state.index)),
         "",
         "↑↓ SELECT · ENTER REFRESH · ESC BACK",
       ]
@@ -351,6 +393,69 @@ export function refreshCatalogModal({
   );
 }
 
+function fixedModalText(text, props) {
+  return h(Box, { flexShrink: 0 }, h(Text, props, text));
+}
+
+function ChoiceGroup({ line }) {
+  const props = { backgroundColor: MODAL_BACKGROUND };
+  return h(Box, { width: line.text.length, flexDirection: "row" },
+    fixedModalText("│ ", props),
+    fixedModalText(line.label, props),
+    ...line.options.map((option, index) => fixedModalText(
+      `${index ? "  " : ""}${choiceLabel(option.label, index === line.selectedIndex)}`,
+      {
+        backgroundColor: MODAL_BACKGROUND,
+        color: index === line.selectedIndex
+          ? option.color || line.color || "cyan"
+          : MODAL_FOREGROUND,
+        bold: index === line.selectedIndex || line.focused,
+        dimColor: index !== line.selectedIndex && !line.focused,
+      },
+    )),
+    fixedModalText(
+      " ".repeat(Math.max(0, line.text.length - 4 - line.bodyText.length)),
+      { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
+    ),
+    fixedModalText("│", props));
+}
+
+function SelectableOption({ line }) {
+  return h(Box, { width: line.text.length, flexDirection: "row" },
+    fixedModalText("│ ", { backgroundColor: MODAL_BACKGROUND }),
+    fixedModalText(line.selected ? "› " : "  ", {
+      backgroundColor: MODAL_BACKGROUND,
+      color: line.selected ? "cyan" : MODAL_FOREGROUND,
+      bold: line.selected,
+    }),
+    fixedModalText(fitColumn(line.label, line.bodyText.length - 2), {
+      backgroundColor: MODAL_BACKGROUND,
+      color: line.selected ? "cyan" : MODAL_FOREGROUND,
+      bold: line.selected,
+    }),
+    fixedModalText(
+      " ".repeat(Math.max(0, line.text.length - 4 - line.bodyText.length)),
+      { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
+    ),
+    fixedModalText("│", { backgroundColor: MODAL_BACKGROUND }));
+}
+
+function ModalLine({ line }) {
+  const commonProps = {
+    color: line.color || MODAL_FOREGROUND,
+    backgroundColor: MODAL_BACKGROUND,
+    bold: line.bold,
+    dimColor: line.dimColor,
+  };
+  if (line.component === "choice-group") {
+    return h(ChoiceGroup, { line });
+  }
+  if (line.component === "selectable-option") {
+    return h(SelectableOption, { line });
+  }
+  return h(Text, commonProps, line.text);
+}
+
 export function ModalOverlay({ modal, columns, rows }: {
   modal: ReturnType<typeof modalFrame>;
   columns: number;
@@ -364,11 +469,8 @@ export function ModalOverlay({ modal, columns, rows }: {
     left,
     width: modal.width,
     flexDirection: "column",
-  }, ...modal.lines.map((line, index) => h(Text, {
+  }, ...modal.lines.map((line, index) => h(ModalLine, {
     key: `modal-line-${index}`,
-    color: line.color || MODAL_FOREGROUND,
-    backgroundColor: MODAL_BACKGROUND,
-    bold: line.bold,
-    dimColor: line.dimColor,
-  }, line.text)));
+    line,
+  })));
 }

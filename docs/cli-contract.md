@@ -38,7 +38,7 @@ generic commands with `--catalog <source-name>`.
 Omitting it preserves all project defaults. User scope supports skills, agents,
 MCPs and bundles without instructions,
 resolves the target with Node.js `os.homedir()`, and rejects `--target`.
-Internal and source user skills use `.agents/skills` (Copilot) and
+Locally managed and source user skills use `.agents/skills` (Copilot) and
 `.claude/skills` (Claude), relative to that home. Source delegation specifies
 `--dir` explicitly so upstream defaults cannot change the managed location.
 User agents use `.copilot/agents/<id>.agent.md` for Copilot CLI and
@@ -56,15 +56,35 @@ other scope and reports the failing scope explicitly instead of rewriting it.
 Dashboard actions require confirmation and use the normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
 New installations can choose project/user scope and Copilot/Claude/both
-clients; instructions remain project-scoped. Press `F` to enter filter mode;
-uppercase `A`/`U` install and update, and `Delete` uninstalls the selection.
+clients; instructions remain project-scoped. Press `F` to enter filter mode and
+`D` to toggle the selected resource's details panel in inventory and catalog
+browsing or catalog management.
+From inventory, uppercase `A`/`U` install or update resources, and `Delete`
+uninstalls the selection. Press `M` for catalog management; there, `A` adds a
+catalog, `Delete` removes the selected catalog, `E` edits its name, repository,
+setup mode and custom paths, and `R` refreshes catalogs.
+The management screen compares each local index's commit with its repository's
+default-branch HEAD; unreachable repositories show `UNKNOWN`. Refresh updates
+metadata indexes only; use `U` in inventory to update installed resources.
 
-For automation, specify the kind and catalog where available:
-`install skill <id> --catalog internal`. The shorthand resolution rule is
-stable, but the uniqueness of an ID is not: adding catalog content can make an
-unqualified ID ambiguous. Unknown kinds are never reinterpreted as another kind.
+The edit dialog is prefilled from the selected catalog. In custom mode, use
+`↑`/`↓` to select a path, `Delete` to remove it, `A` to add a file or directory,
+then `Enter` to save and rebuild its index. Editing does not change installed
+resources; use `U` in inventory to update an installed resource.
 
-Uninstalling an internal resource required by one or more installed bundles
+Custom user catalogs accept repository-relative files or directories. A skill
+mapping can point to one skill directory containing `SKILL.md` or to a parent
+directory containing multiple nested skills. Agent and instruction mappings can
+point to a Markdown file or a directory of Markdown artifacts. Resource IDs are
+derived from skill directory names or Markdown filenames.
+
+
+For automation, specify the kind and source catalog when selecting a user-managed
+catalog resource: `install skill <id> --catalog <source-name>`. Adding catalog
+content can make an unqualified ID ambiguous. Unknown kinds are never reinterpreted
+as another kind.
+
+Uninstalling a locally managed resource required by one or more installed bundles
 offers a cascade in an interactive terminal and lists the bundles and additional
 dependencies before asking for confirmation. Non-interactive removal requires
 `uninstall <kind> <id> --cascade`; without it, the CLI refuses and names the
@@ -104,10 +124,10 @@ them. Their detected paths appear in the description.
 dashboard. Both paths clone the repository temporarily, pin the index to its
 current commit, then store only metadata and user path mappings under
 `~/.config/kitia/` (or `$KITIA_CONFIG_DIR`). Artifact bodies remain upstream.
-Each source is independent; `catalog list` displays bundled and user sources,
-and `catalog remove <name>` removes only a user source definition/index. It
-does not remove already-installed artifacts; tracked installations can still
-be removed with `uninstall <kind> <id> --catalog <name>`.
+Each source is independent; `catalog list` displays user-managed sources, and
+`catalog remove <name>` removes only a user source definition/index. It does
+not remove already-installed artifacts; tracked installations can still be
+removed with `uninstall <kind> <id> --catalog <name>`.
 
 Use `G` in the dashboard to choose a single catalog or all user catalogs to
 refresh. `kitia catalog refresh <name>` refreshes one source, and
@@ -116,86 +136,11 @@ current upstream commit and replaces that source's metadata index; configuration
 and already-installed artifacts remain unchanged. Bulk refresh continues after
 individual failures and exits nonzero if any source failed.
 
-Discovery reads user indexes locally and needs no Kitia Actions artifact. Skills
-install through `gh skill` at the refreshed pin; agents and instructions are
-fetched from that pinned commit and installed through Kitia's normal managed-file
-inventory.
+Discovery reads user indexes locally. Skills install through `gh skill` at the
+refreshed pin; agents and instructions are fetched from that pinned commit and
+installed through Kitia's normal managed-file inventory.
+Offline preview and source installation/update execution are refused; registry indexes remain local and require no network fetch.
 
-Repository-configured catalogs continue to use the published Actions index
-described below. User-registered catalogs are independent of that workflow.
-## Dynamic source catalogs
-
-Skill sources are configured in `catalogs/catalogSources.json`, with a unique
-catalog name and GitHub repository URL for each repository. Names may use any
-format; uniqueness is checked case-insensitively, and the entered spelling is
-preserved. Each configured repository must provide a root `skills/` directory.
-Skills may be nested below arbitrarily many category folders; the source index stores each relative path.
-The site build generates metadata-only indexes under `data/source-catalogs/<name>.json` and
-publishes them with the manifest in the private `source-catalogs` Actions artifact.
-Source skill bodies are neither committed here nor bundled with the CLI.
-
-When source metadata is needed, the CLI reads a one-hour cache or retrieves the
-artifact through authenticated `gh`. It considers only completed successful
-`push`, `schedule` or `workflow_dispatch` runs of
-`.github/workflows/pages.yml` on `main` in `grasdouble/Kitia`. It
-searches at most five successful runs, skipping missing or expired artifacts.
-Downloads and API requests have timeouts and size limits. PR/fork,
-alternate-workflow, unsuccessful and running builds are not trusted.
-
-Indexes contain only metadata; discovery does not clone upstream repositories
-or download skill source. Preview/install delegate to `gh skill` at the exact
-selected upstream SHA. The same snapshot is reused throughout a command,
-including dashboard actions.
-
-Reading the private artifact requires read access to this repository's Actions
-artifacts. Fine-grained tokens require Actions read permission; classic PATs
-and OAuth tokens require the `repo` scope, plus any organization SSO/application
-approval. No workflow write, administration or release permission is needed.
-Access to the configured upstream repository is additionally required for
-preview/install.
-
-| Selection | Behavior |
-|---|---|
-| Default | Reuse a cache younger than one hour; otherwise fetch |
-| `--offline` | Read an existing cache without network access or rewriting it; fail explicitly if absent |
-| `--refresh-catalog` | Fetch even with a fresh cache; fail rather than fall back on a refresh error |
-| `KITIA_SOURCE_CATALOGS` environment variable | Read a local directory containing `catalogSources.json` and the configured `<name>.json` indexes, without network/cache access; the previous `catalogs/<name>.json` layout remains supported |
-| `--catalog internal` | Do not load source indexes or require GitHub CLI |
-
-`--offline` and `--refresh-catalog` cannot be combined and are not doctor options.
-Offline source preview/install/update execution is refused; installation/update
-dry runs and inventory-based uninstall remain available. Default dry runs may
-fetch metadata temporarily, but never create or modify a persistent cache.
-`validate --catalog internal|<source-name>` is additive; unscoped validation
-continues to validate internal resources and every configured source.
-
-On retrieval failure, a valid older cache may be used with a
-`SOURCE_CATALOG_STALE` warning containing its fetch time and upstream SHAs.
-Discovery then exits with `1`; checks return attention (`1` human-readable,
-`2` JSON), and other operations display the warning before using the snapshot.
-Without a cache, discovery remains partial with a warning/nonzero status;
-operations requiring an unavailable source fail. Invalid/incompatible
-downloaded formats or unexpected upstream repositories are errors, not reasons
-to silently fall back to an older format. A failed cache write emits
-`SOURCE_CATALOG_CACHE_WRITE_FAILED`; the verified downloaded indexes can still
-be used.
-
-The cache is stored at:
-
-| Platform | File |
-|---|---|
-| Linux | `$XDG_CACHE_HOME/kitia/source-catalogs.json`, or `~/.cache/kitia/source-catalogs.json` |
-| macOS | `~/Library/Caches/kitia/source-catalogs.json` |
-| Windows | `%LOCALAPPDATA%\\kitia\\source-catalogs.json`, or the equivalent below the user profile |
-
-The version-1 cache envelope records `fetched_at`, `run_id`, `artifact_id` and
-the configured source catalogs. It is replaced atomically with user-only
-permissions where supported. Corrupt/unsupported caches are reported and not
-silently deleted or rewritten; explicitly inspect and remove only the named
-cache file to recover. The cache is separate from installation inventories
-and locks. Artifacts expire according to repository retention settings (90
-days for the publication workflow), so a long pause in builds can require a
-rebuild.
 
 ## JSON formats
 
@@ -211,8 +156,8 @@ their schema version in `schema_version`.
 
 ### MCP and bundle setup
 
-`bundle` and `mcp` are internal resource kinds for discovery, show/preview and
-the generic install/update/uninstall commands. Bundle recipes reference internal
+`bundle` and `mcp` are local resource kinds for discovery, show/preview and the
+generic install/update/uninstall commands. Bundle recipes reference local
 skills/agents/instructions/MCPs. MCPs can be installed independently, for example
 `install mcp <mcp-id> --scope user --tool both`.
 MCP and bundle targets are exclusively Copilot CLI (`--tool copilot`) and Claude Code
@@ -252,12 +197,13 @@ still references it. MCP setup adds requested runtimes to existing registrations
 without silently pruning the other client. Narrowing that set requires explicit
 uninstall/reinstall after dependent bundles are removed.
 
-MCP resource IDs are unchanged by relocation from external to internal metadata.
-Source bundle recipes must reference internal resources.
+MCP resource IDs are stable across metadata updates. Bundle recipes reference
+resources available to the local resource machinery.
 
-Reports and discovery retain their version-1 wire shapes. Configured-resource previews add
-resource identities for MCPs, bundles and internal dependencies;
-shared client configuration actions may have a null resource identity.
+Reports and discovery keep their version-1 envelopes and arrays. Source-backed
+resource identities include their configured catalog; local resource identities
+omit a catalog. Configured-resource previews add MCP, bundle, and local dependency
+identities; shared client configuration actions may have a null resource identity.
 Additional error codes include `MISSING_CONFIGURATION` and `MISSING_PREREQUISITE`.
 
 `list --json` and `search --json` emit a single JSON array on stdout, including
@@ -265,7 +211,7 @@ an empty array when there are no results. Aggregate discovery entries include
 `catalog`; use `--catalog <source-name>` to discover and search entries in a
 configured source. The default `community` source retains its upstream-reference
 fields. Machine-specific
-`source` paths and the internal `applyTo` field are not emitted.
+`source` paths are not emitted in machine-readable output.
 
 `check --json`, `doctor --json`, and `install/update/uninstall --dry-run --json`
 emit one object with these required fields:
@@ -276,7 +222,7 @@ emit one object with these required fields:
 | `command` | Requested operation; a delegated source plan uses `install` or `uninstall` |
 | `dry_run` | Whether this is an operation preview |
 | `status` | `ok`, `attention`, or `error` |
-| `resources` | Identities (`catalog`, `kind`, `id`), with `current`, `attention`, or `planned` status |
+| `resources` | Identities (`kind`, `id`, and `catalog` when source-backed), with `current`, `attention`, or `planned` status |
 | `actions` | Planned action, target-relative `path` (or null), and resource identity (or null for shared inventory work) |
 | `warnings` | Diagnostics containing a `code` and human-readable `message` |
 | `messages` | Human-readable context; never parse this to determine behavior |
@@ -350,11 +296,7 @@ Within report version 1:
   command or option is additive.
 
 The schema version covers the wire format; the package version covers the
-implementation. Pinning a full Git commit remains available when callers need the implementation
-and internal catalog content to be reproducible. Also provide
-`KITIA_SOURCE_CATALOGS` with a retained source-data directory when source metadata
-must be frozen.
-
+implementation. Pin a full Git commit when callers need a reproducible CLI version.
 ## Catalog and inventory compatibility
 
 Inventory schema and migration details are documented in the

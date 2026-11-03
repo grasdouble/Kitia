@@ -2,13 +2,25 @@
 
 import React, { type ReactNode } from "react";
 import { Box, Text } from "ink";
-import type { CatalogResource, ScanError } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+import type { ScanError } from "../catalog/lifecycle.js";
 import {
-  catalogTableColumns, colorForStatus, dashboardStatus, filterCatalogResources,
-  filterInventory, fitColumn, fitText, inventoryPanelLayout, issueLine, tableColumns, tableLine, wrapText,
+  catalogLabel, catalogTableColumns, colorForStatus, dashboardStatus, filterCatalogResources,
+  filterInventory, fitColumn, fitText, detailPanelLayout, issueLine, tableColumns, tableLine, wrapText,
 } from "./helpers.mjs";
 
 const h = React.createElement;
+
+const shortcutKey = /^(?:Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])$/;
+
+function shortcutHint(value: string, width: number) {
+  const visible = fitText(value, width);
+  const parts = visible.split(/(Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])/g);
+  return h(Text, { dimColor: true }, ...parts.map((part, index) =>
+    shortcutKey.test(part)
+      ? h(Text, { key: `shortcut-${index}`, bold: true, color: "cyan" }, part)
+      : part));
+}
 
 function Panel({
   title,
@@ -36,6 +48,41 @@ function Panel({
   }, h(Text, { bold: true, color }, title), children);
 }
 
+function DetailsPanel({
+  title,
+  children,
+  width,
+  marginTop = 1,
+  marginLeft = 0,
+}: {
+  title: string;
+  children?: ReactNode;
+  width?: number;
+  marginTop?: number;
+  marginLeft?: number;
+}) {
+  return h(Panel, { title, children, color: "blue", width, marginTop, marginLeft });
+}
+
+function detailValue(key: string, value: unknown, width: number, maxLines = 1, color = "gray") {
+  return wrapText(value, width, maxLines).map((line, index) =>
+    h(Text, { key: `${key}-value-${index}`, color }, fitText(line, width)));
+}
+
+function detailField(
+  key: string,
+  label: string,
+  value: unknown,
+  width: number,
+  maxLines = 1,
+  color = "gray",
+) {
+  return [
+    h(Text, { key: `${key}-label`, color: "white", bold: true }, fitText(label, width)),
+    ...detailValue(key, value, width, maxLines, color),
+  ];
+}
+
 export function ScreenFrame({ columns, rows, children }: {
   columns: number;
   rows: number;
@@ -60,10 +107,8 @@ export function InventoryScreen({
   selectedIndex,
   actionMessage,
   catalogAvailable,
-  canAddCatalog,
-  canRemoveCatalog,
-  canRefreshCatalog,
   canExecute,
+  showDetails,
   columns,
   rows,
 }: {
@@ -76,10 +121,8 @@ export function InventoryScreen({
   selectedIndex: number;
   actionMessage: string;
   catalogAvailable: boolean;
-  canAddCatalog: boolean;
-  canRemoveCatalog: boolean;
-  canRefreshCatalog: boolean;
   canExecute: boolean;
+  showDetails: boolean;
   columns: number;
   rows: number;
 }) {
@@ -94,70 +137,37 @@ export function InventoryScreen({
   const kinds = Object.fromEntries(["skill", "agent", "instruction"].map((kind) => [
     kind, resources.filter((resource) => resource.kind === kind).length,
   ]));
-  const scopeCount = (scope: string) => resources.filter((resource) => resource.scope === scope).length;
-  const scopeError = (scope: string) => errors.find((error) => error.scope === scope);
-  const scopeRows: Array<{ text: string; color?: string; bold?: boolean }> = ["project", "user"].map((scope) => {
-    const error = scopeError(scope);
-    return {
-      text: error
-        ? `${scope.toUpperCase().padEnd(8)} UNAVAILABLE · ${error.code}`
-        : `${scope.toUpperCase().padEnd(8)} ${scopeCount(scope)} resource(s)`,
-      color: error ? "yellow" : scope === "user" ? "cyan" : "blue",
-    };
-  });
-  scopeRows.push({ text: `TOTAL    ${managedResources.length} managed · ${unmanaged} unmanaged`, bold: true });
-  scopeRows.push({
-    text: errors.length ? `${errors.length} scope scan warning(s)` : "Both inventories scanned",
-    color: errors.length ? "yellow" : "gray",
-  });
-  const healthBarWidth = 16;
-  const healthyBlocks = managedResources.length
-    ? Math.round((current / managedResources.length) * healthBarWidth)
-    : 0;
-  const healthRows: Array<{ text: string; color?: string; bold?: boolean }> = [
-    { text: `MANAGED ${managedResources.length}     UNMANAGED ${unmanaged}`, color: unmanaged ? "gray" : "green" },
-    {
-      text: `CURRENT ${current}     UPDATES ${updates}     ATTENTION ${attention}`,
-      color: attention ? "yellow" : updates ? "cyan" : "gray",
-    },
-    {
-      text: managedResources.length
-        ? `HEALTH [${"█".repeat(healthyBlocks)}${"░".repeat(healthBarWidth - healthyBlocks)}]`
-        : "HEALTH [no managed resources]",
-      color: attention ? "yellow" : updates ? "cyan" : "green",
-    },
-    { text: `SKILLS ${kinds.skill}  AGENTS ${kinds.agent}  INSTRUCTIONS ${kinds.instruction}` },
-  ];
+  const catalogCount = new Set(resources.filter((resource) => resource.managed !== false && resource.source_repository)
+    .map((resource) => resource.catalog)).size;
+  const needsReview = updates + attention;
   const sideBySide = columns >= 76;
   const contentWidth = Math.max(1, columns - 6);
-  const panelWidth = Math.floor((columns - 3) / 2);
-  const inventoryLayout = inventoryPanelLayout(columns);
-  const inventorySideBySide = inventoryLayout.sideBySide;
-  const inventoryListWidth = inventoryLayout.listWidth || columns;
-  const inventoryDetailsWidth = inventoryLayout.detailsWidth || columns;
+  const inventoryLayout = detailPanelLayout(columns);
+  const inventorySideBySide = showDetails && inventoryLayout.sideBySide;
+  const inventoryListWidth = inventorySideBySide ? inventoryLayout.listWidth! : columns;
+  const inventoryDetailsWidth = inventorySideBySide ? inventoryLayout.detailsWidth! : columns;
   const listContentWidth = Math.max(1, inventorySideBySide ? inventoryListWidth - 4 : contentWidth);
   const detailsContentWidth = Math.max(1, inventorySideBySide ? inventoryDetailsWidth - 4 : contentWidth);
+  const cardGap = 1;
+  const cardWidth = Math.floor((columns - 2 - cardGap * 2) / 3);
+  const summaryCards = [
+    { title: "RESOURCES", value: resources.length, note: `${catalogCount} catalog(s) connected`, color: "cyan" },
+    { title: "MANAGED", value: managedResources.length, note: `${current} current · ${unmanaged} unmanaged`, color: "green" },
+    { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} attention`, color: needsReview ? "yellow" : "green" },
+  ];
   const panels = h(Box, {
     flexDirection: sideBySide ? "row" : "column",
+    alignItems: "stretch",
+  }, ...summaryCards.map((card, index) => h(Panel, {
+    key: card.title,
+    title: card.title,
+    color: card.color,
+    width: sideBySide ? cardWidth : undefined,
+    marginTop: sideBySide ? 0 : index ? 1 : 0,
+    marginLeft: sideBySide && index ? cardGap : 0,
   },
-  h(Panel, {
-    title: "SCOPES",
-    width: sideBySide ? panelWidth : undefined,
-    marginTop: 0,
-  }, ...scopeRows.map((row, index) => h(Text, {
-    key: `scope-${index}`,
-    color: row.color,
-    bold: row.bold,
-  }, fitText(row.text, sideBySide ? panelWidth - 4 : contentWidth)))),
-  h(Panel, {
-    title: "RESOURCE HEALTH",
-    width: sideBySide ? columns - 3 - panelWidth : undefined,
-    marginTop: sideBySide ? 0 : undefined,
-    marginLeft: sideBySide ? 1 : 0,
-  }, ...healthRows.map((row, index) => h(Text, {
-    key: `health-${index}`,
-    color: row.color,
-  }, fitText(row.text, sideBySide ? columns - panelWidth - 7 : contentWidth)))));
+  h(Text, { bold: true, color: card.color }, String(card.value).padStart(2, "0")),
+  h(Text, { dimColor: true }, fitText(card.note, sideBySide ? cardWidth - 4 : contentWidth)))));
   const warnings = errors.length
     ? h(Panel, { title: "SCAN WARNINGS", marginTop: 1 },
       ...errors.map((error, index) => h(Text, {
@@ -179,6 +189,13 @@ export function InventoryScreen({
     ["DESC", columnsByField.description],
   ]);
   const description = selected?.description || "No description available.";
+  const sourceLocation = selected?.source_repository
+    ? `https://github.com/${selected.source_repository}`
+    : "";
+  const locations = [
+    ...(selected?.managed === false && Array.isArray(selected.paths) ? selected.paths : []),
+    ...(sourceLocation ? [sourceLocation] : []),
+  ].join(" · ") || "-";
   const issues = selected?.managed === false
     ? "Not managed by Kitia; removal requires two confirmations."
     : selected?.issues?.length
@@ -191,47 +208,38 @@ export function InventoryScreen({
     : "-";
   const detailRows = selected
     ? [
-      `CATALOG  ${selected.managed === false ? "-" : selected.catalog}`,
-      `SCOPE    ${selected.scope?.toUpperCase()}`,
-      `VERSION  ${displayVersion}`,
-      "LOCATIONS",
-      ...wrapText(description, detailsContentWidth, 2),
-      "DETAILS",
-      `STATUS   [ ${selectedStatus.toUpperCase()} ]`,
-      ...wrapText(issues, detailsContentWidth, 2),
-      ...(actionMessage ? [fitText(actionMessage, detailsContentWidth)] : []),
+      { label: "CATALOG", value: catalogLabel(selected), maxLines: 1 },
+      { label: "SCOPE", value: selected.scope?.toUpperCase() || "-", maxLines: 1 },
+      { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
+      { label: "", value: issues, maxLines: 2 },
+      { label: "VERSION", value: displayVersion, maxLines: 1 },
+      { label: "LOCATIONS", value: locations, maxLines: 2 },
+      { label: "DESCRIPTION", value: description, maxLines: 3 },
+      ...(actionMessage
+        ? [{ label: "", value: fitText(actionMessage, detailsContentWidth), maxLines: 1 }]
+        : []),
     ]
-    : [
-      errors.length
+    : [{
+      label: "",
+      value: errors.length
         ? "No resource selected; see scan warnings above."
         : resources.length ? "No matching resource selected." : "No resources found.",
-    ];
-  const details = detailRows;
-  const selectionContent = selected
-    ? h(Box, { flexDirection: "column" },
-      h(Text, null,
-        h(Text, { dimColor: true, bold: true }, "CATALOG  "),
-        selected.managed === false ? "-" : selected.catalog),
-      h(Text, null,
-        h(Text, { dimColor: true, bold: true }, "SCOPE    "),
-        selected.scope?.toUpperCase()),
-      h(Text, null,
-        h(Text, { dimColor: true, bold: true }, "VERSION  "),
-        displayVersion),
-      h(Box, { flexDirection: "column", marginTop: 1 },
-        h(Text, { dimColor: true, bold: true }, "LOCATIONS"),
-        h(Text, null, fitText(description, detailsContentWidth))),
-      h(Box, { flexDirection: "column", marginTop: 1 },
-        h(Text, { dimColor: true, bold: true }, "DETAILS"),
-        h(Text, { color: colorForStatus(selectedStatus), bold: true },
-          `STATUS   [ ${selectedStatus.toUpperCase()} ]`),
-        h(Text, { color: selected.issues?.length ? "yellow" : undefined },
-          fitText(issues, detailsContentWidth)),
-        actionMessage ? h(Text, { color: "cyan" }, fitText(actionMessage, detailsContentWidth)) : null))
-    : details.map((line, index) => h(Text, { key: `detail-${index}` }, fitText(line, detailsContentWidth)));
-  const summaryPanelRows = sideBySide ? 7 : 14;
+      maxLines: 1,
+    }];
+  const selectionContent = detailRows.flatMap((row, index) =>
+    row.label
+      ? detailField(
+        `inventory-${index}`,
+        row.label,
+        row.value,
+        detailsContentWidth,
+        row.maxLines,
+        row.label === "STATUS" ? colorForStatus(selectedStatus) : "gray",
+      )
+      : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
+  const summaryPanelRows = sideBySide ? 5 : 15;
   const warningPanelRows = errors.length ? errors.length + 4 : 0;
-  const detailsVerticalOverhead = inventorySideBySide ? 0 : details.length + 4;
+  const detailsVerticalOverhead = showDetails && !inventorySideBySide ? selectionContent.length + 4 : 0;
   const viewport = Math.max(
     1,
     rows - (3 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead + 1),
@@ -248,7 +256,7 @@ export function InventoryScreen({
         [resource.scope.toUpperCase(), columnsByField.scope],
         [resource.kind === "instruction" ? "instr" : resource.kind, columnsByField.kind],
         [resource.id, columnsByField.id],
-        [resource.managed === false ? "-" : resource.catalog, columnsByField.catalog],
+        [catalogLabel(resource), columnsByField.catalog],
         [status.toUpperCase(), columnsByField.status],
         [resource.description, columnsByField.description],
       ]);
@@ -263,10 +271,11 @@ export function InventoryScreen({
     tableRows.push(h(Text, { key: `empty-${tableRows.length}` }, " "));
   }
   const resourcePanel = h(Panel, {
-    title: `RESOURCES ${visible.length}/${resources.length}  ·  ${pageRange}`,
+    title: "INVENTORY",
     width: inventorySideBySide ? inventoryListWidth : undefined,
     marginTop: 1,
   },
+  h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${resources.length} · ${pageRange}`, listContentWidth)),
   h(Text, {
     color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" ? "cyan" : "gray",
   }, fitText(
@@ -275,9 +284,8 @@ export function InventoryScreen({
   )),
   h(Text, { bold: true }, tableHeader),
   ...tableRows);
-  const selectionPanel = h(Panel, {
+  const selectionPanel = h(DetailsPanel, {
     title: selected ? `${selected.kind.toUpperCase()} - ${fitText(selected.id, Math.max(1, detailsContentWidth - selected.kind.length - 3))}` : "SELECTION",
-    color: "blue",
     width: inventorySideBySide ? inventoryDetailsWidth : undefined,
     marginTop: 1,
     marginLeft: inventorySideBySide ? 1 : 0,
@@ -286,30 +294,32 @@ export function InventoryScreen({
     flexDirection: inventorySideBySide ? "row" : "column",
     alignItems: "stretch",
     width: columns - 2,
-  }, resourcePanel, selectionPanel);
+  }, resourcePanel, showDetails ? selectionPanel : null);
   const shortcuts = [
-    ...(catalogAvailable ? ["A install"] : []),
-    ...(canAddCatalog ? ["N add catalog"] : []),
-    ...(canRefreshCatalog ? ["G refresh catalog(s)"] : []),
-    ...(canExecute
-      ? [selected?.managed === false ? "Delete remove" : "U update · Delete uninstall"]
-      : []),
-    ...(resources.length ? ["C catalog", "K kind"] : []),
-  ].join(" · ");
+    [
+      ...(catalogAvailable ? ["A install"] : []),
+      ...(canExecute
+        ? [selected?.managed === false ? "Delete remove" : "U update - Delete uninstall"]
+        : []),
+    ].filter(Boolean).join(" - "),
+    "M catalogs",
+    ["F filter", ...(resources.length ? ["C catalog", "K kind"] : []), "D details"].join(" - "),
+    "↑↓ navigate - Q quit",
+  ].filter(Boolean).join(" | ");
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
+    h(Text, { dimColor: true, bold: true }, fitText("KITIA  /  PROJECT WORKSPACE  ·  RESOURCES", columns - 2)),
     h(Text, { bold: true, color: "cyan" }, fitText(
-      `KITIA / DASHBOARD  ·  ${managedResources.length} managed  ·  ${unmanaged} unmanaged  ·  ${updates} updates  ·  ${attention} attention`,
+      `${managedResources.length ? "AI resource inventory" : "No managed resources"}  ·  ${managedResources.length} managed  ·  ${unmanaged} unmanaged`,
       columns - 2,
     )),
     panels,
     warnings,
     inventoryPanels,
-    h(Text, { dimColor: true },
-      fitText(
-        `${filterMode ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR" : `${shortcuts ? `${shortcuts} · ` : ""}F filter · ↑↓ navigate · Q quit`}`,
-        columns - 2,
-      )),
+    shortcutHint(
+      filterMode ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR" : shortcuts,
+      columns - 2,
+    ),
   );
 }
 
@@ -321,6 +331,7 @@ export function CatalogScreen({
   catalogFilter,
   kindFilter,
   selectedIndex,
+  showDetails,
   columns,
   rows,
 }: {
@@ -331,14 +342,20 @@ export function CatalogScreen({
   catalogFilter: string;
   kindFilter: string;
   selectedIndex: number;
+  showDetails: boolean;
   columns: number;
   rows: number;
 }) {
   const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const contentWidth = Math.max(1, columns - 6);
-  const columnsByField = catalogTableColumns(columns);
+  const panelLayout = detailPanelLayout(columns);
+  const detailsSideBySide = showDetails && panelLayout.sideBySide;
+  const listWidth = detailsSideBySide ? panelLayout.listWidth! : columns;
+  const detailsWidth = detailsSideBySide ? panelLayout.detailsWidth! : columns;
+  const contentWidth = Math.max(1, detailsSideBySide ? listWidth - 4 : columns - 6);
+  const detailsContentWidth = Math.max(1, detailsSideBySide ? detailsWidth - 4 : columns - 6);
+  const columnsByField = catalogTableColumns(listWidth);
   const installedScopes = selected
     ? resources.filter((entry) =>
       entry.catalog === selected.catalog && entry.kind === selected.kind && entry.id === selected.id,
@@ -346,12 +363,20 @@ export function CatalogScreen({
     : "none";
   const detailRows = selected
     ? [
-      `${selected.catalog.toUpperCase()}  /  ${selected.kind}:${selected.id}`,
-      ...wrapText(selected.description || "No description available.", contentWidth, 2),
-      `Installed in: ${installedScopes}${selected.license_status ? `  ·  License: ${selected.license_status}` : ""}`,
+      { label: "CATALOG", value: selected.catalog, maxLines: 1 },
+      { label: "DESCRIPTION", value: selected.description || "No description available.", maxLines: 2 },
+      { label: "INSTALLED IN", value: installedScopes, maxLines: 1 },
+      { label: "LICENSE", value: selected.license_status || "not declared", maxLines: 1 },
     ]
-    : ["No matching catalog resources.", "", ""];
-  const viewport = Math.max(1, rows - (13 + detailRows.length));
+    : [];
+  const entryContent = selected
+    ? detailRows.flatMap((row, index) =>
+      detailField(`catalog-entry-${index}`, row.label, row.value, detailsContentWidth, row.maxLines))
+    : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
+  const viewport = Math.max(
+    1,
+    rows - (9 + (showDetails && !detailsSideBySide ? entryContent.length + 4 : 0)),
+  );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
   const pageRange = visible.length ? `${first + 1}-${first + page.length}` : "0-0";
@@ -391,32 +416,216 @@ export function CatalogScreen({
     tableRows.push(h(Text, { key: `empty-${tableRows.length}` }, " "));
   }
 
+  const resourcePanel = h(Panel, {
+    title: "CATALOG RESOURCES",
+    width: detailsSideBySide ? listWidth : undefined,
+    marginTop: 1,
+  },
+  h(Text, { color: "gray" },
+    fitText(`Filter ${filterMode ? `${query}▏` : query || "(F to filter)"}`, contentWidth)),
+  h(Text, { bold: true }, tableHeader),
+  ...tableRows);
+  const entryPanel = showDetails ? h(DetailsPanel, {
+    title: selected
+      ? `${selected.kind.toUpperCase()} - ${fitText(
+        selected.id, Math.max(1, detailsContentWidth - selected.kind.length - 3),
+      )}`
+      : "CATALOG ENTRY",
+    width: detailsSideBySide ? detailsWidth : undefined,
+    marginTop: 1,
+    marginLeft: detailsSideBySide ? 1 : 0,
+  }, entryContent) : null;
+  const catalogPanels = h(Box, {
+    flexDirection: detailsSideBySide ? "row" : "column",
+    alignItems: "stretch",
+    width: columns - 2,
+  }, resourcePanel, entryPanel);
+
   return h(Box, { flexDirection: "column", paddingX: 1 },
     h(Text, { bold: true, color: "cyan" }, "INSTALL FROM CATALOG"),
     h(Text, null, fitText(
       `AVAILABLE  ${visible.length}/${candidates.length}  ·  ${pageRange}  ·  CATALOG ${catalogFilter.toUpperCase()}  ·  KIND ${kindFilter.toUpperCase()}`,
       columns - 2,
     )),
-    h(Panel, { title: "CATALOG RESOURCES", marginTop: 1 },
-      h(Text, { color: "gray" },
-        fitText(`Filter ${filterMode ? `${query}▏` : query || "(F to filter)"}`, contentWidth)),
-      h(Text, { bold: true }, tableHeader),
-      ...tableRows,
+    catalogPanels,
+    shortcutHint(
+      filterMode
+        ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR"
+        : "C catalog - K kind - F filter - D details | ↑↓ navigate - ENTER select - ESC back",
+      columns - 2,
     ),
-    h(Panel, {
-      title: selected ? `CATALOG ENTRY ${selected.id}` : "CATALOG ENTRY",
-      color: "blue",
-      marginTop: 1,
-    }, ...detailRows.map((line, index) => h(Text, {
-      key: `catalog-detail-${index}`,
-      dimColor: !selected && index > 0,
-    }, fitText(line, contentWidth)))),
-    h(Text, { dimColor: true },
-      fitText(
-        filterMode
-          ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR"
-          : "C catalog · K kind · F filter · ↑↓ navigate · ENTER select · ESC back",
-        columns - 2,
-      )),
+  );
+}
+export type CatalogFreshnessStatus = "checking" | "current" | "outdated" | "unknown";
+
+export function CatalogManagementScreen({
+  catalogs,
+  catalogResources,
+  installedResources,
+  selectedIndex,
+  freshness,
+  canAdd,
+  canRemove,
+  canEdit,
+  canRefresh,
+  showDetails,
+  columns,
+  rows,
+}: {
+  catalogs: Array<{ name: string; repository: string }>;
+  catalogResources: CatalogResource[];
+  installedResources: CatalogResource[];
+  selectedIndex: number;
+  freshness: Record<string, CatalogFreshnessStatus>;
+  canAdd: boolean;
+  canRemove: boolean;
+  canEdit: boolean;
+  canRefresh: boolean;
+  showDetails: boolean;
+  columns: number;
+  rows: number;
+}) {
+  const activeIndex = Math.min(selectedIndex, Math.max(0, catalogs.length - 1));
+  const selected = catalogs[activeIndex];
+  const panelLayout = detailPanelLayout(columns);
+  const detailsSideBySide = showDetails && panelLayout.sideBySide;
+  const listWidth = detailsSideBySide ? panelLayout.listWidth! : columns;
+  const detailsWidth = detailsSideBySide ? panelLayout.detailsWidth! : columns;
+  const contentWidth = Math.max(1, detailsSideBySide ? listWidth - 4 : columns - 6);
+  const detailsContentWidth = Math.max(1, detailsSideBySide ? detailsWidth - 4 : columns - 6);
+  const compact = contentWidth < 64;
+  const nameWidth = Math.min(compact ? 12 : 20, Math.max(8, Math.floor(contentWidth * 0.22)));
+  const resourceWidth = compact ? 4 : 9;
+  const installedWidth = compact ? 5 : 9;
+  const freshnessWidth = 10;
+  const repositoryWidth = Math.max(8,
+    contentWidth - nameWidth - resourceWidth - installedWidth - freshnessWidth - 7);
+  const freshnessLabels: Record<CatalogFreshnessStatus, string> = {
+    checking: "CHECKING",
+    current: "UP TO DATE",
+    outdated: "OUTDATED",
+    unknown: "UNKNOWN",
+  };
+  const freshnessColors: Record<CatalogFreshnessStatus, string> = {
+    checking: "cyan",
+    current: "green",
+    outdated: "yellow",
+    unknown: "gray",
+  };
+  const freshnessOf = (name: string) => freshness[name] || "unknown";
+  const catalogCounts = (name: string) => ({
+    resources: catalogResources.filter((resource) => resource.catalog === name).length,
+    installed: installedResources.filter((resource) =>
+      resource.managed !== false && resource.catalog === name).length,
+  });
+  const tableHeader = tableLine([
+    ["", 2],
+    ["CATALOG", nameWidth],
+    ["REPOSITORY", repositoryWidth],
+    [compact ? "RES" : "RESOURCES", resourceWidth],
+    [compact ? "INST" : "INSTALLED", installedWidth],
+    ["FRESHNESS", freshnessWidth],
+  ]);
+  const selectedCounts = selected ? catalogCounts(selected.name) : null;
+  const detailsContent = selected
+    ? [
+      ...detailField("catalog-repository", "REPOSITORY", selected.repository, detailsContentWidth, 2),
+      ...detailField("catalog-resources", "RESOURCES", selectedCounts?.resources, detailsContentWidth),
+      ...detailField("catalog-installed", "INSTALLED", selectedCounts?.installed, detailsContentWidth),
+      ...detailField(
+        "catalog-freshness",
+        "FRESHNESS",
+        freshnessLabels[freshnessOf(selected.name)],
+        detailsContentWidth,
+        1,
+        freshnessColors[freshnessOf(selected.name)],
+      ),
+      ...detailField(
+        "catalog-refresh",
+        "REFRESH",
+        "Updates catalog metadata only; installed resources stay unchanged.",
+        detailsContentWidth,
+        2,
+      ),
+      ...detailField(
+        "catalog-update",
+        "UPDATE",
+        "Use U in the inventory to update an installed resource.",
+        detailsContentWidth,
+        2,
+      ),
+    ]
+    : detailValue("catalog-empty", "Add a user catalog to browse and install external resources.", detailsContentWidth, 2);
+  const viewport = Math.max(
+    1,
+    rows - (detailsSideBySide || !showDetails ? 10 : detailsContent.length + 12),
+  );
+  const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
+  const page = catalogs.slice(first, first + viewport);
+  const rowsContent = page.map((catalog, index) => {
+    const selectedRow = first + index === activeIndex;
+    const counts = catalogCounts(catalog.name);
+    const status = freshnessOf(catalog.name);
+    return h(Box, {
+      key: catalog.name,
+      flexDirection: "row",
+    },
+    h(Text, {
+      color: selectedRow ? "cyan" : undefined,
+      bold: selectedRow,
+    }, `${tableLine([
+      [selectedRow ? ">" : "", 2],
+      [catalog.name, nameWidth],
+      [catalog.repository, repositoryWidth],
+      [String(counts.resources), resourceWidth],
+      [String(counts.installed), installedWidth],
+    ])} `),
+    h(Text, {
+      color: freshnessColors[status],
+      bold: true,
+    }, fitColumn(freshnessLabels[status], freshnessWidth)));
+  });
+  while (rowsContent.length < viewport) {
+    rowsContent.push(h(Text, { key: `empty-${rowsContent.length}` }, " "));
+  }
+  const shortcuts = [
+    [
+      ...(canAdd ? ["A add catalog"] : []),
+      ...(canRemove && selected ? ["Delete remove selected"] : []),
+      ...(canEdit && selected ? ["E edit selected"] : []),
+      ...(canRefresh && selected ? ["R refresh"] : []),
+    ].join(" - "),
+    "D details - ↑↓ navigate - ESC inventory - Q quit",
+  ].filter(Boolean).join(" | ");
+
+  const catalogPanel = h(Panel, {
+    title: `CONNECTED CATALOGS ${catalogs.length}`,
+    width: detailsSideBySide ? listWidth : undefined,
+    marginTop: 1,
+  },
+  h(Text, { bold: true }, tableHeader),
+  ...(page.length
+    ? rowsContent
+    : [h(Text, { key: "empty-catalogs", dimColor: true }, "No user catalogs connected.")]));
+  const detailsPanel = showDetails ? h(DetailsPanel, {
+    title: selected ? `CATALOG - ${selected.name}` : "CATALOG DETAILS",
+    width: detailsSideBySide ? detailsWidth : undefined,
+    marginTop: 1,
+    marginLeft: detailsSideBySide ? 1 : 0,
+  }, detailsContent) : null;
+  const catalogPanels = h(Box, {
+    flexDirection: detailsSideBySide ? "row" : "column",
+    alignItems: "stretch",
+    width: columns - 2,
+  }, catalogPanel, detailsPanel);
+
+  return h(Box, { flexDirection: "column", paddingX: 1 },
+    h(Text, { bold: true, color: "cyan" }, fitText("KITIA  /  CATALOG MANAGEMENT", columns - 2)),
+    h(Text, { dimColor: true }, fitText(
+      `USER CATALOGS  ${catalogs.length}  ·  Refreshing indexes does not update installed resources`,
+      columns - 2,
+    )),
+    catalogPanels,
+    shortcutHint(shortcuts, columns - 2),
   );
 }

@@ -1,25 +1,13 @@
 "use strict";
-
 const fs = require("node:fs");
-const {
-  CatalogError, LOCAL_KINDS, loadCatalog,
-} = require("./resources/index.js");
-const { validateCatalog } = require("./resources/files.js");
-const { readInstallState } = require("./inventory/index.js");
-const {
-  loadSourceConfiguration, loadUserSourceConfiguration, userCatalogIndexDirectory,
-} = require("./sources/config.js");
-const {
-  sourceResourceRecords, inventorySourceNames,
-} = require("./sources/installed.js");
-const {
-  loadSourceCatalogsFromDirectory, loadPublishedSourceCatalogs,
-} = require("./sources/loader.js");
-import type { CatalogResource, InstallState } from "../types.js";
 
-function sourceCatalogNames(sources) {
-  return sources.map(({ name }) => name);
-}
+const { CatalogError, loadCatalog } = require("./resources/index.js");
+const { readInstallState } = require("./inventory/index.js");
+const { loadUserSourceConfiguration, userCatalogIndexDirectory } = require("./sources/config.js");
+const { sourceResourceRecords, inventorySourceNames } = require("./sources/installed.js");
+const { loadSourceCatalogsFromDirectory } = require("./sources/loader.js");
+import type { CatalogResource } from "./entries.js";
+import type { InstallState } from "./inventory/files.js";
 
 function sourceResourcesFromInventory(state: InstallState): CatalogResource[] {
   return [...sourceResourceRecords(state)].map(([key, record]) => {
@@ -40,39 +28,34 @@ function sourceResourcesFromInventory(state: InstallState): CatalogResource[] {
 
 function loadCommandCatalogs(options, root, warn) {
   const { command, catalog, kind, id } = options;
-  const sources = loadSourceConfiguration(root);
-  const sourceNames = sourceCatalogNames(sources);
-  const allNames = ["internal", ...sourceNames];
+  const sources = loadUserSourceConfiguration();
+  const sourceNames = sources.map(({ name }) => name);
+  const localResources = !catalog && !["list", "search", "validate", "dashboard", "uninstall"].includes(command);
   let names;
-  if (command === "validate") names = catalog ? [catalog] : allNames;
+  if (command === "validate") names = catalog ? [catalog] : sourceNames;
   else if (catalog) names = [catalog];
   else if (["check", "dashboard"].includes(command) || (command === "update" && !id)) {
-    names = allNames;
+    names = sourceNames;
   }
   else if (command === "update" || command === "uninstall") {
     const state = readInstallState(fs.realpathSync(options.target));
-    const internal = [...Object.keys(state.resources), ...Object.keys(state.bundles || {}).map((key) => `bundle:${key}`),
-      ...Object.keys(state.mcps || {}).map((key) => `mcp:${key}`)].some((key) =>
-      (!id || key.split(":")[1] === id) && (!kind || key.split(":")[0] === kind));
     const sourceRecords = sourceResourceRecords(state);
     const installedSources = inventorySourceNames(state).filter((name) =>
       (command === "uninstall" || sourceNames.includes(name)) &&
       [...sourceRecords.keys()].some((key) => key.startsWith(`${name}:`) &&
         (!id || key.split(":")[2] === id) && (!kind || key.split(":")[1] === kind)));
-    names = [...(internal ? ["internal"] : []), ...installedSources];
-  } else if (options.group) names = ["internal"];
-  else names = allNames;
+    names = installedSources;
+  } else names = sourceNames;
 
-  const loaded = { resources: [], sourceResources: [], unavailable: [] };
+  const loaded = { resources: localResources ? loadCatalog(root) : [], sourceResources: [], unavailable: [] };
   if (command === "uninstall") {
     const state = readInstallState(fs.realpathSync(options.target));
-    loaded.resources = names.includes("internal") ? Object.keys(state.resources).map((key) => {
+    if (!catalog) loaded.resources = Object.keys(state.resources).map((key) => {
       const [resourceKind, resourceId] = key.split(":");
       return { kind: resourceKind, id: resourceId, catalog: "internal", description: "Tracked local installation." };
-    }) : [];
+    });
     const installedSourceNames = inventorySourceNames(state);
-    names = names.filter((name) => name === "internal" || installedSourceNames.includes(name) ||
-      name === options.catalog);
+    names = names.filter((name) => installedSourceNames.includes(name) || name === options.catalog);
     loaded.sourceResources = sourceResourcesFromInventory(state)
       .filter((resource) => names.includes(resource.catalog) &&
         (!id || resource.id === id) && (!kind || kind === resource.kind));
@@ -84,51 +67,20 @@ function loadCommandCatalogs(options, root, warn) {
   let sourceResources;
   const loadSources = () => {
     if (sourceResources) return sourceResources;
-    if (options.sourceResources) {
-      sourceResources = options.sourceResources;
-    } else if (process.env.KITIA_SOURCE_CATALOGS) {
-      if (options.refreshCatalog) {
-        throw new CatalogError("--refresh-catalog cannot be combined with KITIA_SOURCE_CATALOGS", "INVALID_ARGUMENT");
-      }
-      sourceResources = loadSourceCatalogsFromDirectory(process.env.KITIA_SOURCE_CATALOGS, sources);
-    } else {
-      const userSources = loadUserSourceConfiguration();
-      const userNames = new Set(userSources.map(({ name }) => name));
-      const bundledSources = sources.filter((source) => !userNames.has(source.name));
-      sourceResources = [];
-      if (userSources.length) {
-        sourceResources.push(...loadSourceCatalogsFromDirectory(userCatalogIndexDirectory(), userSources));
-      }
-      if (bundledSources.length) {
-        sourceResources.push(...loadPublishedSourceCatalogs(options, (warning) => {
-          if (warning.code === "SOURCE_CATALOG_STALE") loaded.unavailable.push(...bundledSources.map(({ name }) => name));
-          warn(warning);
-        }, undefined, bundledSources));
-      }
-    }
+    sourceResources = options.sourceResources || (sources.length
+      ? loadSourceCatalogsFromDirectory(userCatalogIndexDirectory(), sources)
+      : []);
     return sourceResources;
   };
-
-  const loaders = {
-    internal: () => {
-      const resources = command === "validate" ? validateCatalog(root) : loadCatalog(root);
-      if (resources.some((entry) => !LOCAL_KINDS.has(entry.kind) || !entry.group)) {
-        throw new CatalogError("catalog.json may contain only grouped installable resources");
-      }
-      loaded.resources = resources;
-    },
-  };
+  const loaders = {};
   for (const source of sources) {
     loaders[source.name] = () => {
       loaded.sourceResources.push(...loadSources().filter((resource) => resource.catalog === source.name));
     };
   }
   for (const name of names) {
-    if (command === "uninstall" && name === "internal") continue;
     const loader = loaders[name];
-    if (!loader) {
-      throw new CatalogError(`Unknown catalog: ${name}`, "INVALID_ARGUMENT");
-    }
+    if (!loader) throw new CatalogError(`Unknown catalog: ${name}`, "INVALID_ARGUMENT");
     try {
       loader();
     } catch (error) {
@@ -137,14 +89,13 @@ function loadCommandCatalogs(options, root, warn) {
       const errorCode = (error as Error & { code?: string }).code;
       const code = errorCode && ["UNSUPPORTED_CATALOG_VERSION", "UNSUPPORTED_RESOURCE_KIND", "INVALID_ARGUMENT"].includes(errorCode)
         ? errorCode : "CATALOG_UNAVAILABLE";
-      if (!["list", "search"].includes(command)) {
-        throw new CatalogError(message, code);
-      }
+      if (!["list", "search"].includes(command)) throw new CatalogError(message, code);
       loaded.unavailable.push(name);
       warn({ code, catalog: name, message });
     }
   }
   return loaded;
 }
+
 
 module.exports = { loadCommandCatalogs };

@@ -5,7 +5,17 @@ const readline = require("node:readline");
 const { CatalogError, INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
 const { validateResource, readSourceFiles } = require("../catalog/resources/files.js");
 const { matchesSearchText } = require("../catalog/search.js");
-import type { CatalogResource, Keypress, TerminalInput, TerminalOutput } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+
+interface Keypress {
+  name?: string;
+  ctrl?: boolean;
+  meta?: boolean;
+  shift?: boolean;
+}
+
+type TerminalInput = NodeJS.ReadStream & { isRaw?: boolean };
+type TerminalOutput = NodeJS.WriteStream;
 
 function formatCatalogHeader() {
   return `${colorize("CATALOG".padEnd(18), "bold")} ${colorize("KIND".padEnd(11), "bold")} ${colorize("ID".padEnd(30), "bold")} ${colorize("GROUP".padEnd(13), "bold")} ${colorize("STATUS".padEnd(13), "bold")} DESCRIPTION`;

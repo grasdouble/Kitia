@@ -4,7 +4,75 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { CatalogError, isWithin, LOCK_PATH, addPlanEntry } = require("../resources/index.js");
-import type { InstallPlanOptions, InstallState, JsonRecord } from "../../types.js";
+import type { BundleMember } from "../entries.js";
+import type { FileFingerprint, InstallPlanEntry } from "../plan.js";
+
+export type InstallationTool = "claude" | "copilot" | "both";
+export type InventoryScope = "project" | "user";
+
+export interface ResourceInventoryRecord {
+  tool: InstallationTool;
+  digest: string;
+  commit: string;
+  version: string;
+  files: Record<string, FileFingerprint>;
+  standalone: boolean;
+}
+
+export interface SourceResourceInventoryRecord {
+  source_repository: string;
+  source_path: string;
+  source_ref?: string;
+  apply_to?: string[];
+  license_status?: string;
+  files: Record<string, FileFingerprint>;
+}
+
+export interface BundleInventoryRecord {
+  tool: InstallationTool;
+  scope: InventoryScope;
+  digest: string;
+  resources: BundleMember[];
+}
+
+export type McpConfigurationRecord =
+  | { managed: true; sha256: string }
+  | { managed: false; sha256?: unknown };
+
+export interface McpInventoryRecord {
+  server: string;
+  digest: string;
+  values: Record<string, string>;
+  configurations: Record<string, McpConfigurationRecord>;
+  files: Record<string, FileFingerprint>;
+  standalone?: boolean;
+  tool?: InstallationTool;
+  scope?: InventoryScope;
+}
+
+export interface InstallState {
+  lock_version: number;
+  catalog: string;
+  resources: Record<string, ResourceInventoryRecord>;
+  bundles?: Record<string, BundleInventoryRecord>;
+  mcps?: Record<string, McpInventoryRecord>;
+  sources?: Record<string, Record<string, Record<string, SourceResourceInventoryRecord>>>;
+}
+
+export interface PlanAction {
+  action: string;
+  path: string | null;
+  resource?: { catalog: string; kind: string; id: string } | null;
+  command?: { program: string; args: string[] };
+}
+
+export interface InstallPlanOptions {
+  force?: boolean;
+  dryRun?: boolean;
+  remove?: string[];
+  expectedRemovals?: Map<string, FileFingerprint | null>;
+  onAction?: (action: PlanAction) => void;
+}
 
 function targetPath(targetRoot, relativePath, { allowFinalDirectorySymlink = false } = {}) {
   const parts = relativePath.split("/");
@@ -56,11 +124,11 @@ function targetPath(targetRoot, relativePath, { allowFinalDirectorySymlink = fal
   return current;
 }
 
-function fileFingerprint(content, executable) {
+function fileFingerprint(content: Buffer, executable: boolean): FileFingerprint {
   return { sha256: crypto.createHash("sha256").update(content).digest("hex"), executable };
 }
 
-function installedFingerprint(targetRoot, relativePath) {
+function installedFingerprint(targetRoot: string, relativePath: string): FileFingerprint | null {
   const absolutePath = targetPath(targetRoot, relativePath);
   let stat;
   try {
@@ -77,12 +145,12 @@ function installedFingerprint(targetRoot, relativePath) {
   return fileFingerprint(fs.readFileSync(absolutePath), Boolean(stat.mode & 0o111));
 }
 
-function sameFingerprint(left, right) {
+function sameFingerprint(left: FileFingerprint | null, right: FileFingerprint | null): boolean | null {
   return left && right && left.sha256 === right.sha256 &&
     (process.platform === "win32" || left.executable === right.executable);
 }
 
-function inspectInstalledFiles(targetRoot, record) {
+function inspectInstalledFiles(targetRoot: string, record: { files: Record<string, FileFingerprint> }) {
   const missing = [];
   const modified = [];
   for (const [relativePath, expected] of Object.entries(record.files)) {
@@ -101,7 +169,7 @@ function trackedPaths(state: InstallState) {
 }
 
 function writeInstallPlan(
-  plan: Map<string, JsonRecord>,
+  plan: Map<string, InstallPlanEntry>,
   target: string,
   {
     force = false,
@@ -189,7 +257,6 @@ function writeInstallPlan(
     }
     return messages;
   }
-
   // Publish the new inventory only after resource writes and removals succeed.
   actions.sort(([leftAction, left], [rightAction, right]) =>
     (left === LOCK_PATH ? 2 : leftAction === "remove" ? 1 : 0) -
@@ -229,13 +296,14 @@ function writeInstallPlan(
   return messages;
 }
 
-function equalOptionalFingerprint(left, right) {
+function equalOptionalFingerprint(left: FileFingerprint | null, right: FileFingerprint | null): boolean {
   return !left && !right || Boolean(sameFingerprint(left, right));
 }
 
-function addInventoryStateToPlan(plan: Map<string, JsonRecord>, state: InstallState) {
+function addInventoryStateToPlan(plan: Map<string, InstallPlanEntry>, state: InstallState) {
   addPlanEntry(plan, LOCK_PATH, Buffer.from(`${JSON.stringify(state, null, 2)}\n`));
 }
+
 
 module.exports = {
   targetPath, fileFingerprint, installedFingerprint, sameFingerprint, inspectInstalledFiles,

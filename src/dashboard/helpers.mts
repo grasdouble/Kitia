@@ -1,7 +1,7 @@
 "use strict";
 
 import { createRequire } from "node:module";
-import type { CatalogResource } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
 
 const require = createRequire(import.meta.url);
 const { matchesSearchText } = require("../catalog/search.js");
@@ -18,6 +18,10 @@ export function issueLine(issue: { code: string; paths?: string[] }): string {
   return `${label}${issue.paths?.length ? `: ${issue.paths.join(", ")}` : ""}`;
 }
 
+export function catalogLabel(resource: CatalogResource): string {
+  return resource.managed === false || !resource.source_repository ? "-" : resource.catalog || "-";
+}
+
 export function filterCatalogResources(
   resources: CatalogResource[],
   query: string,
@@ -25,27 +29,33 @@ export function filterCatalogResources(
   kindFilter: string,
 ): CatalogResource[] {
   return resources.filter((resource) => {
-    if (catalogFilter !== "all" && resource.catalog !== catalogFilter) return false;
+    const catalog = catalogLabel(resource);
+    if (catalogFilter !== "all" && catalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
     return matchesSearchText(query, [
-      resource.catalog, resource.kind, resource.id, resource.description,
+      catalog, resource.kind, resource.id, resource.description,
       resource.license_status || "",
     ]);
   });
 }
 
+type CatalogFilterProperty = "catalog" | "kind";
+
+function catalogFilterValue(resource: CatalogResource, property: CatalogFilterProperty): string {
+  if (property === "catalog") return catalogLabel(resource);
+  return resource.kind;
+}
+
 export function cycleFilter(
   current: string,
   resources: CatalogResource[],
-  property: string,
-  otherProperty: string,
+  property: CatalogFilterProperty,
+  otherProperty: CatalogFilterProperty,
   otherFilter: string,
 ): string {
   const values = [...new Set(resources
-    .filter((resource) => otherFilter === "all" ||
-      (otherProperty === "catalog" && resource.managed === false ? "-" : resource[otherProperty]) === otherFilter)
-    .map((resource) => String(property === "catalog" && resource.managed === false
-      ? "-" : resource[property] || ""))
+    .filter((resource) => otherFilter === "all" || catalogFilterValue(resource, otherProperty) === otherFilter)
+    .map((resource) => catalogFilterValue(resource, property))
     .filter(Boolean))].sort((left, right) => left.localeCompare(right));
   const choices = ["all", ...values];
   return choices[(choices.indexOf(current) + 1) % choices.length];
@@ -62,7 +72,7 @@ export function filterInventory(
   kindFilter: string,
 ): CatalogResource[] {
   return resources.filter((resource) => {
-    const resourceCatalog = resource.managed === false ? "-" : resource.catalog;
+    const resourceCatalog = catalogLabel(resource);
     if (catalogFilter !== "all" && resourceCatalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
     return matchesSearchText(query, [
@@ -137,7 +147,7 @@ export function tableColumns(width: number) {
     description,
   };
 }
-export function inventoryPanelLayout(width: number) {
+export function detailPanelLayout(width: number) {
   if (width < 112) {
     return { sideBySide: false, listWidth: undefined, detailsWidth: undefined };
   }

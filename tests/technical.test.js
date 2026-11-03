@@ -22,7 +22,7 @@ beforeEach(() => {
   target = path.join(temporary, "target");
   fs.mkdirSync(path.join(fixture, "dist"), { recursive: true });
   fs.mkdirSync(target);
-  fs.cpSync(path.join(root, "catalogs"), path.join(fixture, "catalogs"), { recursive: true });
+  fs.mkdirSync(path.join(fixture, "catalogs"), { recursive: true });
   fs.mkdirSync(path.join(fixture, "skills/create-readme"), { recursive: true });
   fs.writeFileSync(path.join(fixture, "skills/create-readme/SKILL.md"), [
     "---",
@@ -67,7 +67,7 @@ function run(args, expectedStatus) {
     fixture,
   ], { encoding: "utf8", cwd: fixture, env: {
     ...process.env, HOME: temporary, USERPROFILE: temporary,
-    KITIA_CONFIG_DIR: path.join(temporary, "kitia-config"), KITIA_SOURCE_CATALOGS: "", NO_COLOR: "1",
+    KITIA_CONFIG_DIR: path.join(temporary, "kitia-config"), NO_COLOR: "1",
   } });
   if (result.error) throw result.error;
   if (expectedStatus !== undefined) {
@@ -86,8 +86,7 @@ test("bare CLI invocation defaults to dashboard while explicit help stays help",
 
 test("JSON installation previews are structured and strictly read-only", () => {
   const result = run([
-    "install", "skill", "create-readme", "--catalog", "internal", "--target", target,
-    "--dry-run", "--json",
+    "install", "skill", "create-readme", "--target", target, "--dry-run", "--json",
   ], 0);
   const report = JSON.parse(result.stdout);
   assert.equal(report.schema_version, CLI_REPORT_SCHEMA_VERSION);
@@ -95,26 +94,26 @@ test("JSON installation previews are structured and strictly read-only", () => {
   assert.equal(report.status, "ok");
   assert.equal(report.dry_run, true);
   assert.deepEqual(report.resources, [
-    { catalog: "internal", kind: "skill", id: "create-readme", status: "planned" },
+    { kind: "skill", id: "create-readme", status: "planned" },
   ]);
   assert.ok(report.actions.some((action) => action.path === ".agents/skills/create-readme/SKILL.md"));
   assert.deepEqual(fs.readdirSync(target), []);
 });
 
 test("checks report local modifications without changing human-readable exit behavior", () => {
-  run(["install", "create-readme", "--catalog", "internal", "--target", target], 0);
+  run(["install", "create-readme", "--target", target], 0);
   const installed = path.join(target, ".agents/skills/create-readme/SKILL.md");
-  const clean = run(["check", "--catalog", "internal", "--target", target, "--json"], 0);
+  const clean = run(["check", "--target", target, "--json"], 0);
   assert.equal(JSON.parse(clean.stdout).resources[0].status, "current");
 
   fs.appendFileSync(installed, "\nLocal customization.\n");
-  const changed = run(["check", "--catalog", "internal", "--target", target, "--json"], 2);
+  const changed = run(["check", "--target", target, "--json"], 2);
   assert.equal(JSON.parse(changed.stdout).status, "attention");
   assert.equal(JSON.parse(changed.stdout).resources[0].issues[0].code, "LOCAL_MODIFICATIONS");
-  run(["check", "--catalog", "internal", "--target", target], 1);
+  run(["check", "--target", target], 1);
 
   const preview = run([
-    "update", "--catalog", "internal", "--target", target, "--dry-run", "--json",
+    "update", "--target", target, "--dry-run", "--json",
   ], 1);
   assert.equal(JSON.parse(preview.stdout).errors[0].code, "LOCAL_CONFLICT");
 });
@@ -124,7 +123,7 @@ test("target operation locks prevent concurrent lifecycle mutations", () => {
   try {
     assert.equal(inspectOperationLock(target).status, "active");
     const result = run([
-      "install", "create-readme", "--catalog", "internal", "--target", target, "--force",
+      "install", "create-readme", "--target", target, "--force",
     ], 1);
     assert.match(result.stderr, /Target operation is locked/);
     assert.deepEqual(fs.readdirSync(target), [OPERATION_LOCK]);

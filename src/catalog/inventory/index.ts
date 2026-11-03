@@ -6,19 +6,32 @@ const fileApi = require("./files.js");
 const { targetPath } = fileApi;
 const { CURRENT_INVENTORY_VERSION } = require("./version.js");
 const {
-  CatalogError, readUtf8, CATALOG_NAME,
+  CatalogError, readUtf8, parseFrontmatter, CATALOG_NAME,
   INSTALL_SCAN_DIRECTORIES, USER_INSTALL_SCAN_DIRECTORIES, RESOURCE_ID, TOOLS, LOCK_PATH, MCP_DIRECTORY,
   SOURCE_SKILL_DIRECTORIES,
   INSTALLABLE_KINDS, rejectUnsupportedVersion, mcpConfigPaths,
 } = require("../resources/index.js");
 const { parseInjectedMetadata } = require("../resources/files.js");
-import type { InstallState, JsonRecord } from "../../types.js";
+import { isJsonObject } from "../json.js";
+import type { JsonObject } from "../json.js";
+import type { InstallState, McpConfigurationRecord } from "./files.js";
+import type { FileFingerprint } from "../plan.js";
+
+function isFileFingerprint(value: unknown): value is FileFingerprint {
+  return isJsonObject(value) && typeof value.sha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(value.sha256) && typeof value.executable === "boolean";
+}
+
+function isMcpConfigurationRecord(value: unknown): value is McpConfigurationRecord {
+  return isJsonObject(value) && typeof value.managed === "boolean" &&
+    (!value.managed || typeof value.sha256 === "string" && /^[a-f0-9]{64}$/.test(value.sha256));
+}
 
 const SOURCE_COLLECTIONS = new Set(["skills", "agents", "instructions", "bundles", "mcps"]);
+
 function validSourceCatalogName(name: string): boolean {
   return name.length > 0 && name === name.trim() &&
-    !/[\/\\:\u0000-\u001f\u007f-\u009f]/u.test(name) &&
-    name.toUpperCase() !== "INTERNAL";
+    !/[\/\\:\u0000-\u001f\u007f-\u009f]/u.test(name);
 }
 
 function collectMarkdownFiles(targetRoot, relativeDirectory, output, mode = "markdown") {
@@ -105,6 +118,24 @@ function unmanagedArtifact(relativePath) {
   return null;
 }
 
+function unmanagedArtifactDescription(targetRoot: string, paths: string[]): string {
+  for (const relativePath of [...paths].sort()) {
+    try {
+      const filePath = targetPath(targetRoot, relativePath);
+      const stat = fs.lstatSync(filePath);
+      if (stat.isSymbolicLink() || !stat.isFile()) continue;
+      const metadata = parseFrontmatter(readUtf8(filePath, "Unmanaged artifact"), relativePath);
+      const description = metadata.get("description");
+      if (typeof description === "string" && description.trim()) {
+        return description.trim().replace(/\s+/g, " ");
+      }
+    } catch {
+      // Unmanaged files may not have valid frontmatter; keep scanning other locations.
+    }
+  }
+  return paths.sort().join(", ");
+}
+
 function findUnmanagedArtifacts(targetRoot, excludedPaths: Set<string> = new Set()) {
   const scanDirectories = [
     ...Object.values(INSTALL_SCAN_DIRECTORIES),
@@ -131,7 +162,11 @@ function findUnmanagedArtifacts(targetRoot, excludedPaths: Set<string> = new Set
     paths.paths.push(relativePath);
     artifacts.set(key, paths);
   }
-  return [...artifacts.values()];
+  return [...artifacts.values()].map((artifact) => ({
+    ...artifact,
+    paths: [...artifact.paths].sort(),
+    description: unmanagedArtifactDescription(targetRoot, artifact.paths),
+  }));
 }
 
 
@@ -204,12 +239,13 @@ function resourceOwnsPath(key, relativePath) {
   return candidates.includes(relativePath);
 }
 
-function isUserResource(key: string, record: JsonRecord) {
+function isUserResource(key: string, record: unknown) {
   const [kind] = key.split(":");
-  return kind === "skill" || (kind === "agent" && Object.keys(record.files).every((relativePath) =>
+  const inventory = isJsonObject(record) ? record : {};
+  const files = isJsonObject(inventory.files) ? inventory.files : {};
+  return kind === "skill" || (kind === "agent" && Object.keys(files).every((relativePath) =>
     relativePath.startsWith(".claude/agents/") || relativePath.startsWith(".copilot/agents/")));
 }
-
 function readInstallState(targetRoot: string): InstallState {
   const lockFile = targetPath(targetRoot, LOCK_PATH);
   if (!fs.existsSync(lockFile)) {
@@ -218,36 +254,39 @@ function readInstallState(targetRoot: string): InstallState {
       bundles: {}, mcps: {},
     };
   }
-  let state: InstallState;
+  let parsed: unknown;
   try {
-    state = JSON.parse(readUtf8(lockFile, "Installation state")) as InstallState;
+    parsed = JSON.parse(readUtf8(lockFile, "Installation state"));
   } catch (error) {
     throw new CatalogError(`Cannot read ${LOCK_PATH}: ${error.message}`);
   }
   const fail = (): never => { throw new CatalogError(`Invalid installation state in ${LOCK_PATH}; restore it from version control before continuing.`); };
-  if (!state || Array.isArray(state) || state.catalog !== CATALOG_NAME) fail();
-  if (Number.isSafeInteger(state.lock_version) &&
-      state.lock_version > 0 && state.lock_version < CURRENT_INVENTORY_VERSION) {
+  const state = isJsonObject(parsed) ? parsed : fail();
+  if (state.catalog !== CATALOG_NAME) fail();
+  const version = state.lock_version;
+  if (typeof version === "number" && Number.isSafeInteger(version) &&
+      version > 0 && version < CURRENT_INVENTORY_VERSION) {
     throw new CatalogError(
-      `Installation inventory version ${state.lock_version} must be migrated before using this CLI. Run npx --yes github:grasdouble/Kitia migrate --apply; inventories already at the current version are skipped.`,
+      `Installation inventory version ${version} must be migrated before using this CLI. Run npx --yes github:grasdouble/Kitia migrate --apply; inventories already at the current version are skipped.`,
       "INVENTORY_MIGRATION_REQUIRED",
     );
   }
-  if (state.lock_version !== CURRENT_INVENTORY_VERSION) {
+  if (version !== CURRENT_INVENTORY_VERSION) {
     rejectUnsupportedVersion(
-      state.lock_version, CURRENT_INVENTORY_VERSION,
+      version, CURRENT_INVENTORY_VERSION,
       "Installation inventory", "UNSUPPORTED_INVENTORY_VERSION",
     );
   }
-  if (!state || state.lock_version !== CURRENT_INVENTORY_VERSION ||
+  if (state.lock_version !== CURRENT_INVENTORY_VERSION ||
       state.catalog !== CATALOG_NAME ||
       Object.keys(state).some((key) =>
         !["lock_version", "catalog", "resources", "sources", "bundles", "mcps"].includes(key)) ||
-      !state.resources || typeof state.resources !== "object" || Array.isArray(state.resources) ||
-      !state.sources || typeof state.sources !== "object" || Array.isArray(state.sources)) {
+      !isJsonObject(state.resources) || !isJsonObject(state.sources)) {
     fail();
   }
-  for (const [key, record] of Object.entries(state.resources)) {
+  const resources = isJsonObject(state.resources) ? state.resources : fail();
+  const sources = isJsonObject(state.sources) ? state.sources : fail();
+  for (const [key, recordValue] of Object.entries(resources)) {
     const identity = key.match(/^([a-z0-9]+(?:-[a-z0-9]+)*):([a-z0-9]+(?:-[a-z0-9]+)*)$/);
     if (identity && !INSTALLABLE_KINDS.has(identity[1])) {
       throw new CatalogError(
@@ -255,36 +294,33 @@ function readInstallState(targetRoot: string): InstallState {
         "UNSUPPORTED_RESOURCE_KIND",
       );
     }
+    const record = isJsonObject(recordValue) ? recordValue : fail();
+    const files = isJsonObject(record.files) ? record.files : fail();
     if (!/^(skill|agent|instruction):[a-z0-9]+(?:-[a-z0-9]+)*$/.test(key) ||
-        !record || !TOOLS.has(record.tool) ||
-        !/^[a-f0-9]{64}$/.test(record.digest) || !/^[a-f0-9]{40}$/i.test(record.commit) ||
-        typeof record.version !== "string" || !record.files ||
-        typeof record.files !== "object" || Array.isArray(record.files) ||
-        !Object.keys(record.files).length) {
+        typeof record.tool !== "string" || !TOOLS.has(record.tool) ||
+        typeof record.digest !== "string" || !/^[a-f0-9]{64}$/.test(record.digest) ||
+        typeof record.commit !== "string" || !/^[a-f0-9]{40}$/i.test(record.commit) ||
+        typeof record.version !== "string" || !Object.keys(files).length) {
       fail();
     }
-    for (const [relativePath, file] of Object.entries(record.files as Record<string, JsonRecord>)) {
-      if (!resourceOwnsPath(key, relativePath) || !file ||
-          !/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.executable !== "boolean") {
-        fail();
-      }
+    for (const [relativePath, file] of Object.entries(files)) {
+      if (!resourceOwnsPath(key, relativePath) || !isFileFingerprint(file)) fail();
       targetPath(targetRoot, relativePath);
     }
   }
-  for (const [catalog, collections] of Object.entries(state.sources)) {
-    if (typeof catalog !== "string" || !validSourceCatalogName(catalog) ||
-        !collections || typeof collections !== "object" || Array.isArray(collections)) fail();
-    for (const [collection, records] of Object.entries(collections)) {
+  for (const [catalog, collectionsValue] of Object.entries(sources)) {
+    if (!validSourceCatalogName(catalog) || !isJsonObject(collectionsValue)) fail();
+    for (const [collection, recordsValue] of Object.entries(collectionsValue)) {
       if (!SOURCE_COLLECTIONS.has(collection)) {
         throw new CatalogError(
           `Source inventory contains unsupported resource collection '${collection}'. Use a compatible CLI version; do not rewrite the inventory.`,
           "UNSUPPORTED_RESOURCE_KIND",
         );
       }
-      if (!records || typeof records !== "object" || Array.isArray(records)) fail();
+      if (!isJsonObject(recordsValue)) fail();
       const kind = collection.slice(0, -1);
       if (!["skill", "agent", "instruction"].includes(kind)) {
-        if (Object.keys(records).length) {
+        if (Object.keys(recordsValue).length) {
           throw new CatalogError(
             `Source inventory contains unsupported resource collection '${collection}'. Use a compatible CLI version; do not rewrite the inventory.`,
             "UNSUPPORTED_RESOURCE_KIND",
@@ -292,102 +328,120 @@ function readInstallState(targetRoot: string): InstallState {
         }
         continue;
       }
-      for (const [id, record] of Object.entries(records)) {
-        const sourceParts = typeof record?.source_path === "string" ? record.source_path.split("/") : [];
-        const validSourcePath = sourceParts.length > 0 && !record.source_path.startsWith("/") &&
-          !record.source_path.includes("\\") && sourceParts.every((part) => part && part !== "." && part !== "..");
-        if (!RESOURCE_ID.test(id) || id.length > 64 || !record ||
+      for (const [id, recordValue] of Object.entries(recordsValue)) {
+        const record = isJsonObject(recordValue) ? recordValue : fail();
+        const sourcePath = record.source_path;
+        const sourceParts = typeof sourcePath === "string" ? sourcePath.split("/") : [];
+        const validSourcePath = typeof sourcePath === "string" && sourceParts.length > 0 && !sourcePath.startsWith("/") &&
+          !sourcePath.includes("\\") && sourceParts.every((part) => part && part !== "." && part !== "..");
+        const files = isJsonObject(record.files) ? record.files : fail();
+        if (!RESOURCE_ID.test(id) || id.length > 64 ||
             typeof record.source_repository !== "string" ||
             !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(record.source_repository) ||
             !validSourcePath ||
-            (record.source_ref !== undefined && !/^[a-f0-9]{40}$/i.test(record.source_ref)) ||
-            !record.files || typeof record.files !== "object" ||
-            Array.isArray(record.files) || !Object.keys(record.files).length) fail();
+            (record.source_ref !== undefined && (typeof record.source_ref !== "string" || !/^[a-f0-9]{40}$/i.test(record.source_ref))) ||
+            !Object.keys(files).length) fail();
         const allowedPaths = kind === "skill"
           ? new Set(Object.values(SOURCE_SKILL_DIRECTORIES).map((directory) => `${directory}/${id}/SKILL.md`))
           : kind === "agent"
             ? new Set([`.claude/agents/${id}.md`, `.github/agents/${id}.agent.md`, `.copilot/agents/${id}.agent.md`])
             : new Set([`.claude/rules/${id}.md`, `.github/instructions/${id}.instructions.md`]);
-        for (const [relativePath, file] of Object.entries(record.files as Record<string, JsonRecord>)) {
-          if (!allowedPaths.has(relativePath) || !file ||
-              !/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.executable !== "boolean") {
-            fail();
-          }
+        for (const [relativePath, file] of Object.entries(files)) {
+          if (!allowedPaths.has(relativePath) || !isFileFingerprint(file)) fail();
           targetPath(targetRoot, relativePath);
         }
       }
     }
   }
   validateBundleState(state, targetRoot, fail);
-  return state;
+  return state as unknown as InstallState;
 }
 
-function validateBundleState(state: InstallState, targetRoot: string, fail: () => never) {
-  const object = (value: unknown): value is JsonRecord =>
-    Boolean(value) && typeof value === "object" && !Array.isArray(value);
-  if (!object(state.bundles) || !object(state.mcps)) fail();
-  for (const record of Object.values(state.resources)) {
+
+function validateBundleState(state: JsonObject, targetRoot: string, fail: () => never) {
+  const resources = isJsonObject(state.resources) ? state.resources : fail();
+  const bundleRecords = isJsonObject(state.bundles) ? state.bundles : fail();
+  const mcpRecords = isJsonObject(state.mcps) ? state.mcps : fail();
+  for (const recordValue of Object.values(resources)) {
+    const record = isJsonObject(recordValue) ? recordValue : fail();
     if (typeof record.standalone !== "boolean") fail();
   }
-  for (const [id, record] of Object.entries(state.bundles)) {
-    for (const member of Array.isArray(record?.resources) ? record.resources : []) {
-      if (typeof member?.kind === "string" && RESOURCE_ID.test(member.kind) &&
-          ![...INSTALLABLE_KINDS, "mcp"].includes(member.kind)) {
-        throw new CatalogError(`Bundle inventory contains unsupported resource kind '${member.kind}'. Use a compatible CLI version; do not rewrite the inventory.`, "UNSUPPORTED_RESOURCE_KIND");
+  for (const [id, recordValue] of Object.entries(bundleRecords)) {
+    const record = isJsonObject(recordValue) ? recordValue : fail();
+    const members = Array.isArray(record.resources) ? record.resources : fail();
+    for (const memberValue of members) {
+      if (isJsonObject(memberValue) && typeof memberValue.kind === "string" && RESOURCE_ID.test(memberValue.kind) &&
+          ![...INSTALLABLE_KINDS, "mcp"].includes(memberValue.kind)) {
+        throw new CatalogError(`Bundle inventory contains unsupported resource kind '${memberValue.kind}'. Use a compatible CLI version; do not rewrite the inventory.`, "UNSUPPORTED_RESOURCE_KIND");
       }
     }
-    if (!RESOURCE_ID.test(id) || !object(record) || !TOOLS.has(record.tool) ||
-        !["project", "user"].includes(record.scope) || !/^[a-f0-9]{64}$/.test(record.digest) ||
-        !Array.isArray(record.resources) || !record.resources.length ||
-        record.resources.some((member) => !object(member) ||
-          Object.keys(member).sort().join(",") !== "catalog,id,kind" ||
-          !RESOURCE_ID.test(member.id) ||
-          !(member.catalog === "internal" && INSTALLABLE_KINDS.has(member.kind) ||
-            ["internal", "external"].includes(member.catalog) && member.kind === "mcp")) ||
-        new Set(record.resources.map((member) => `${member.kind === "mcp" ? "internal" : member.catalog}:${member.kind}:${member.id}`)).size !== record.resources.length) fail();
-    for (const member of record.resources) {
-      if (member.kind === "mcp" ? !Object.hasOwn(state.mcps, member.id)
-        : !Object.hasOwn(state.resources, `${member.kind}:${member.id}`)) fail();
+    if (!RESOURCE_ID.test(id) || typeof record.tool !== "string" || !TOOLS.has(record.tool) ||
+        typeof record.scope !== "string" || !["project", "user"].includes(record.scope) ||
+        typeof record.digest !== "string" || !/^[a-f0-9]{64}$/.test(record.digest) || !members.length) fail();
+    const identities = new Set<string>();
+    for (const memberValue of members) {
+      const member = isJsonObject(memberValue) ? memberValue : fail();
+      if (Object.keys(member).sort().join(",") !== "catalog,id,kind" ||
+          !RESOURCE_ID.test(String(member.id)) ||
+          !(member.catalog === "internal" && typeof member.kind === "string" && INSTALLABLE_KINDS.has(member.kind) ||
+            ["internal", "external"].includes(member.catalog as string) && member.kind === "mcp")) fail();
+      const identity = `${member.kind === "mcp" ? "internal" : member.catalog}:${member.kind}:${member.id}`;
+      if (identities.has(identity)) fail();
+      identities.add(identity);
+      const resourceKey = `${member.kind}:${member.id}`;
+      if (member.kind === "mcp" ? !Object.hasOwn(mcpRecords, String(member.id))
+        : !Object.hasOwn(resources, resourceKey)) fail();
       if (member.kind !== "mcp") {
-        const dependency = state.resources[`${member.kind}:${member.id}`];
-        if (record.scope === "user" && !isUserResource(`${member.kind}:${member.id}`, dependency)) fail();
+        const dependency = isJsonObject(resources[resourceKey]) ? resources[resourceKey] : fail();
+        if (record.scope === "user" && !isUserResource(resourceKey, dependency)) fail();
         if (record.tool === "both" ? dependency.tool !== "both"
           : dependency.tool !== "both" && dependency.tool !== record.tool) fail();
       }
     }
   }
-  for (const [id, record] of Object.entries(state.mcps)) {
-    if (!RESOURCE_ID.test(id) || !object(record) ||
-        typeof record.server !== "string" || !/^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/.test(record.server) ||
-        !/^[a-f0-9]{64}$/.test(record.digest) || !object(record.values) ||
-        Object.entries(record.values).some(([name, value]) =>
-          !/^[a-z][a-z0-9_]*$/.test(name) || typeof value !== "string") ||
-        !object(record.configurations) || !Object.keys(record.configurations).length ||
-        !object(record.files) ||
+  for (const [id, recordValue] of Object.entries(mcpRecords)) {
+    const record = isJsonObject(recordValue) ? recordValue : fail();
+    const values = isJsonObject(record.values) ? record.values : fail();
+    const configurations = isJsonObject(record.configurations) ? record.configurations : fail();
+    const files = isJsonObject(record.files) ? record.files : fail();
+    if (!RESOURCE_ID.test(id) || typeof record.server !== "string" || !/^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/.test(record.server) ||
+        typeof record.digest !== "string" || !/^[a-f0-9]{64}$/.test(record.digest) ||
+        Object.entries(values).some(([name, value]) => !/^[a-z][a-z0-9_]*$/.test(name) || typeof value !== "string") ||
+        !Object.keys(configurations).length ||
         (record.standalone !== undefined && typeof record.standalone !== "boolean") ||
-        (record.tool !== undefined && !TOOLS.has(record.tool)) ||
-        (record.scope !== undefined && !["project", "user"].includes(record.scope)) ||
-        (record.standalone && (!TOOLS.has(record.tool) || !["project", "user"].includes(record.scope)))) fail();
-    for (const [relativePath, config] of Object.entries(record.configurations)) {
+        (record.tool !== undefined && (typeof record.tool !== "string" || !TOOLS.has(record.tool))) ||
+        (record.scope !== undefined && (typeof record.scope !== "string" || !["project", "user"].includes(record.scope))) ||
+        (record.standalone && (typeof record.tool !== "string" || !TOOLS.has(record.tool) ||
+          typeof record.scope !== "string" || !["project", "user"].includes(record.scope)))) fail();
+    for (const [relativePath, config] of Object.entries(configurations)) {
       if (![".mcp.json", ".claude.json", ".copilot/mcp-config.json"].includes(relativePath) ||
-          !object(config) || typeof config.managed !== "boolean" ||
-          (config.managed && !/^[a-f0-9]{64}$/.test(config.sha256))) fail();
+          !isMcpConfigurationRecord(config)) fail();
       targetPath(targetRoot, relativePath);
     }
-    for (const [relativePath, file] of Object.entries(record.files)) {
-      if (relativePath !== `${MCP_DIRECTORY}/${id}.cjs` || !object(file) ||
-          !/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.executable !== "boolean") fail();
+    for (const [relativePath, file] of Object.entries(files)) {
+      if (relativePath !== `${MCP_DIRECTORY}/${id}.cjs` || !isFileFingerprint(file)) fail();
       targetPath(targetRoot, relativePath);
     }
-    if (!record.standalone && !Object.values(state.bundles).some((bundle) => bundle.resources.some((member) =>
-      member.kind === "mcp" && member.id === id))) fail();
-    if (record.standalone && mcpConfigPaths(record.tool, record.scope).some((relativePath) =>
-      !Object.hasOwn(record.configurations, relativePath))) fail();
+    const referencedByBundle = Object.values(bundleRecords).some((bundleValue) => {
+      if (!isJsonObject(bundleValue) || !Array.isArray(bundleValue.resources)) return false;
+      return bundleValue.resources.some((memberValue) =>
+        isJsonObject(memberValue) && memberValue.kind === "mcp" && memberValue.id === id);
+    });
+    if (!record.standalone && !referencedByBundle) fail();
+    if (record.standalone && typeof record.tool === "string" && typeof record.scope === "string" &&
+        mcpConfigPaths(record.tool, record.scope).some((relativePath) => !Object.hasOwn(configurations, relativePath))) fail();
   }
-  for (const bundle of Object.values(state.bundles)) {
-    for (const member of bundle.resources.filter((member) => member.kind === "mcp")) {
+  for (const bundleValue of Object.values(bundleRecords)) {
+    const bundle = isJsonObject(bundleValue) ? bundleValue : fail();
+    const members = Array.isArray(bundle.resources) ? bundle.resources : fail();
+    for (const memberValue of members) {
+      if (!isJsonObject(memberValue) || memberValue.kind !== "mcp") continue;
+      const mcpRecordValue = mcpRecords[String(memberValue.id)];
+      const mcpRecord = isJsonObject(mcpRecordValue) ? mcpRecordValue : fail();
+      const configurations = isJsonObject(mcpRecord.configurations) ? mcpRecord.configurations : fail();
+      if (typeof bundle.tool !== "string" || typeof bundle.scope !== "string") fail();
       const paths = mcpConfigPaths(bundle.tool, bundle.scope);
-      if (paths.some((relativePath) => !Object.hasOwn(state.mcps[member.id].configurations, relativePath))) fail();
+      if (paths.some((relativePath) => !Object.hasOwn(configurations, relativePath))) fail();
     }
   }
 }

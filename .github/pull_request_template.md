@@ -12,11 +12,8 @@
 
 - [ ] `npm test`
 - [ ] `npm run validate` (catalog or resource changes)
-- [ ] `npm run catalog:build` and `npm run catalog:check` (catalog source or generator changes)
 - [ ] `npm run test:contract` (CLI or inventory contract changes)
 - [ ] `npm run test:package` (package or CLI distribution changes)
-- [ ] `npm run site:build` (site or site-build changes)
-- [ ] `npm run test:browser` (browser behavior changes)
 - [ ] Other or not applicable (explain)
 
 ## Compatibility and data safety
@@ -25,4 +22,4 @@
 - [ ] Lifecycle changes preserve dry-run, conflict, path-safety, and operation-lock protections (or not applicable).
 - [ ] Generated catalog outputs are regenerated and included when required.
 
-<!-- Configured source metadata is generated during the site build and published as an Actions artifact; do not commit snapshots. -->
+<!-- User-managed source catalog metadata stays in local configuration; do not commit personal indexes. -->

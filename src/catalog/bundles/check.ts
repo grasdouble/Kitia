@@ -2,7 +2,8 @@
 
 const { inspectInstalledFiles } = require("../inventory/index.js");
 const { digest, bundleDigest, readMcpConfig, isUserMcp, registeredMcpTool, tools } = require("./utils.js");
-import type { CatalogResource, InstallState, JsonRecord, McpConfiguration } from "../../types.js";
+import type { CatalogResource } from "../entries.js";
+import type { InstallState, McpInventoryRecord } from "../inventory/files.js";
 
 function checkMcps(
   root: string,
@@ -10,7 +11,7 @@ function checkMcps(
   resources: CatalogResource[],
   { scope }: { scope?: string } = {},
 ): CatalogResource[] {
-  const mcpRecords: Record<string, JsonRecord> = state.mcps || {};
+  const mcpRecords = state.mcps || {};
   return Object.entries(mcpRecords).filter(([, record]) => scope !== "user" || isUserMcp(record))
     .map(([id, record]) => checkMcp(root, state, resources, id, record));
 }
@@ -20,7 +21,7 @@ function checkMcp(
   state: InstallState,
   resources: CatalogResource[],
   id: string,
-  record: JsonRecord,
+  record: McpInventoryRecord,
 ): CatalogResource {
   const result: CatalogResource = { catalog: "internal", kind: "mcp", id, status: "current", issues: [] };
   const issue = (code: string, paths: string[] = []) => { result.status = "attention"; result.issues.push({ code, paths }); };
@@ -36,7 +37,7 @@ function checkMcp(
   if (missing.length) issue("MISSING_FILES", missing);
   if (modified.length) issue("LOCAL_MODIFICATIONS", modified);
   for (const [relativePath, tracked] of Object.entries(
-    record.configurations as Record<string, McpConfiguration>,
+    record.configurations,
   )) {
     const config = readMcpConfig(root, relativePath);
     const entry = Object.hasOwn(config.data.mcpServers || {}, record.server) ? config.data.mcpServers[record.server] : undefined;
@@ -55,8 +56,8 @@ function checkBundles(
   const dependencies = new Map<string, CatalogResource>(checkedDependencies.filter((resource) => resource.catalog === "internal")
     .map((resource) => [`${resource.kind}:${resource.id}`, resource]));
   const results: CatalogResource[] = [];
-  const bundleRecords: Record<string, JsonRecord> = state.bundles || {};
-  const mcpRecords: Record<string, JsonRecord> = state.mcps || {};
+  const bundleRecords = state.bundles || {};
+  const mcpRecords = state.mcps || {};
   for (const [id, record] of Object.entries(bundleRecords)) {
     const result: CatalogResource = { catalog: "internal", kind: "bundle", id, status: "current", issues: [] };
     const issue = (code: string, paths: string[] = []) => {

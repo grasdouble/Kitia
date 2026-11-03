@@ -3,7 +3,7 @@
 The CLI records managed files, ownership, and content fingerprints in
 `.agents/kitia-lock.json`. The current and only supported format is version 1,
 defined by [`schemas/catalog-lock-v1.schema.json`](../schemas/catalog-lock-v1.schema.json).
-It stores internal resources, configured source records, bundles, and MCP state.
+It stores locally managed resources, configured source records, bundles, and MCP state.
 
 This repository is not yet in production, so it ships no historical inventory
 schemas or migration transformations. `Kitia migrate` remains as the runner for

@@ -7,11 +7,11 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { afterEach, test } = require("node:test");
-const { buildSourceCatalog, generateSourceCatalogs } = require("../scripts/build-source-catalogs.js");
-const { createSourceIndex, manageCatalogCommand } = require("../dist/catalog/sources/manage.js");
+const {
+  checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog,
+} = require("../dist/catalog/sources/manage.js");
 const { installSourceFileResource } = require("../dist/catalog/sources/skills.js");
-const { loadSourceConfiguration, loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
-const { loadPublishedSourceCatalogs } = require("../dist/catalog/sources/loader.js");
+const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
 const { recordSourceInstallation } = require("../dist/catalog/sources/installed.js");
 const { loadCommandCatalogs } = require("../dist/catalog/loading.js");
@@ -71,6 +71,52 @@ test("first Kitia use preserves existing Kiti catalog settings", () => {
 });
 
 
+test("catalog freshness compares cached index with remote default branch", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-catalog-freshness-"));
+  const previousConfig = process.env.KITIA_CONFIG_DIR;
+  const previousPath = process.env.PATH;
+  const configDirectory = path.join(temporary, "config");
+  const repository = "https://github.com/example/test";
+  const revision = "a".repeat(40);
+  const remote = (ref) => async () => ({ stdout: `${ref}\tHEAD\n` });
+  try {
+    const fakeBin = path.join(temporary, "bin");
+    fs.mkdirSync(fakeBin);
+    const fakeGit = path.join(fakeBin, "git");
+    fs.writeFileSync(fakeGit, `#!/bin/sh\nprintf '%s\\tHEAD\\n' '${revision}'\n`);
+    fs.chmodSync(fakeGit, 0o755);
+    process.env.PATH = [fakeBin, previousPath].filter(Boolean).join(path.delimiter);
+    process.env.KITIA_CONFIG_DIR = configDirectory;
+    writeJson(path.join(configDirectory, "catalogSources.json"), {
+      catalog_version: 1,
+      sources: [{ name: "Test", repository }],
+    });
+    writeJson(path.join(configDirectory, "source-catalogs", "Test.json"), {
+      catalog_name: "Test",
+      source_repository: "example/test",
+      source_ref: revision,
+      resources: [],
+    });
+    assert.deepEqual(await checkCatalogFreshness(remote(revision)), [
+      { name: "Test", status: "current" },
+    ]);
+    assert.deepEqual(await checkCatalogFreshness(), [
+      { name: "Test", status: "current" },
+    ]);
+    assert.deepEqual(await checkCatalogFreshness(remote("b".repeat(40))), [
+      { name: "Test", status: "outdated" },
+    ]);
+    assert.deepEqual(await checkCatalogFreshness(async () => {
+      throw new Error("network unavailable");
+    }), [{ name: "Test", status: "unknown" }]);
+  } finally {
+    if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfig;
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
 function createSource(name, repository) {
   const source = path.join(temporary, name);
   const skill = path.join(source, "skills", "demo-skill");
@@ -95,6 +141,49 @@ function createSource(name, repository) {
   ]);
   return source;
 }
+test("user catalogs can be added, listed and removed without repository manifests", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-user-catalog-lifecycle-"));
+  const repository = "https://github.com/example/user-catalog";
+  const upstream = createSource("upstream", repository);
+  const configDirectory = path.join(temporary, "config");
+  const environmentKeys = [
+    "KITIA_CONFIG_DIR", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+  ];
+  const previousEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  process.env.GIT_CONFIG_COUNT = "1";
+  process.env.GIT_CONFIG_KEY_0 = `url.${pathToFileURL(upstream).href}.insteadOf`;
+  process.env.GIT_CONFIG_VALUE_0 = repository;
+  const run = (args) => {
+    const logs = [];
+    const errors = [];
+    const code = manageCatalogCommand({
+      ...parseArguments(["catalog", ...args]),
+      output: { log: (message) => logs.push(message), error: (message) => errors.push(message) },
+    });
+    return { code, logs, errors };
+  };
+  try {
+    const added = run(["add", "internal", repository]);
+    assert.equal(added.code, 0, added.errors.join("\n"));
+    assert.match(added.logs.join("\n"), /Added catalog internal/);
+    assert.deepEqual(run(["list"]).logs, [`internal\t${repository}`]);
+    assert.equal(fs.existsSync(path.join(configDirectory, "source-catalogs", "internal.json")), true);
+    assert.equal(parseArguments(["list", "--catalog", "internal"]).catalog, "internal");
+    const loaded = loadCommandCatalogs({ command: "list", catalog: "internal" }, process.cwd(), () => {});
+    assert.ok(loaded.sourceResources.length > 0);
+    assert.ok(loaded.sourceResources.every((resource) => resource.catalog === "internal"));
+    assert.equal(run(["remove", "internal"]).code, 0);
+    assert.deepEqual(loadUserSourceConfiguration(), []);
+    assert.equal(fs.existsSync(path.join(configDirectory, "source-catalogs", "internal.json")), false);
+  } finally {
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("catalog refresh updates one or all configured user indexes", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-refresh-catalog-"));
   const repositoryUrls = [
@@ -183,6 +272,31 @@ test("catalog refresh updates one or all configured user indexes", () => {
     assert.equal(betaIndex.resources.find(({ id }) => id === "review-policy").description, "Updated policy.");
     assert.deepEqual(loadUserSourceConfiguration().find(({ name }) => name === "Beta").entries, [betaEntry]);
     assert.deepEqual(loadUserSourceConfiguration().find(({ name }) => name === "Beta").mode, "custom");
+    const userConfigurationFile = path.join(configDirectory, "catalogSources.json");
+    const configurationBeforeUpdate = JSON.parse(fs.readFileSync(userConfigurationFile, "utf8"));
+    const betaIndexBeforeUpdate = fs.readFileSync(path.join(sourceIndexDirectory, "Beta.json"), "utf8");
+    assert.throws(() => updateCatalog("Beta", "Beta", repositoryUrls[1], {
+      mode: "custom", entries: [{ kind: "instruction", path: "missing" }],
+    }), /Source resource does not exist/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(userConfigurationFile, "utf8")), configurationBeforeUpdate);
+    assert.equal(fs.readFileSync(path.join(sourceIndexDirectory, "Beta.json"), "utf8"), betaIndexBeforeUpdate);
+    assert.throws(() => updateCatalog("Beta", "Alpha", repositoryUrls[1]), /Catalog already exists/);
+    const updated = updateCatalog("Beta", "BetaEdited", repositoryUrls[1], {
+      mode: "custom", entries: [{ kind: "instruction", path: "policies/" }],
+    });
+    assert.equal(updated.catalog_name, "BetaEdited");
+    assert.deepEqual(updated.resources.map(({ kind, id }) => `${kind}:${id}`), [
+      "instruction:review-policy",
+    ]);
+    const updatedSources = loadUserSourceConfiguration();
+    assert.deepEqual(updatedSources.map(({ name }) => name), ["Alpha", "BetaEdited"]);
+    assert.deepEqual(updatedSources.find(({ name }) => name === "BetaEdited").entries, [
+      { kind: "instruction", path: "policies" },
+    ]);
+    assert.equal(fs.existsSync(path.join(sourceIndexDirectory, "Beta.json")), false);
+    assert.equal(fs.existsSync(path.join(sourceIndexDirectory, "BetaEdited.json")), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sourceIndexDirectory, "catalogSources.json"), "utf8")),
+      JSON.parse(fs.readFileSync(userConfigurationFile, "utf8")));
   } finally {
     for (const key of envKeys) {
       if (previousEnvironment[key] === undefined) delete process.env[key];
@@ -192,53 +306,6 @@ test("catalog refresh updates one or all configured user indexes", () => {
 });
 
 
-test("configured repositories generate pinned metadata catalogs for root skills directories", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-catalogs-"));
-  const catalogRoot = path.join(temporary, "catalog");
-  const outputDirectory = path.join(temporary, "site", "data");
-  const sources = [
-    { name: "team-alpha", repository: "https://github.com/example/team-alpha" },
-    { name: "team-beta", repository: "https://github.com/example/team-beta" },
-  ];
-  fs.mkdirSync(path.join(catalogRoot, "catalogs"), { recursive: true });
-  fs.writeFileSync(path.join(catalogRoot, "catalogs/catalogSources.json"), JSON.stringify({
-    catalog_version: 1, sources,
-  }));
-  const sourceRoots = {
-    "team-alpha": createSource("alpha", `${sources[0].repository}.git`),
-    "team-beta": createSource("beta", sources[1].repository),
-  };
-
-  const catalogs = generateSourceCatalogs({ catalogRoot, outputDirectory, sourceRoots });
-  assert.deepEqual(catalogs.map((catalog) => catalog.catalog_name), ["team-alpha", "team-beta"]);
-  const publishedConfig = JSON.parse(fs.readFileSync(
-    path.join(outputDirectory, "catalogSources.json"),
-    "utf8",
-  ));
-  assert.deepEqual(publishedConfig, { catalog_version: 1, sources });
-  assert.deepEqual(fs.readdirSync(outputDirectory).sort(), [
-    "catalogSources.json", "team-alpha.json", "team-beta.json",
-  ]);
-  for (const source of sources) {
-    const catalog = JSON.parse(fs.readFileSync(
-      path.join(outputDirectory, `${source.name}.json`),
-      "utf8",
-    ));
-    assert.equal(catalog.source_repository, source.repository.replace("https://github.com/", ""));
-    assert.equal(catalog.source_ref, execFileSync(
-      "git", ["-C", sourceRoots[source.name], "rev-parse", "HEAD"], { encoding: "utf8" },
-    ).trim());
-    assert.equal(catalog.catalog_name, source.name);
-    assert.deepEqual(catalog.resources, [{
-      id: "demo-skill",
-      kind: "skill",
-      description: "A generated source skill.",
-      source_path: "skills/demo-skill",
-      license_status: "MIT",
-    }]);
-    assert.equal(JSON.stringify(catalog).includes("Synthetic body"), false);
-  }
-});
 
 test("Basic source indexing discovers categorized skills, agents, and instructions", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-categorized-source-"));
@@ -294,11 +361,6 @@ test("Basic source indexing discovers categorized skills, agents, and instructio
   assert.equal(globalResource.source_path, "instructions/global-guidance.md");
   assert.deepEqual(globalResource.apply_to, ["**"]);
   assert.equal(catalog.resources.some(({ id }) => id === "readme"), false);
-  const published = buildSourceCatalog(source, {
-    name: "categorized", repository, repositoryId: "example/categorized",
-  }, execFileSync("git", ["-C", source, "rev-parse", "HEAD"], { encoding: "utf8" }).trim());
-  assert.equal(published.resources.find((entry) => entry.id === "research").source_path,
-    "skills/engineering/research");
 });
 test("custom catalog mappings index explicit paths and default unscoped instructions globally", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-custom-source-"));
@@ -340,7 +402,9 @@ test("custom catalog mappings index explicit paths and default unscoped instruct
       ],
     }],
   })[0];
-  assert.deepEqual(configuration.entries.map(({ id }) => id), ["review", "release", "checklist"]);
+  assert.deepEqual(configuration.entries.map(({ kind, id }) => [kind, id]), [
+    ["skill", undefined], ["agent", "release"], ["instruction", "checklist"],
+  ]);
   const catalog = createSourceIndex(repository, "custom", source, configuration);
   assert.deepEqual(catalog.resources.map(({ kind, id }) => `${kind}:${id}`).sort(), [
     "agent:release", "instruction:checklist", "skill:review",
@@ -385,21 +449,74 @@ test("custom catalog mappings index explicit paths and default unscoped instruct
     /example\/custom:policies\/checklist\.instructions\.md must define a non-empty/);
 });
 
+test("custom catalog directory mappings discover nested skills, agents, and instructions", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-custom-directories-"));
+  const repository = "https://github.com/example/custom-directories";
+  const source = createSource("custom-directories", repository);
+  const writeMarkdown = (relativePath, lines) => {
+    const file = path.join(source, relativePath);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, lines.join("\n"));
+  };
+  writeMarkdown("custom/skills/review/SKILL.md", [
+    "---", "name: review", "description: Review changes.", "---", "", "Review skill.",
+  ]);
+  writeMarkdown("custom/skills/testing/SKILL.md", [
+    "---", "name: testing", "description: Test changes.", "---", "", "Testing skill.",
+  ]);
+  writeMarkdown("custom/agents/release.agent.md", [
+    "---", "name: release", "description: Release agent.", "---", "", "Release agent.",
+  ]);
+  writeMarkdown("custom/agents/security/security-review.agent.md", [
+    "---", "name: security-review", "description: Security review agent.", "---", "", "Review agent.",
+  ]);
+  writeMarkdown("custom/instructions/security.instructions.md", [
+    "---", "description: Security policy.", "apply_to: src/**", "---", "", "Security instructions.",
+  ]);
+  writeMarkdown("custom/instructions/testing/note.md", [
+    "---", "description: Test policy.", "apply_to: tests/**", "---", "", "Test instructions.",
+  ]);
+  execFileSync("git", ["-C", source, "add", "."]);
+  execFileSync("git", [
+    "-C", source, "-c", "user.name=Catalog fixtures", "-c",
+    "user.email=fixtures@example.invalid", "-c", "commit.gpgsign=false",
+    "commit", "--quiet", "-m", "Add custom resource directories",
+  ]);
+  const configuration = validateSourceConfiguration({
+    catalog_version: 1,
+    sources: [{
+      name: "custom-directories",
+      repository,
+      mode: "custom",
+      entries: [
+        { kind: "skill", path: "custom/skills/" },
+        { kind: "agent", path: "custom/agents" },
+        { kind: "instruction", path: "custom/instructions" },
+      ],
+    }],
+  })[0];
+  assert.deepEqual(configuration.entries.map(({ path: sourcePath }) => sourcePath), [
+    "custom/skills", "custom/agents", "custom/instructions",
+  ]);
+  const catalog = createSourceIndex(repository, "custom-directories", source, configuration);
+  assert.deepEqual(catalog.resources.map(({ kind, id }) => `${kind}:${id}`).sort(), [
+    "agent:release", "agent:security-review", "instruction:note", "instruction:security",
+    "skill:review", "skill:testing",
+  ]);
+  assert.equal(catalog.resources.find(({ id }) => id === "testing").source_path,
+    "custom/skills/testing");
+});
 
 
-test("source configuration rejects duplicate names and non-GitHub repositories", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-config-"));
-  const catalogRoot = path.join(temporary, "catalog");
-  fs.mkdirSync(path.join(catalogRoot, "catalogs"), { recursive: true });
-  const file = path.join(catalogRoot, "catalogs/catalogSources.json");
-  fs.writeFileSync(file, JSON.stringify({
+
+test("user source configuration rejects duplicate names and non-GitHub repositories", () => {
+  assert.throws(() => validateSourceConfiguration({
     catalog_version: 1,
     sources: [
       { name: "duplicate", repository: "https://github.com/example/one" },
       { name: "Duplicate", repository: "https://github.com/example/two" },
     ],
-  }));
-  assert.throws(() => loadSourceConfiguration(catalogRoot), /Duplicate catalog source name/);
+  }), /Duplicate catalog source name/);
   assert.deepEqual(validateSourceConfiguration({
     catalog_version: 1,
     sources: [
@@ -408,11 +525,10 @@ test("source configuration rejects duplicate names and non-GitHub repositories",
       { name: "skills_catalog.v2", repository: "https://github.com/example/skills" },
     ],
   }).map(({ name }) => name), ["Test", "AI Kit", "skills_catalog.v2"]);
-  fs.writeFileSync(file, JSON.stringify({
+  assert.throws(() => validateSourceConfiguration({
     catalog_version: 1,
     sources: [{ name: "unsupported", repository: "https://example.com/team/repo" }],
-  }));
-  assert.throws(() => loadSourceConfiguration(catalogRoot), /Invalid GitHub source repository URL/);
+  }), /Invalid GitHub source repository URL/);
 });
 
 test("user registries load metadata for multiple independently named catalogs", () => {
@@ -443,9 +559,7 @@ test("user registries load metadata for multiple independently named catalogs", 
   }
 
   const originalConfig = process.env.KITIA_CONFIG_DIR;
-  const originalSources = process.env.KITIA_SOURCE_CATALOGS;
   process.env.KITIA_CONFIG_DIR = temporary;
-  delete process.env.KITIA_SOURCE_CATALOGS;
   try {
     const loaded = loadCommandCatalogs({ command: "list" }, path.resolve(__dirname, ".."));
     assert.deepEqual(loaded.sourceResources.map(({ catalog, id }) => `${catalog}:${id}`).sort(), [
@@ -455,77 +569,47 @@ test("user registries load metadata for multiple independently named catalogs", 
   } finally {
     if (originalConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
     else process.env.KITIA_CONFIG_DIR = originalConfig;
-    if (originalSources === undefined) delete process.env.KITIA_SOURCE_CATALOGS;
-    else process.env.KITIA_SOURCE_CATALOGS = originalSources;
   }
 });
 
-test("published source catalogs are loaded as one pinned set and cached by source name", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-artifact-"));
+test("source catalogs load from the user registry without repository manifests", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-user-catalogs-"));
+  const indexDirectory = path.join(temporary, "source-catalogs");
+  fs.mkdirSync(indexDirectory, { recursive: true });
   const sources = [
-    { name: "team-alpha", repository: "https://github.com/example/team-alpha", repositoryId: "example/team-alpha" },
-    { name: "team-beta", repository: "https://github.com/example/team-beta", repositoryId: "example/team-beta" },
+    { name: "team-alpha", repository: "https://github.com/example/team-alpha" },
+    { name: "team-beta", repository: "https://github.com/example/team-beta" },
   ];
-  const catalogs = sources.map((source, index) => ({
-    catalog_version: 1,
-    catalog_name: source.name,
-    source_repository: source.repositoryId,
-    source_ref: String(index + 1).repeat(40),
-    resources: [{
-      id: "demo-skill",
-      kind: "skill",
-      description: `${source.name} skill.`,
-      source_path: "skills/demo-skill",
-      license_status: "MIT",
-    }],
-  }));
-  const cacheFile = path.join(temporary, "cache", "source-catalogs.json");
-  const now = Date.parse("2026-10-23T12:00:00Z");
-  const calls = [];
-  const spawn = (program, args, options) => {
-    calls.push(args);
-    assert.equal(program, "gh");
-    assert.equal(options.env.GH_PROMPT_DISABLED, "1");
-    if (args[0] === "api") {
-      const endpoint = args[3];
-      return {
-        status: 0,
-        stdout: JSON.stringify(endpoint.includes("/workflows/")
-          ? { workflow_runs: [{
-            id: 10, head_branch: "main", head_repository: { full_name: "grasdouble/Kitia" },
-            path: ".github/workflows/pages.yml", status: "completed", conclusion: "success", event: "push",
-          }] }
-          : { artifacts: [{
-            id: 11, name: "source-catalogs", expired: false, size_in_bytes: 1024,
-          }] }),
-      };
-    }
-    const destination = args[args.indexOf("--dir") + 1];
-    fs.mkdirSync(destination, { recursive: true });
-    fs.writeFileSync(path.join(destination, "catalogSources.json"), JSON.stringify({
+  const manifest = { catalog_version: 1, sources };
+  writeJson(path.join(temporary, "catalogSources.json"), manifest);
+  writeJson(path.join(indexDirectory, "catalogSources.json"), manifest);
+  for (const [index, source] of sources.entries()) {
+    writeJson(path.join(indexDirectory, `${source.name}.json`), {
       catalog_version: 1,
-      sources: sources.map(({ name, repository }) => ({ name, repository })),
-    }));
-    for (const catalog of catalogs) {
-      fs.writeFileSync(
-        path.join(destination, `${catalog.catalog_name}.json`),
-        JSON.stringify(catalog),
-      );
-    }
-    return { status: 0, stdout: "" };
-  };
-
-  const resources = loadPublishedSourceCatalogs({ cacheFile, now }, assert.fail, spawn, sources);
-  assert.deepEqual(resources.map((resource) => `${resource.catalog}:${resource.id}`), [
-    "team-alpha:demo-skill", "team-beta:demo-skill",
-  ]);
-  assert.equal(resources[0].source_ref, "1".repeat(40));
-  assert.equal(resources[1].source_ref, "2".repeat(40));
-  assert.equal(calls.filter((args) => args[0] === "api").length, 2);
-  assert.equal(calls[2][argsIndex(calls[2], "--name") + 1], "source-catalogs");
-  assert.deepEqual(loadPublishedSourceCatalogs(
-    { cacheFile, now: now + 1_000, offline: true }, assert.fail, () => assert.fail(), sources,
-  ).map((resource) => resource.catalog), ["team-alpha", "team-beta"]);
+      catalog_name: source.name,
+      source_repository: `example/${source.name}`,
+      source_ref: String(index + 1).repeat(40),
+      resources: [{
+        id: `demo-${source.name}`,
+        kind: "skill",
+        description: `${source.name} skill.`,
+        source_path: `skills/category-${index}/demo-${source.name}`,
+        license_status: "MIT",
+      }],
+    });
+  }
+  const originalConfig = process.env.KITIA_CONFIG_DIR;
+  process.env.KITIA_CONFIG_DIR = temporary;
+  try {
+    const loaded = loadCommandCatalogs({ command: "list" }, path.resolve(__dirname, ".."));
+    assert.deepEqual(loaded.sourceResources.map(({ catalog, id }) => `${catalog}:${id}`).sort(), [
+      "team-alpha:demo-team-alpha",
+      "team-beta:demo-team-beta",
+    ]);
+  } finally {
+    if (originalConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = originalConfig;
+  }
 });
 
 
@@ -683,7 +767,7 @@ test("configured source skills use the same pinned install, check, update and un
   assert.equal(fs.existsSync(path.join(target, ".agents/skills/demo-skill")), false);
   assert.equal(readInstalledSourceSkills(target, []).length, 0);
 });
-test("uninstalling a managed internal skill removes its entire directory", () => {
+test("uninstalling a locally managed skill removes its entire directory", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-managed-skill-uninstall-"));
   const target = path.join(temporary, "project");
   const skillDirectory = path.join(target, ".agents/skills/managed-skill");
@@ -734,9 +818,19 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.ok(refreshModal.lines.some(({ text }) => text.includes("ALL CATALOGS")));
   const setupModal = addCatalogModal({
     step: "mode", name: "Test", repository, mode: "basic", kind: "skill",
-    id: "", path: "", entries: [], message: "", columns: 100,
+    path: "", entries: [], message: "", columns: 100,
   });
   assert.ok(setupModal.lines.some(({ text }) => text.includes("skills, agents, and instructions")));
+  const skillPathModal = addCatalogModal({
+    step: "path", name: "Test", repository, mode: "custom", kind: "skill",
+    path: "custom/skills", entries: [], message: "", columns: 100,
+  });
+  assert.ok(skillPathModal.lines.map(({ bodyText, text }) => bodyText || text).join(" ").includes("parent folder containing multiple skills"));
+  const agentPathModal = addCatalogModal({
+    step: "path", name: "Test", repository, mode: "custom", kind: "agent",
+    path: "custom/agents", entries: [], message: "", columns: 100,
+  });
+  assert.ok(agentPathModal.lines.map(({ bodyText, text }) => bodyText || text).join(" ").includes("folder containing multiple artifacts"));
   const drive = async (keys, removeCatalog) => {
     const input = new PassThrough();
     input.isTTY = true;
@@ -761,7 +855,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     output.destroy();
     return result;
   };
-  const driveRefresh = async (keys, refreshCatalog) => {
+  const driveRefresh = async (keys, refreshCatalog, extraActions = {}) => {
     const input = new PassThrough();
     input.isTTY = true;
     input.setRawMode = () => {};
@@ -776,6 +870,8 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     const done = runDashboard([], input, output, [], {
       userCatalogs: [{ name: "Test", repository }],
       refreshCatalog,
+      removeCatalog: async () => ({ catalogs: [{ name: "Test", repository }], resources: [] }),
+      ...extraActions,
     });
     for (const key of keys) {
       input.write(key);
@@ -788,7 +884,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   };
   const removed = [];
   assert.equal(await drive(
-    ["r", "\r", "y", "\r", "q"],
+    ["m", "\x1b[3~", "\r", "y", "\r", "q"],
     async (name) => {
       removed.push(name);
       return { catalogs: [], resources: [] };
@@ -796,7 +892,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   ), true);
   assert.deepEqual(removed, ["Test"]);
   assert.equal(await drive(
-    ["r", "\x1b", "q"],
+    ["m", "\x1b[3~", "\x1b", "q"],
     async (name) => {
       removed.push(name);
       return { catalogs: [], resources: [] };
@@ -811,14 +907,116 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       refreshed: [{ name: name || "Test", count: 2 }], failures: [],
     };
   };
-  const refreshedOne = await driveRefresh(["g", "\r", "\r", "\r", "q"], refresh);
+  const management = await driveRefresh(["m", "q"], refresh, {
+    addCatalog: async () => ({ catalog: "New", count: 0 }),
+    updateCatalog: async () => ({ catalog: "Test", count: 0 }),
+  });
+  assert.equal(management.result, true);
+  assert.match(management.renderedOutput, /USER CATALOGS/);
+  assert.match(management.renderedOutput, /A add catalog/);
+  assert.match(management.renderedOutput, /Delete remove selected/);
+  assert.match(management.renderedOutput, /R refresh/);
+  assert.match(management.renderedOutput, /A add catalog - Delete remove selected - E edit selected - R refresh \|/);
+  assert.match(management.renderedOutput, /FRESHNESS[^\n]*\n[^\n]*UNKNOWN/);
+  const currentManager = await driveRefresh(["m", "q"], refresh, {
+    checkCatalogFreshness: async () => [{ name: "Test", status: "current" }],
+  });
+  assert.match(currentManager.renderedOutput, /UP TO DATE/);
+  const outdatedManager = await driveRefresh(["m", "q"], refresh, {
+    checkCatalogFreshness: async () => [{ name: "Test", status: "outdated" }],
+  });
+  assert.match(outdatedManager.renderedOutput, /OUTDATED/);
+  const addFromManager = await driveRefresh(["m", "a", "\x1b", "q"], refresh, {
+    addCatalog: async () => ({ catalog: "New", count: 0 }),
+  });
+  assert.equal(addFromManager.result, true);
+  assert.match(addFromManager.renderedOutput, /ADD CATALOG/);
+  const submittedDirectoryCatalogs = [];
+  const directoryWizard = await driveRefresh([
+    "m", "a", "DirectoryCatalog", "\r", repository, "\r", "\x1b[C", "\r", "\r",
+    "custom/skills/", "\r", "\r", "\r", "q",
+  ], refresh, {
+    addCatalog: async (request) => {
+      submittedDirectoryCatalogs.push(request);
+      return { catalog: "DirectoryCatalog", count: 2 };
+    },
+  });
+  assert.equal(directoryWizard.result, true);
+  assert.deepEqual(submittedDirectoryCatalogs[0], {
+    name: "DirectoryCatalog",
+    repository,
+    mode: "custom",
+    entries: [{ kind: "skill", path: "custom/skills" }],
+  });
+  assert.match(directoryWizard.renderedOutput, /Catalog added: DirectoryCatalog · 2 resources indexed/);
+  const submittedEdits = [];
+  const editedCatalog = await driveRefresh([
+    "m", "e", "\r", "\r", "\r", "\x1b[3~", "a", "\r", "custom/skills/",
+    "\r", "\r", "\r", "q",
+  ], refresh, {
+    userCatalogs: [{
+      name: "Test",
+      repository,
+      mode: "custom",
+      entries: [{ kind: "skill", path: "custom/skills/old" }],
+    }],
+    updateCatalog: async (originalName, request) => {
+      submittedEdits.push({ originalName, request });
+      return {
+        catalog: request.name,
+        count: 1,
+        catalogs: [{ ...request }],
+        resources: [],
+      };
+    },
+  });
+  assert.equal(editedCatalog.result, true);
+  assert.deepEqual(submittedEdits, [{
+    originalName: "Test",
+    request: {
+      name: "Test",
+      repository,
+      mode: "custom",
+      entries: [{ kind: "skill", path: "custom/skills" }],
+    },
+  }]);
+  assert.match(editedCatalog.renderedOutput, /EDIT CATALOG/);
+  assert.match(editedCatalog.renderedOutput, /Catalog updated: Test · 1 resource indexed/);
+  const managerRemoved = [];
+  const removedInManager = await driveRefresh(["m", "\x1b[3~", "\r", "y", "\r", "q"], refresh, {
+    removeCatalog: async (name) => {
+      managerRemoved.push(name);
+      return { catalogs: [], resources: [] };
+    },
+  });
+  assert.equal(removedInManager.result, true);
+  assert.deepEqual(managerRemoved, ["Test"]);
+  const managerRefreshed = [];
+  const refreshedInManager = await driveRefresh(["m", "r", "\r", "\r", "\r", "q"], async (name) => {
+    managerRefreshed.push(name);
+    return {
+      catalogs: [{ name: "Test", repository }], resources: [],
+      refreshed: [{ name, count: 1 }], failures: [],
+    };
+  });
+  assert.equal(refreshedInManager.result, true);
+  assert.deepEqual(managerRefreshed, ["Test"]);
+  const initialDashboard = await driveRefresh(["q"], refresh);
+  assert.equal(initialDashboard.result, true);
+  assert.doesNotMatch(initialDashboard.renderedOutput, /A add catalog|Delete remove selected|R refresh/);
+  assert.doesNotMatch(initialDashboard.renderedOutput, /G refresh/);
+  assert.match(initialDashboard.renderedOutput, /F filter.*\|.*navigate/);
+  const ignoredInventoryRefresh = await driveRefresh(["g", "q"], refresh);
+  assert.equal(ignoredInventoryRefresh.result, true);
+  assert.deepEqual(refreshed, []);
+  const refreshedOne = await driveRefresh(["m", "r", "\r", "\r", "\r", "q"], refresh);
   assert.equal(refreshedOne.result, true);
   assert.deepEqual(refreshed, ["Test"]);
-  const refreshedAll = await driveRefresh(["g", "\u001b[C", "\r", "\r", "q"], refresh);
+  const refreshedAll = await driveRefresh(["m", "r", "\u001b[C", "\r", "\r", "q"], refresh);
   assert.equal(refreshedAll.result, true);
   assert.deepEqual(refreshed, ["Test", undefined]);
   const failedRefresh = await driveRefresh(
-    ["g", "\r", "\r", "s", "\r", "\r", "q"],
+    ["m", "r", "\r", "\r", "s", "\r", "\r", "q"],
     async () => ({
       catalogs: [{ name: "Test", repository }], resources: [], refreshed: [],
       failures: [{ name: "Test", message: "Repository not found." }],
@@ -925,8 +1123,19 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
     "",
   ].join("\n"));
   writeArtifact(".claude/skills/category/local-skill/SKILL.md", "Local skill.");
-  writeArtifact(".claude/agents/review-helper.md", "Local agent.");
-  writeArtifact(".github/instructions/repo-rules.instructions.md", "Local instruction.");
+  writeArtifact(".claude/agents/review-helper.md", [
+    "---",
+    "name: review-helper",
+    "description: Reviews code changes.",
+    "---",
+    "",
+  ].join("\n"));
+  writeArtifact(".github/instructions/repo-rules.instructions.md", [
+    "---",
+    "description: Repository-specific guidance.",
+    "---",
+    "",
+  ].join("\n"));
   assert.ok(findUnmanagedArtifacts(target).some((artifact) =>
     artifact.kind === "instruction" && artifact.id === "repo-rules"),
   JSON.stringify(findUnmanagedArtifacts(target)));
@@ -956,10 +1165,19 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
     JSON.stringify(result),
   );
   assert.ok(unmanaged.every((resource) => resource.status === "unmanaged" && resource.scope === "project"));
+  const resource = (id) => unmanaged.find((entry) => entry.id === id);
+  assert.equal(resource("demo-skill").description, "Installed outside Kitia.");
+  assert.equal(resource("review-helper").description, "Reviews code changes.");
+  assert.equal(resource("repo-rules").description, "Repository-specific guidance.");
+  assert.equal(
+    resource("category/local-skill").description,
+    ".claude/skills/category/local-skill/SKILL.md",
+  );
   const rendered = renderInstalledResources(formatDashboardRows(result.resources, []), {
     columns: 120, isTTY: false,
   });
   assert.match(rendered, /project\s+-\s+skill\s+demo-skill\s+unmanaged/);
+  assert.match(rendered, /Installed outside Kitia\./);
   assert.deepEqual(result.errors, []);
   assert.ok(result.resources.some((resource) =>
     resource.catalog === "Tracked" && resource.id === "kitia-tracked" && resource.managed !== false));
@@ -1054,13 +1272,16 @@ test("dashboard renders the resource list and selection panel at wide and narrow
     let rendered = "";
     output.on("data", (chunk) => { rendered += chunk.toString(); });
     const done = runDashboard([{
-      catalog: "-",
+      catalog: "sample-catalog",
       kind: "skill",
       id: "manual-skill",
       scope: "project",
-      status: "unmanaged",
-      managed: false,
-      description: ".agents/skills/manual-skill/SKILL.md",
+      status: "current",
+      managed: true,
+      description: "A manually maintained skill.",
+      source_repository: "example/manual-skill",
+      source_path: "skills/manual-skill",
+      source_ref: "abcdef0123456789abcdef0123456789abcdef01",
     }], input, output);
     await new Promise((resolve) => setTimeout(resolve, 100));
     input.write("q");
@@ -1069,30 +1290,165 @@ test("dashboard renders the resource list and selection panel at wide and narrow
     assert.match(rendered, /SKILL - manual-skill/);
     assert.match(rendered, /VERSION/);
     const selectedPanel = rendered.slice(rendered.indexOf("SKILL - manual-skill"));
-    const orderedLabels = ["CATALOG", "SCOPE", "VERSION", "LOCATIONS", "DETAILS"];
+    const orderedLabels = ["CATALOG", "SCOPE", "STATUS", "VERSION", "LOCATIONS", "DESCRIPTION"];
     assert.ok(orderedLabels.every((label, index) =>
       index === 0 || selectedPanel.indexOf(label) > selectedPanel.indexOf(orderedLabels[index - 1])));
+    const catalogLabel = selectedPanel.indexOf("CATALOG");
+    const catalogValue = selectedPanel.indexOf("sample-catalog");
+    assert.ok(selectedPanel.slice(catalogLabel, catalogValue).includes("\n"));
+    assert.match(selectedPanel, /sample-catalog/);
+    assert.match(selectedPanel, /abcdef0/);
+    assert.match(selectedPanel, /https:\/\/github\.com\/example\/manual-skill/);
+    assert.match(selectedPanel, /A manually maintained skill\./);
     if (columns >= 112) {
       assert.match(rendered, /LOCATIONS/);
-      assert.match(rendered, /DETAILS/);
-      assert.match(rendered, /UNMANAGED/);
+      assert.match(rendered, /DESCRIPTION/);
+      assert.match(rendered, /STATUS/);
     }
     input.destroy();
     output.destroy();
   }
 });
+test("dashboard toggles the selection panel with D", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 160;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const done = runDashboard([{
+    catalog: "sample-catalog",
+    kind: "skill",
+    id: "manual-skill",
+    scope: "project",
+    status: "current",
+    managed: true,
+    description: "Description toggle behavior.",
+  }], input, output);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(rendered, /SKILL - manual-skill/);
+  const beforeHide = rendered.length;
+  input.write("d");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const hiddenFrame = rendered.slice(beforeHide);
+  assert.doesNotMatch(hiddenFrame, /SKILL - manual-skill/);
+  const beforeShow = rendered.length;
+  input.write("d");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(rendered.slice(beforeShow), /SKILL - manual-skill/);
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
 
-test("dashboard moves selected details beside the resource list on wide terminals", async () => {
-  const { inventoryPanelLayout } = await import("../dist/dashboard/helpers.mjs");
-  assert.deepEqual(inventoryPanelLayout(160), {
+test("dashboard toggles the catalog entry panel with D", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 160;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const candidates = [{
+    catalog: "sample-catalog",
+    kind: "skill",
+    id: "catalog-skill",
+    description: "Catalog panel toggle behavior.",
+  }];
+  const done = runDashboard([], input, output, [], { catalogResources: candidates });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(rendered, /SKILL - catalog-skill/);
+  const resourcesTitle = rendered.indexOf("CATALOG RESOURCES");
+  const entryTitle = rendered.indexOf("SKILL - catalog-skill");
+  assert.equal(
+    rendered.lastIndexOf("\n", resourcesTitle),
+    rendered.lastIndexOf("\n", entryTitle),
+  );
+  const entryPanel = rendered.slice(entryTitle);
+  assert.match(entryPanel, /CATALOG[^\n]*\n[^\n]*sample-catalog/);
+  assert.match(entryPanel, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
+  const beforeHide = rendered.length;
+  input.write("d");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.doesNotMatch(rendered.slice(beforeHide), /SKILL - catalog-skill/);
+  const beforeShow = rendered.length;
+  input.write("d");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(rendered.slice(beforeShow), /SKILL - catalog-skill/);
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
+
+test("dashboard toggles catalog management details with D", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 160;
+  output.rows = 24;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const done = runDashboard([], input, output, [], {
+    userCatalogs: [{ name: "Sample", repository: "example/sample" }],
+    checkCatalogFreshness: async () => [{ name: "Sample", status: "current" }],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  input.write("m");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const managementHeader = rendered.indexOf("USER CATALOGS 1");
+  const panelTop = rendered.indexOf("┌", managementHeader);
+  const panelTopEnd = rendered.indexOf("\n", panelTop);
+  assert.ok((rendered.slice(panelTop, panelTopEnd).match(/┌/g) || []).length >= 2);
+  const detailsPanel = rendered.slice(rendered.indexOf("CATALOG - Sample"));
+  assert.match(detailsPanel, /REPOSITORY[^\n]*\n[^\n]*example\/sample/);
+  assert.match(detailsPanel, /FRESHNESS[^\n]*\n[^\n]*UP TO DATE/);
+  assert.match(rendered, /Updates catalog metadata only/);
+  const beforeHide = rendered.length;
+  input.write("d");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.doesNotMatch(rendered.slice(beforeHide), /Updates catalog metadata only/);
+  const beforeShow = rendered.length;
+  input.write("d");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(rendered.slice(beforeShow), /Updates catalog metadata only/);
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
+
+
+test("dashboard uses a shared list/details split at wide terminal widths", async () => {
+  const { detailPanelLayout } = await import("../dist/dashboard/helpers.mjs");
+  assert.deepEqual(detailPanelLayout(160), {
     sideBySide: true, listWidth: 106, detailsWidth: 51,
   });
-  assert.deepEqual(inventoryPanelLayout(100), {
+  assert.deepEqual(detailPanelLayout(100), {
     sideBySide: false, listWidth: undefined, detailsWidth: undefined,
   });
 });
 
 
-function argsIndex(args, value) {
-  return args.indexOf(value);
-}

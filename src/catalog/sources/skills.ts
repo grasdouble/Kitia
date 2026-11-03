@@ -11,17 +11,19 @@ const {
   targetPath, readInstallState, installedFingerprint, sameFingerprint, writeInstallPlan,
   addInventoryStateToPlan,
 } = require("../inventory/index.js");
-const { loadSourceCatalogsFromDirectory, loadPublishedSourceCatalogs } = require("./loader.js");
-const { loadSourceConfiguration } = require("./config.js");
+const { loadSourceCatalogsFromDirectory } = require("./loader.js");
+const { loadUserSourceConfiguration, userCatalogIndexDirectory } = require("./config.js");
 const {
   sourceCatalogName, sourceSkillKey, sourceSkillRecords, sourceSkillRecord,
   removeSourceSkillRecord, readInstalledSourceSkills, recordSourceInstallation,
   removeSourceResourceRecord, readInstalledSourceResources,
   recordSourceResourceInstallation,
 } = require("./installed.js");
-import type {
-  CatalogResource, CliOptions, InstallState, InstalledSourceResource, PlanAction,
-} from "../../types.js";
+import type { CatalogResource } from "../entries.js";
+import type { InstallPlanEntry } from "../plan.js";
+import type { CliOptions } from "../../cli/arguments.js";
+import type { InstallState, PlanAction } from "../inventory/files.js";
+import type { InstalledSourceResource } from "./installed.js";
 
 function catalogLabel(resource: CatalogResource): string {
   return `${resource.catalog || "source"} catalog`;
@@ -103,7 +105,7 @@ function installSourceFileResource(
   const targetRoot = fs.realpathSync(target);
   const destinations = requestedDestinations || sourceFileDestinations(resource, tool, scope);
   const content = dryRun ? null : readPinnedSourceFile(resource);
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   for (const relativePath of destinations) {
     targetPath(targetRoot, relativePath);
     if (!dryRun) addPlanEntry(plan, relativePath, materializeSourceFile(resource, content, relativePath));
@@ -135,7 +137,7 @@ function materializeSourceFile(resource, content, relativePath) {
 function assertSourceFileCanBeInstalled(resource, target) {
   const state = readInstallState(target);
   if (state.resources[`${resource.kind}:${resource.id}`]) {
-    throw new CatalogError(`${resource.kind} ID '${resource.id}' is already installed from the internal catalog.`, "LOCAL_CONFLICT");
+    throw new CatalogError(`${resource.kind} ID '${resource.id}' is already installed as a locally managed resource.`, "LOCAL_CONFLICT");
   }
   for (const [catalog, collections] of Object.entries(state.sources || {})) {
     if (catalog !== sourceCatalogName(resource) && collections[`${resource.kind}s`]?.[resource.id]) {
@@ -353,7 +355,7 @@ function uninstallSourceFileResource(
     return paths.map((relativePath) => `Would remove: ${relativePath}`);
   }
   removeSourceResourceRecord(state, resource);
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   addInventoryStateToPlan(plan, state);
   writeInstallPlan(plan, targetRoot, { force: true, remove: paths });
   return paths.length ? paths.map((relativePath) => `Removed ${catalogLabel(resource)} ${resource.kind}: ${relativePath}`)
@@ -442,7 +444,7 @@ function uninstallSourceResource(
 
   if (record) {
     removeSourceSkillRecord(state, resource);
-    const plan = new Map();
+    const plan = new Map<string, InstallPlanEntry>();
     addInventoryStateToPlan(plan, state);
     writeInstallPlan(plan, targetRoot, { force: true, remove: paths });
   }
@@ -476,7 +478,7 @@ function uninstallSourceResource(
 function runGhSkill(
   args: string[],
   cwd = process.cwd(),
-  spawn: any = spawnSync,
+  spawn: typeof spawnSync = spawnSync,
   { nonInteractive = false }: { nonInteractive?: boolean } = {},
 ): number {
   const result = spawn("gh", args, {
@@ -510,18 +512,10 @@ function runSourceCommand(
   const catalog = options.catalog || "source";
   let sourceResources: CatalogResource[] = options.sourceResources || [];
   if (!options.resource && !sourceResources.length) {
-    const configuredSources = loadSourceConfiguration(catalogRoot);
-    if (process.env.KITIA_SOURCE_CATALOGS) {
-      if (options.refreshCatalog) {
-        throw new CatalogError("--refresh-catalog cannot be combined with KITIA_SOURCE_CATALOGS", "INVALID_ARGUMENT");
-      }
-      sourceResources = loadSourceCatalogsFromDirectory(
-        process.env.KITIA_SOURCE_CATALOGS,
-        configuredSources,
-      );
-    } else {
-      sourceResources = loadPublishedSourceCatalogs(options, undefined, spawnSync, configuredSources);
-    }
+    const sources = loadUserSourceConfiguration();
+    sourceResources = sources.length
+      ? loadSourceCatalogsFromDirectory(userCatalogIndexDirectory(), sources)
+      : [];
   }
   const resource = options.resource
     ? { ...options.resource, catalog: options.resource.catalog || catalog }
@@ -533,7 +527,7 @@ function runSourceCommand(
   if (options.offline && (options.action === "preview" || !options.dryRun)) {
     throw new CatalogError("Source resource preview and installation require network access. Use an installation --dry-run --json plan while offline.", "INVALID_ARGUMENT");
   }
-  options.onResource?.({ catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id, status: "planned" });
+  options.onResource?.({ catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id, status: "planned", source: true });
 
   let target = process.cwd();
   if (options.action === "install") {

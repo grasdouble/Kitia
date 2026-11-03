@@ -18,15 +18,23 @@ const {
 } = require("./sources/skills.js");
 const { checkBundles, checkMcps } = require("./bundles/check.js");
 const { isUserMcp } = require("./bundles/utils.js");
-import type {
-  CatalogName, CatalogResource, CliOptions, InstallState, JsonRecord, ResourceKind, ScanError,
-} from "../types.js";
+import type { CatalogName, CatalogResource, ResourceKind } from "./entries.js";
+import type { BuildInfo } from "./resources/files.js";
+import type { InstallPlanEntry } from "./plan.js";
+import type { BundleInventoryRecord, InstallState, InstallationTool, McpInventoryRecord } from "./inventory/files.js";
+import type { CliOptions } from "../cli/arguments.js";
+
+export interface ScanError {
+  scope: string;
+  code: string;
+  message: string;
+}
 
 function checkInstalledResources(
   target: string,
   resources: CatalogResource[],
   catalogRoot: string,
-  buildInfo: JsonRecord,
+  buildInfo: BuildInfo,
   sourceResources: CatalogResource[] = [],
   { catalog, scope, includeUnmanaged = false }: {
     catalog?: string; scope?: string; includeUnmanaged?: boolean;
@@ -37,7 +45,7 @@ function checkInstalledResources(
   }
   const targetRoot = fs.realpathSync(target);
   const state: InstallState = readInstallState(targetRoot);
-  if (catalog && catalog !== "internal") state.resources = {};
+  if (catalog) state.resources = {};
   const registeredPaths = trackedPaths(state);
   if (scope === "user") {
     state.resources = Object.fromEntries(Object.entries(state.resources)
@@ -45,13 +53,12 @@ function checkInstalledResources(
     if (state.bundles) state.bundles = Object.fromEntries(Object.entries(state.bundles)
       .filter(([, bundle]) => bundle.scope === "user"));
   }
-  const legacy = catalog && catalog !== "internal" ? new Map()
+  const legacy = catalog ? new Map()
     : findInstalledProvenance(targetRoot, registeredPaths, undefined, { scope });
-  const installedSourceResources = catalog === "internal" ? []
-    : [
-      ...readInstalledSourceSkills(targetRoot, sourceResources, { catalog }),
-      ...readInstalledSourceResources(targetRoot, sourceResources, { catalog }),
-    ];
+  const installedSourceResources = [
+    ...readInstalledSourceSkills(targetRoot, sourceResources, { catalog }),
+    ...readInstalledSourceResources(targetRoot, sourceResources, { catalog }),
+  ];
   const currentResources = new Map<string, CatalogResource>(
     resources.filter((resource) => INSTALLABLE_KINDS.has(resource.kind))
       .map((resource) => [`${resource.kind}:${resource.id}`, resource]),
@@ -68,10 +75,10 @@ function checkInstalledResources(
     result.issues.push({ code, paths });
   };
   let updateAvailable = false;
-  if (buildInfo.dirty) {
+  if (buildInfo.dirty && resources.length) {
     messages.push("Warning: current catalog source has uncommitted changes.");
   }
-  if (!Object.keys(state.resources).length && (catalog && catalog !== "internal" ||
+  if (!Object.keys(state.resources).length && (catalog ||
       !Object.keys(state.bundles || {}).length && !mcpsPresent(state, scope)) &&
       !legacy.size && !installedSourceResources.length) {
     messages.push("No catalog-managed resources found in target.");
@@ -168,7 +175,7 @@ function checkInstalledResources(
       updateAvailable = true;
     }
   }
-  if (!catalog || catalog === "internal") {
+  if (!catalog) {
     const mcps = checkMcps(targetRoot, state, resources, { scope });
     for (const mcp of mcps) {
       results.set(`internal:mcp:${mcp.id}`, mcp);
@@ -187,14 +194,14 @@ function checkInstalledResources(
     }
   }
   if (!updateAvailable) {
-    const hasInternalResources = (!catalog || catalog === "internal") && (Object.keys(state.resources).length > 0 ||
+    const hasLocalResources = !catalog && (Object.keys(state.resources).length > 0 ||
       Object.keys(state.bundles || {}).length > 0 || mcpsPresent(state, scope));
-    if (installedSourceResources.length && hasInternalResources) {
-      messages.push("All internal and source catalog resources match their pinned commits.");
+    if (installedSourceResources.length && hasLocalResources) {
+      messages.push("All managed resources match their pinned commits.");
     } else if (installedSourceResources.length) {
       messages.push("All installed source catalog resources match their pinned commits.");
-    } else if (hasInternalResources) {
-      messages.push("All catalog-managed resources are up to date.");
+    } else if (hasLocalResources) {
+      messages.push("All locally managed resources are up to date.");
     }
   }
   if (includeUnmanaged && !catalog) {
@@ -212,7 +219,7 @@ function checkInstalledResources(
         catalog: "-",
         kind: artifact.kind,
         id: artifact.id,
-        description: artifact.paths.join(", "),
+        description: artifact.description,
         paths: artifact.paths,
         status: "unmanaged",
         managed: false,
@@ -223,7 +230,7 @@ function checkInstalledResources(
 }
 
 function mcpsPresent(state: InstallState, scope?: string): boolean {
-  const mcps: Record<string, JsonRecord> = state.mcps || {};
+  const mcps: Record<string, McpInventoryRecord> = state.mcps || {};
   return Object.values(mcps).some((record) =>
     scope !== "user" || isUserMcp(record));
 }
@@ -232,7 +239,7 @@ function collectInstalledScopes(
   targets: Record<string, string>,
   resources: CatalogResource[],
   catalogRoot: string,
-  buildInfo: JsonRecord,
+  buildInfo: BuildInfo,
   sourceResources: CatalogResource[] = [],
 ): { resources: Array<CatalogResource & { scope: string }>; errors: ScanError[] } {
   const result: { resources: Array<CatalogResource & { scope: string }>; errors: ScanError[] } = {
@@ -263,8 +270,8 @@ function prepareResourceInstall(
   resources: CatalogResource[],
   catalogRoot: string,
   target: string,
-  tool: string | null,
-  buildInfo: JsonRecord,
+  tool: InstallationTool | null,
+  buildInfo: BuildInfo,
   options: CliOptions = {},
   state?: InstallState,
 ) {
@@ -283,7 +290,7 @@ function prepareResourceInstall(
     const key = `${resource.kind}:${resource.id}`;
     const selected = tool || state.resources[key]?.tool;
     const requestedRuntimes = selected === "both" ? ["claude", "copilot"] : [selected];
-    const bundles: Record<string, JsonRecord> = state.bundles || {};
+    const bundles: Record<string, BundleInventoryRecord> = state.bundles || {};
     const required = Object.entries(bundles).filter(([, bundle]) =>
       bundle.resources.some((member) => member.kind === resource.kind && member.id === resource.id) &&
       (bundle.tool === "both" ? ["claude", "copilot"] : [bundle.tool]).some((runtime) => !requestedRuntimes.includes(runtime)));
@@ -301,7 +308,7 @@ function prepareResourceInstall(
   ))];
   const legacy = findInstalledProvenance(targetRoot, trackedPaths(state), runtimes,
     options);
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   const remove = new Set();
   const conflicts = [];
   for (const resource of resources) {
@@ -394,8 +401,8 @@ function installResources(
   resources: CatalogResource[],
   catalogRoot: string,
   target: string,
-  tool: string | null,
-  buildInfo: JsonRecord,
+  tool: InstallationTool | null,
+  buildInfo: BuildInfo,
   options: CliOptions = {},
 ) {
   const prepared = prepareResourceInstall(resources, catalogRoot, target, tool, buildInfo, options);
@@ -411,7 +418,7 @@ function uninstallResource(kind: string, id: string, target: string, options: Cl
   const state = readInstallState(root);
   const key = `${kind}:${id}`;
   const record = state.resources[key];
-  const bundles: Record<string, JsonRecord> = state.bundles || {};
+  const bundles: Record<string, BundleInventoryRecord> = state.bundles || {};
   const dependents = Object.entries(bundles).filter(([, bundle]) =>
     bundle.resources.some((member) => member.kind === kind && member.id === id)).map(([id]) => id);
   if (dependents.length) {
@@ -425,7 +432,7 @@ function uninstallResource(kind: string, id: string, target: string, options: Cl
     throw new CatalogError(`Refusing to remove locally modified files: ${modified.join(", ")}. Back them up or pass --force.`, "LOCAL_CONFLICT");
   }
   delete state.resources[key];
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   addInventoryStateToPlan(plan, state);
   const messages = writeInstallPlan(plan, target, {
     ...options, force: true, remove: Object.keys(record.files),

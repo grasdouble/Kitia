@@ -3,13 +3,15 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { execFileSync } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
+const { promisify } = require("node:util");
+const execFileAsync = promisify(execFile);
 const {
   CatalogError, parseFrontmatter, validateSourceCatalog,
 } = require("../resources/index.js");
 const {
   catalogNameKey, isValidCatalogName, repositoryId, validateSourceConfiguration,
-  loadSourceConfiguration, userCatalogSourcesFile, userCatalogIndexDirectory,
+  loadUserSourceConfiguration, userCatalogSourcesFile, userCatalogIndexDirectory,
 } = require("./config.js");
 function sourceMetadata(file) {
   try {
@@ -72,6 +74,36 @@ function discoverBasicMarkdownResources(checkout, kind, roots, suffix) {
   return resources;
 }
 
+function discoverCustomSkills(checkout, sourceRoot) {
+  const root = safeRepositoryPath(checkout, sourceRoot);
+  const resources = [];
+  function visit(directory, segments) {
+    const skillFile = path.join(directory, "SKILL.md");
+    if (fs.existsSync(skillFile)) {
+      const sourcePath = path.posix.join(sourceRoot, ...segments);
+      safeRepositoryPath(checkout, path.posix.join(sourcePath, "SKILL.md"));
+      resources.push({
+        id: segments.at(-1) || path.posix.basename(sourceRoot),
+        kind: "skill",
+        sourcePath,
+        file: skillFile,
+        directory,
+      });
+      return;
+    }
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isSymbolicLink()) {
+        throw new CatalogError(`Symbolic links are not allowed in source resources: ${entry.name}`);
+      }
+      if (entry.isDirectory()) visit(path.join(directory, entry.name), [...segments, entry.name]);
+    }
+  }
+  visit(root, []);
+  return resources;
+}
+
+
 const BASIC_AGENT_DIRECTORIES = [
   "agents", ".agents/agents", ".claude/agents", ".github/agents", ".copilot/agents",
 ];
@@ -90,10 +122,47 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: "
     for (const mapping of mappings) {
       let sourcePath = mapping.path;
       if (mapping.kind === "skill" && sourcePath.endsWith("/SKILL.md")) sourcePath = sourcePath.slice(0, -9);
-      const resourcePath = mapping.kind === "skill" ? path.posix.join(sourcePath, "SKILL.md") : sourcePath;
-      const file = safeRepositoryPath(checkout, resourcePath);
-      if (!fs.lstatSync(file).isFile()) throw new CatalogError(`Source resource is not a regular file: ${resourcePath}`);
-      resourceDirectories.push({ id: mapping.id, kind: mapping.kind, sourcePath, file, directory: path.dirname(file) });
+      const target = safeRepositoryPath(checkout, sourcePath);
+      const stat = fs.lstatSync(target);
+      if (stat.isDirectory()) {
+        let discovered;
+        if (mapping.kind === "skill") {
+          const skillFile = path.join(target, "SKILL.md");
+          if (fs.existsSync(skillFile)) {
+            safeRepositoryPath(checkout, path.posix.join(sourcePath, "SKILL.md"));
+            discovered = [{
+              id: mapping.id || path.posix.basename(sourcePath),
+              kind: "skill",
+              sourcePath,
+              file: skillFile,
+              directory: target,
+            }];
+          } else {
+            discovered = discoverCustomSkills(checkout, sourcePath);
+          }
+        } else {
+          discovered = discoverBasicMarkdownResources(
+            checkout, mapping.kind, [sourcePath],
+            mapping.kind === "agent" ? /\.agent\.md$/i : /\.instructions\.md$/i,
+          );
+        }
+        if (!discovered.length) {
+          throw new CatalogError(`No ${mapping.kind} resources found in source directory: ${sourcePath}`);
+        }
+        resourceDirectories.push(...discovered);
+      } else if (stat.isFile() && mapping.kind !== "skill" && /\.md$/i.test(sourcePath)) {
+        const filename = path.posix.basename(sourcePath);
+        const suffix = mapping.kind === "agent" ? /\.agent\.md$/i : /\.instructions\.md$/i;
+        resourceDirectories.push({
+          id: mapping.id || filename.replace(suffix, "").replace(/\.md$/i, ""),
+          kind: mapping.kind,
+          sourcePath,
+          file: target,
+          directory: path.dirname(target),
+        });
+      } else {
+        throw new CatalogError(`Source resource must be a directory or supported Markdown file: ${sourcePath}`);
+      }
     }
   } else {
     const skillsRootPath = path.join(checkout, "skills");
@@ -191,7 +260,7 @@ function fetchSourceIndex(source) {
 function addCatalog(name, repository, configuration = { mode: "basic", entries: [] }) {
   name = typeof name === "string" ? name.trim() : name;
   if (!isValidCatalogName(name)) {
-    throw new CatalogError("Catalog name must be non-empty and cannot contain path separators, colons, or control characters; 'internal' is reserved");
+    throw new CatalogError("Catalog name must be non-empty and cannot contain path separators, colons, or control characters");
   }
   const repositoryRef = repositoryId(repository);
   const mode = configuration?.mode ?? "basic";
@@ -201,7 +270,7 @@ function addCatalog(name, repository, configuration = { mode: "basic", entries: 
       (mode === "basic" && configuration.entries !== undefined && configuration.entries.length !== 0)) {
     throw new CatalogError("Catalog configuration must use basic mode or custom mode with explicit entries");
   }
-  const current = loadSourceConfiguration();
+  const current = loadUserSourceConfiguration();
   if (current.some((source) => catalogNameKey(source.name) === catalogNameKey(name))) {
     throw new CatalogError(`Catalog already exists: ${name}`);
   }
@@ -230,6 +299,58 @@ function addCatalog(name, repository, configuration = { mode: "basic", entries: 
   return index;
 }
 
+function updateCatalog(originalName, name, repository, configuration = { mode: "basic", entries: [] }) {
+  name = typeof name === "string" ? name.trim() : name;
+  if (!isValidCatalogName(name)) {
+    throw new CatalogError("Catalog name must be non-empty and cannot contain path separators, colons, or control characters");
+  }
+  const repositoryRef = repositoryId(repository);
+  const mode = configuration?.mode ?? "basic";
+  if (!configuration || typeof configuration !== "object" || Array.isArray(configuration) ||
+      !["basic", "custom"].includes(mode) ||
+      (mode === "custom" && !Array.isArray(configuration.entries)) ||
+      (mode === "basic" && configuration.entries !== undefined && configuration.entries.length !== 0)) {
+    throw new CatalogError("Catalog configuration must use basic mode or custom mode with explicit entries");
+  }
+
+  const userSources = require("./config.js").loadUserSourceConfiguration();
+  const original = userSources.find(({ name: sourceName }) =>
+    catalogNameKey(sourceName) === catalogNameKey(originalName));
+  if (!original) throw new CatalogError(`User catalog not found: ${originalName}`);
+  const otherSources = userSources.filter(({ name: sourceName }) =>
+    catalogNameKey(sourceName) !== catalogNameKey(original.name));
+  if (otherSources.some(({ name: sourceName }) => catalogNameKey(sourceName) === catalogNameKey(name))) {
+    throw new CatalogError(`Catalog already exists: ${name}`);
+  }
+  if (otherSources.some(({ repositoryId: sourceRepository }) => sourceRepository === repositoryRef)) {
+    throw new CatalogError(`Catalog repository is already registered: ${repositoryRef}`);
+  }
+
+  const validated = validateSourceConfiguration({ catalog_version: 1, sources: userSources.map(({
+    name: sourceName, repository: sourceRepository, mode: sourceMode, entries,
+  }) => catalogNameKey(sourceName) === catalogNameKey(original.name)
+    ? { name, repository, mode, entries: configuration.entries || [] }
+    : { name: sourceName, repository: sourceRepository, mode: sourceMode, entries }) });
+  const normalized = validated.find(({ name: sourceName }) =>
+    catalogNameKey(sourceName) === catalogNameKey(name));
+  if (!normalized) throw new CatalogError(`User catalog not found: ${originalName}`);
+  const index = fetchSourceIndex(normalized);
+  const sources = validated.map(({ name: sourceName, repository: sourceRepository, mode: sourceMode, entries }) => ({
+    name: sourceName, repository: sourceRepository, mode: sourceMode, entries,
+  }));
+  const manifest = { catalog_version: 1, sources };
+  const directory = userCatalogIndexDirectory();
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  writeJson(userCatalogSourcesFile(), manifest);
+  writeJson(path.join(directory, "catalogSources.json"), manifest);
+  writeJson(path.join(directory, `${name}.json`), index);
+  if (original.name !== name) {
+    const previousIndex = path.join(directory, `${original.name}.json`);
+    if (fs.existsSync(previousIndex)) fs.rmSync(previousIndex);
+  }
+  return index;
+}
+
 function refreshCatalogs(names) {
   const userSources = require("./config.js").loadUserSourceConfiguration();
   const selected = names === undefined ? userSources : names.map((name) => {
@@ -255,6 +376,43 @@ function refreshCatalogs(names) {
     }
   }
   return { refreshed, failures };
+}
+
+async function remoteHead(repository, run = execFileAsync) {
+  const { stdout } = await run("git", ["ls-remote", "--symref", repository, "HEAD"], {
+    encoding: "utf8",
+    timeout: 15000,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  const match = String(stdout).match(/^([a-f0-9]{40})\tHEAD$/im);
+  if (!match) throw new CatalogError(`Cannot resolve the default branch of ${repository}`);
+  return match[1].toLowerCase();
+}
+
+async function checkCatalogFreshness(run = execFileAsync) {
+  const sources = require("./config.js").loadUserSourceConfiguration();
+  const directory = userCatalogIndexDirectory();
+  return Promise.all(sources.map(async (source) => {
+    try {
+      const indexFile = path.join(directory, `${source.name}.json`);
+      const stat = fs.lstatSync(indexFile);
+      if (!stat.isFile() || stat.isSymbolicLink()) return { name: source.name, status: "unknown" };
+      const index = JSON.parse(fs.readFileSync(indexFile, "utf8"));
+      if (index.catalog_name !== source.name ||
+          index.source_repository !== source.repositoryId ||
+          !/^[a-f0-9]{40}$/i.test(index.source_ref || "")) {
+        return { name: source.name, status: "unknown" };
+      }
+      const remote = await remoteHead(source.repository, run);
+      return {
+        name: source.name,
+        status: remote === index.source_ref.toLowerCase() ? "current" : "outdated",
+      };
+    } catch {
+      return { name: source.name, status: "unknown" };
+    }
+  }));
 }
 
 
@@ -299,7 +457,7 @@ function manageCatalogCommand(options) {
     return 0;
   }
   if (options.action === "list") {
-    for (const source of loadSourceConfiguration()) {
+    for (const source of loadUserSourceConfiguration()) {
       output.log(`${source.name}\t${source.repository}`);
     }
     return 0;
@@ -308,5 +466,6 @@ function manageCatalogCommand(options) {
 }
 
 module.exports = {
-  sourceMetadata, createSourceIndex, addCatalog, refreshCatalogs, removeCatalog, manageCatalogCommand,
+  sourceMetadata, createSourceIndex, addCatalog, updateCatalog, refreshCatalogs, checkCatalogFreshness,
+  removeCatalog, manageCatalogCommand,
 };

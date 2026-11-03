@@ -11,6 +11,24 @@ const {
   loadCatalog, validateMetadata,
 } = require("./index.js");
 
+import { isJsonObject } from "../json.js";
+
+export interface BuildInfo {
+  catalog: string;
+  commit: string;
+  package_version: string;
+  dirty: boolean;
+  executable_files?: string[];
+}
+
+function isBuildInfo(value: unknown): value is BuildInfo {
+  return isJsonObject(value) && value.catalog === CATALOG_NAME &&
+    typeof value.commit === "string" && /^[0-9a-f]{40}$/i.test(value.commit) &&
+    typeof value.package_version === "string" && typeof value.dirty === "boolean" &&
+    (value.executable_files === undefined || Array.isArray(value.executable_files) &&
+      value.executable_files.every((file) => typeof file === "string"));
+}
+
 function readSourceFiles(resource, root) {
   root = fs.realpathSync(root);
   if (resource.kind !== "skill") {
@@ -128,7 +146,7 @@ function resourceDigest(resource, catalogRoot) {
   return digest.digest("hex");
 }
 
-function resourceProvenance(resource, catalogRoot, buildInfo, runtime) {
+function resourceProvenance(resource, catalogRoot, buildInfo: BuildInfo, runtime) {
   return {
     "catalog-name": CATALOG_NAME,
     "catalog-resource": `${resource.kind}:${resource.id}`,
@@ -167,10 +185,10 @@ function parseInjectedMetadata(filePath) {
   return Object.fromEntries(PROVENANCE_FIELDS.map((field) => [field, metadata.get(field)]));
 }
 
-function readBuildInfo(catalogRoot = CATALOG_ROOT) {
+function readBuildInfo(catalogRoot = CATALOG_ROOT): BuildInfo {
   const root = fs.realpathSync(catalogRoot);
   const buildFile = path.join(root, "dist", "catalog-build.json");
-  let buildInfo;
+  let buildInfo: unknown;
   if (fs.existsSync(buildFile) && !fs.existsSync(path.join(root, ".git"))) {
     try {
       buildInfo = JSON.parse(readUtf8(buildFile, "Catalog build metadata"));
@@ -181,25 +199,16 @@ function readBuildInfo(catalogRoot = CATALOG_ROOT) {
       throw new CatalogError(`Cannot read build metadata ${buildFile}: ${error.message}`);
     }
   } else {
-    const packageInfo = JSON.parse(readUtf8(path.join(root, "package.json"), "Package manifest"));
+    const packageInfo: unknown = JSON.parse(readUtf8(path.join(root, "package.json"), "Package manifest"));
     const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
     buildInfo = {
       catalog: CATALOG_NAME,
       commit: git(["rev-parse", "HEAD"]),
-      package_version: packageInfo.version,
+      package_version: isJsonObject(packageInfo) ? packageInfo.version : undefined,
       dirty: git(["status", "--porcelain", "--untracked-files=all"]).length > 0,
     };
   }
-  if (
-    buildInfo.catalog !== CATALOG_NAME ||
-    typeof buildInfo.commit !== "string" ||
-    !/^[0-9a-f]{40}$/i.test(buildInfo.commit) ||
-    typeof buildInfo.package_version !== "string" ||
-    typeof buildInfo.dirty !== "boolean" ||
-    (buildInfo.executable_files !== undefined &&
-      (!Array.isArray(buildInfo.executable_files) ||
-        buildInfo.executable_files.some((file) => typeof file !== "string")))
-  ) {
+  if (!isBuildInfo(buildInfo)) {
     throw new CatalogError(`Invalid catalog build metadata: ${buildFile}`);
   }
   return buildInfo;

@@ -2,14 +2,7 @@
 /.video-render.lock
 node_modules/
 dist/
-site-build/
 test-results/
 .DS_Store
 
 coverage/
-web/dist/
-web/dist-pages/
-web/public/registry/
-web/.astro/
-tests/fixtures/web-security/dist/
-tests/fixtures/web-security/.astro/

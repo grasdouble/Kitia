@@ -98,7 +98,6 @@ beforeEach(() => {
     Object.entries(bundle).filter(([key]) => !["id", "kind", "group"].includes(key)),
   ));
 
-  writeJson(path.join(catalog, "catalogs/catalogSources.json"), { catalog_version: 1, sources: [] });
   writeJson(path.join(catalog, "catalogs/catalog.json"), {
     catalog_version: 2,
     resources: [skill, mcp, bundle],
@@ -227,8 +226,8 @@ test("project and user lifecycles preserve another catalog's inventory, launcher
       assert.equal(config.managed, false);
     }
     assert.equal(fs.existsSync(path.join(directory, ".agents/kitia-mcp")), false);
-    run(["check", ...scopeArgs, "--catalog", "internal", "--json"]);
-    run(["update", ...scopeArgs, "--catalog", "internal", "--yes"]);
+    run(["check", ...scopeArgs, "--json"]);
+    run(["update", ...scopeArgs, "--yes"]);
     run(["uninstall", ...args, "--non-interactive"]);
 
     assert.deepEqual(fs.readFileSync(inventoryFile), foreignInventory);

@@ -1,12 +1,14 @@
 {
   "discovery": [
     {
-      "id": "contract-skill",
+      "id": "upstream-skill",
       "kind": "skill",
-      "catalog": "internal",
-      "group": "fixture",
-      "description": "Contract fixture.",
-      "status": "stable"
+      "catalog": "community",
+      "description": "Upstream fixture.",
+      "source_repository": "example/community-skills",
+      "source_path": "skills/upstream-skill",
+      "source_ref": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "license_status": "not-declared"
     }
   ],
   "emptyCheck": {
@@ -24,7 +26,7 @@
     "dry_run": false,
     "status": "ok",
     "resources": [
-      { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "current", "issues": [] }
+      { "kind": "skill", "id": "contract-skill", "status": "current", "issues": [] }
     ],
     "actions": [],
     "errors": []
@@ -36,7 +38,6 @@
     "status": "attention",
     "resources": [
       {
-        "catalog": "internal",
         "kind": "skill",
         "id": "contract-skill",
         "status": "attention",
@@ -54,14 +55,14 @@
     "dry_run": true,
     "status": "ok",
     "resources": [
-      { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "planned" }
+      { "kind": "skill", "id": "contract-skill", "status": "planned" }
     ],
     "actions": [
       { "action": "install", "path": ".agents/kitia-lock.json", "resource": null },
       {
         "action": "install",
         "path": ".agents/skills/contract-skill/SKILL.md",
-        "resource": { "catalog": "internal", "kind": "skill", "id": "contract-skill" }
+        "resource": { "kind": "skill", "id": "contract-skill" }
       }
     ],
     "errors": []
@@ -72,14 +73,14 @@
     "dry_run": true,
     "status": "ok",
     "resources": [
-      { "catalog": "internal", "kind": "skill", "id": "contract-skill", "status": "planned" }
+      { "kind": "skill", "id": "contract-skill", "status": "planned" }
     ],
     "actions": [
       { "action": "overwrite", "path": ".agents/kitia-lock.json", "resource": null },
       {
         "action": "remove",
         "path": ".agents/skills/contract-skill/SKILL.md",
-        "resource": { "catalog": "internal", "kind": "skill", "id": "contract-skill" }
+        "resource": { "kind": "skill", "id": "contract-skill" }
       }
     ],
     "errors": []

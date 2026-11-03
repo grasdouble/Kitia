@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { CatalogError, TOOLS, USER_INSTALLABLE_KINDS, addPlanEntry, assertInstallableResource } = require("./index.js");
 const { readSourceFiles, resourceProvenance, injectProvenance } = require("./files.js");
+import type { InstallPlanEntry } from "../plan.js";
 
 function renderInstruction(resource, body, tool, provenance) {
   const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
@@ -25,7 +26,7 @@ function buildInstallPlan(resources, catalogRoot, tool, buildInfo, { scope = "pr
     throw new CatalogError(`Tool must be one of: ${[...TOOLS].join(", ")}`);
   }
   const root = fs.realpathSync(catalogRoot);
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
 
   for (const resource of resources) {
     assertInstallableResource(resource);

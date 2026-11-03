@@ -2,17 +2,16 @@
 
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
-const { CATALOG_NAME } = require("./resources/index.js");
 const { readInstallState } = require("./inventory/index.js");
 const { inspectOperationLock, OPERATION_LOCK } = require("./operation.js");
-const { loadSourceConfiguration } = require("./sources/config.js");
+const { loadUserSourceConfiguration } = require("./sources/config.js");
 
 function diagnose({ target = ".", network = false } = {}, spawn = spawnSync) {
   const checks = [];
   const add = (id, status, message) => checks.push({ id, status, message });
   let sources = [];
   try {
-    sources = loadSourceConfiguration();
+    sources = loadUserSourceConfiguration();
     add("source-config", "ok", `Loaded ${sources.length} configured skill source(s).`);
   } catch (error) {
     add("source-config", "error", error.message);
@@ -55,19 +54,12 @@ function diagnose({ target = ".", network = false } = {}, spawn = spawnSync) {
     add("github-auth", auth.status === 0 ? "ok" : "error",
       auth.status === 0 ? "GitHub CLI authentication is available." : "Authenticate GitHub CLI with access to the required repositories.");
     if (auth.status === 0) {
-      const repositories = [...new Set([CATALOG_NAME, ...sources.map((source) => source.repositoryId)])];
+      const repositories = [...new Set(sources.map((source) => source.repositoryId))];
       for (const repository of repositories) {
         const access = probe("gh", ["api", "--hostname", "github.com", `repos/${repository}`, "--silent"]);
         add(`access:${repository}`, access.status === 0 ? "ok" : "error",
           access.status === 0 ? `GitHub CLI can read ${repository}.` : `Cannot read ${repository}; check permissions and connectivity.`);
       }
-      const artifacts = probe("gh", [
-        "api", "--hostname", "github.com",
-        `repos/${CATALOG_NAME}/actions/artifacts?name=source-catalogs&per_page=1`, "--silent",
-      ]);
-      add("source-catalog-artifact-access", artifacts.status === 0 ? "ok" : "error",
-        artifacts.status === 0 ? "GitHub CLI can read catalog Actions artifacts."
-          : "Cannot read catalog Actions artifacts; check repository access, Actions read permission and organization SSO.");
     }
   } else {
     add("network", "skipped", network ? "Network checks require GitHub CLI." : "No network checks requested. Use --network to check GitHub authentication and repository access.");

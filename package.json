@@ -16,7 +16,6 @@
     "kitia": "./bin/kitia.js"
   },
   "files": [
-    "catalogs/",
     "dist/",
     "bin/kitia.js",
     "README.md",
@@ -36,16 +35,10 @@
     "build": "node scripts/clean-build.js && tsc -p tsconfig.json",
     "prepare": "npm run build && node scripts/prepare-catalog.js && husky",
     "postpack": "node scripts/prepare-catalog.js --clean",
-    "test": "npm run build && node --test tests/catalog.test.js tests/site.test.js tests/documentation.test.js tests/technical.test.js tests/contract.test.js tests/bundles.test.js tests/source-catalogs.test.js tests/migrations.test.js",
+    "test": "npm run build && node --test tests/catalog.test.js tests/documentation.test.js tests/technical.test.js tests/contract.test.js tests/bundles.test.js tests/source-catalogs.test.js tests/migrations.test.js",
     "test:contract": "npm run build && node --test tests/contract.test.js",
-    "test:browser": "playwright test",
     "test:package": "node scripts/package-smoke.js",
-    "validate": "npm run build && node bin/kitia.js validate",
-    "catalog:build": "npm run build && node scripts/generate-catalog.js",
-    "catalog:check": "npm run build && node scripts/generate-catalog.js --check",
-    "catalog:sources-build": "npm run build && node scripts/build-source-catalogs.js",
-    "site:build": "npm run build && node scripts/build-site.js",
-    "site:dev": "npm run build && node scripts/serve-site.js"
+    "validate": "npm run build && node bin/kitia.js validate"
   },
   "dependencies": {
     "ink": "8.0.0",
@@ -53,7 +46,6 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.0",
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "ajv": "8.20.0",

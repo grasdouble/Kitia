@@ -8,13 +8,22 @@ const {
 const {
   digest, identity, conflict, readMcpConfig, addConfigPlan, isUserMcp,
 } = require("./utils.js");
-import type {
-  BundleMember, CatalogResource, CliOptions, InstallState, JsonRecord, McpConfiguration, McpFileConfig,
-} from "../../types.js";
+import type { BundleMember, CatalogResource } from "../entries.js";
+import type { CliOptions } from "../../cli/arguments.js";
+import type { BundleInventoryRecord, InstallState, McpInventoryRecord, ResourceInventoryRecord } from "../inventory/files.js";
+import type { InstallPlanEntry } from "../plan.js";
+import type { McpFileConfig } from "./utils.js";
+
+export interface CascadeSummary {
+  resource: string;
+  bundles: string[];
+  dependencies: string[];
+  preserved: string[];
+}
 
 function prepareMcpRemoval(
   id: string,
-  record: JsonRecord,
+  record: McpInventoryRecord,
   root: string,
   configurations: Map<string, McpFileConfig>,
   remove: string[],
@@ -22,7 +31,7 @@ function prepareMcpRemoval(
   options: CliOptions,
 ) {
   for (const [relativePath, tracked] of Object.entries(
-    record.configurations as Record<string, McpConfiguration>,
+    record.configurations,
   )) {
     if (!tracked.managed) {
       messages.push(`Preserved pre-existing MCP ${record.server} in ${relativePath}`);
@@ -55,9 +64,9 @@ function prepareUninstall(
 ) {
   const state = readInstallState(root);
   const inventoryFingerprint = installedFingerprint(root, LOCK_PATH);
-  const bundleRecords: Record<string, JsonRecord> = state.bundles || {};
-  const mcpRecords: Record<string, JsonRecord> = state.mcps || {};
-  const bundles: Array<[string, JsonRecord]> = bundleIds.map((id): [string, JsonRecord] => {
+  const bundleRecords: Record<string, BundleInventoryRecord> = state.bundles || {};
+  const mcpRecords: Record<string, McpInventoryRecord> = state.mcps || {};
+  const bundles: Array<[string, BundleInventoryRecord]> = bundleIds.map((id): [string, BundleInventoryRecord] => {
     const bundle = Object.hasOwn(bundleRecords, id) ? bundleRecords[id] : null;
     if (!bundle || options.scope && bundle.scope !== options.scope) {
       throw new CatalogError(`No tracked installation for bundle:${id}`, "RESOURCE_NOT_FOUND");
@@ -66,10 +75,10 @@ function prepareUninstall(
   });
   if (requestedResource) {
     const { kind, id } = requestedResource;
-    const record = kind === "mcp" ? mcpRecords[id] : state.resources[`${kind}:${id}`];
     const installedInScope = kind === "mcp"
-      ? record && (options.scope !== "user" || isUserMcp(record))
-      : record && (options.scope !== "user" || isUserResource(`${kind}:${id}`, record));
+      ? mcpRecords[id] && (options.scope !== "user" || isUserMcp(mcpRecords[id]))
+      : state.resources[`${kind}:${id}`] &&
+        (options.scope !== "user" || isUserResource(`${kind}:${id}`, state.resources[`${kind}:${id}`]));
     if (!installedInScope) {
       throw new CatalogError(`No tracked installation for ${kind}:${id}`, "RESOURCE_NOT_FOUND");
     }
@@ -87,7 +96,7 @@ function prepareUninstall(
     }
   }
 
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   const configurations = new Map<string, McpFileConfig>();
   const remove: string[] = [];
   const messages = [];
@@ -99,15 +108,20 @@ function prepareUninstall(
     for (const member of bundle.resources) members.set(memberKey(member), member);
   }
 
-  const removed = new Set();
-  const preserved = new Set();
+  const removed = new Set<string>();
+  const preserved = new Set<string>();
   const removeMember = (member: BundleMember, explicit = false) => {
     const key = memberKey(member);
-    const resourceRecord = member.kind === "mcp" ? state.mcps[member.id] : state.resources[key];
-    if (!resourceRecord) {
+    const exists = member.kind === "mcp"
+      ? Object.hasOwn(mcpRecords, member.id)
+      : Object.hasOwn(state.resources, key);
+    if (!exists) {
       throw new CatalogError(`Bundle dependency ${key} has no tracked installation; refusing partial removal.`, "LOCAL_CONFLICT");
     }
-    if (!explicit && resourceRecord.standalone) {
+    const standalone = member.kind === "mcp"
+      ? mcpRecords[member.id].standalone
+      : state.resources[key].standalone;
+    if (!explicit && standalone) {
       messages.push(member.kind === "mcp"
         ? `Preserved independently installed MCP: ${key}`
         : `Preserved independently installed resource: ${key}`);
@@ -115,9 +129,10 @@ function prepareUninstall(
       return;
     }
     if (member.kind === "mcp") {
-      prepareMcpRemoval(member.id, resourceRecord, root, configurations, remove, messages, options);
-      delete state.mcps[member.id];
+      prepareMcpRemoval(member.id, mcpRecords[member.id], root, configurations, remove, messages, options);
+      delete mcpRecords[member.id];
     } else {
+      const resourceRecord = state.resources[key];
       const { modified } = inspectInstalledFiles(root, resourceRecord);
       if (modified.length && !options.force) {
         conflict(`Refusing to remove locally modified files: ${modified.join(", ")}`);
@@ -161,7 +176,7 @@ function prepareUninstall(
   return { plan, settings, messages, summary };
 }
 
-function cascadeSummaryText(summary: JsonRecord): string {
+function cascadeSummaryText(summary: CascadeSummary): string {
   const parts = [
     `Cascade uninstall of ${summary.resource} will also remove bundles: ${summary.bundles.join(", ")}.`,
   ];
@@ -178,7 +193,7 @@ function uninstallBundle(id: string, root: string, options: CliOptions = {}) {
 
 async function uninstallResourceWithBundles(kind: BundleMember["kind"], id: string, root: string, options: CliOptions = {}) {
   const state = readInstallState(root);
-  const bundleRecords: Record<string, JsonRecord> = state.bundles || {};
+  const bundleRecords: Record<string, BundleInventoryRecord> = state.bundles || {};
   const dependents = Object.entries(bundleRecords).filter(([, bundle]) =>
     bundle.resources.some((member) => memberKey(member) === `${kind}:${id}`)).map(([bundleId]) => bundleId);
   if (!dependents.length) {
@@ -207,14 +222,14 @@ async function uninstallResourceWithBundles(kind: BundleMember["kind"], id: stri
 
 function uninstallMcp(id: string, root: string, options: CliOptions = {}) {
   const state = readInstallState(root);
-  const mcpRecords: Record<string, JsonRecord> = state.mcps || {};
-  const bundleRecords: Record<string, JsonRecord> = state.bundles || {};
+  const mcpRecords: Record<string, McpInventoryRecord> = state.mcps || {};
+  const bundleRecords: Record<string, BundleInventoryRecord> = state.bundles || {};
   const record = Object.hasOwn(mcpRecords, id) ? mcpRecords[id] : null;
   if (!record || options.scope === "user" && !isUserMcp(record)) throw new CatalogError(`No tracked installation for mcp:${id}`, "RESOURCE_NOT_FOUND");
   const dependents = Object.entries(bundleRecords).filter(([, bundle]) => bundle.resources.some((member) =>
     member.kind === "mcp" && member.id === id)).map(([id]) => id);
   if (dependents.length) conflict(`mcp:${id} is required by bundles: ${dependents.join(", ")}. Uninstall those bundles first.`);
-  const plan = new Map();
+  const plan = new Map<string, InstallPlanEntry>();
   const configurations = new Map<string, McpFileConfig>();
   const remove: string[] = [];
   const messages = [];

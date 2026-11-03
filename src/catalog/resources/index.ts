@@ -9,8 +9,9 @@ const {
   LOCAL_KINDS,
   validateEntry,
   formatResource,
-  filterResources,
 } = require("../entries.js");
+import type { CatalogResource } from "../entries.js";
+import type { InstallPlanEntry } from "../plan.js";
 
 const CATALOG_ROOT = path.resolve(__dirname, "../../..");
 const CATALOG_NAME = "grasdouble/Kitia";
@@ -44,20 +45,6 @@ const MCP_DIRECTORY = ".agents/kitia-mcp";
 const SOURCE_SKILL_DIRECTORIES = {
   "github-copilot": ".agents/skills",
   "claude-code": ".claude/skills",
-};
-
-type BundleReference = {
-  catalog: string;
-  kind: string;
-  id: string;
-};
-
-type CatalogResource = {
-  group?: string;
-  kind: string;
-  id: string;
-  resources?: BundleReference[];
-  inputs?: Record<string, unknown>;
 };
 
 class CatalogError extends Error {
@@ -172,6 +159,7 @@ function parseFrontmatter(text, filePath) {
 function loadCatalog(catalogRoot = CATALOG_ROOT) {
   const root = fs.realpathSync(catalogRoot);
   const manifestPath = path.join(root, "catalogs", "catalog.json");
+  if (!fs.existsSync(manifestPath)) return [];
   let manifest;
   try {
     manifest = JSON.parse(readUtf8(manifestPath, "Catalog manifest"));
@@ -381,7 +369,12 @@ function mcpConfigPaths(tool, scope) {
     .map((runtime) => runtime === "claude" ? ".claude.json" : ".copilot/mcp-config.json");
 }
 
-function addPlanEntry(plan, relativePath, content, executable = false) {
+function addPlanEntry(
+  plan: Map<string, InstallPlanEntry>,
+  relativePath: string,
+  content: Buffer,
+  executable = false,
+): void {
   const existing = plan.get(relativePath);
   if (existing && (!existing.content.equals(content) || existing.executable !== executable)) {
     throw new CatalogError(`Multiple resources generate different content for ${relativePath}`);
@@ -404,5 +397,5 @@ module.exports = {
   rejectUnsupportedVersion,
   loadCatalog, validateSourceCatalog, validateManifest,
   validateBundleReferences, mcpConfigPaths, validateMetadata, frontmatterParts,
-  addPlanEntry, assertInstallableResource, formatResource, filterResources, validateEntry,
+  addPlanEntry, assertInstallableResource, formatResource, validateEntry,
 };

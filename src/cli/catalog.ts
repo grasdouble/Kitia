@@ -1,6 +1,7 @@
 "use strict";
 
-import type { CatalogResource, CliOptions } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+import type { CliOptions } from "./arguments.js";
 const { CatalogError } = require("../catalog/resources/index.js");
 const { matchesSearch } = require("../catalog/search.js");
 
@@ -32,7 +33,7 @@ function listCatalogResources(
   sourceResources: CatalogResource[],
   options: CliOptions,
 ): CatalogResource[] {
-  return catalogEntries(resources, sourceResources).filter((resource) => {
+  return catalogEntries([], sourceResources).filter((resource) => {
     const tags = resource.tags || [];
     return (!options.catalog || resource.catalog === options.catalog) &&
       (!options.kind || resource.kind === options.kind) &&

@@ -19,8 +19,9 @@ test("local Markdown links resolve", () => {
   const files = [
     ...["README.md", "CONTRIBUTING.md", "CHANGELOG.md"]
       .map((file) => path.join(root, file)),
-    ...markdownFiles(path.join(root, "catalogs")),
     ...markdownFiles(path.join(root, "docs")),
+    ...markdownFiles(path.join(root, "migrations")),
+    ...markdownFiles(path.join(root, ".github")),
   ];
   for (const file of files) {
     for (const [, url] of fs.readFileSync(file, "utf8").matchAll(/\[[^\]\n]*\]\(([^\s)]+)\)/g)) {

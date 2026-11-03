@@ -1,28 +1,44 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { render, useInput, useWindowSize } from "ink";
-import type {
-  CatalogResource, DashboardActionResult, PendingDashboardAction, ScanError,
-} from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+import type { ScanError } from "../catalog/lifecycle.js";
 import { cycleFilter, cycleIndex, filterCatalogResources, filterInventory } from "./helpers.mjs";
-import { CatalogScreen, InventoryScreen, ScreenFrame } from "./screens.mjs";
+import {
+  CatalogManagementScreen, CatalogScreen, InventoryScreen, ScreenFrame,
+  type CatalogFreshnessStatus,
+} from "./screens.mjs";
 import {
   ModalOverlay, addCatalogModal, confirmationModal, inventoryMigrationModal,
   optionsModal, postInstallModal, removeCatalogModal, refreshCatalogModal,
+  type PendingDashboardAction,
 } from "./modals.mjs";
 
-type CatalogEntry = { kind: "skill" | "agent" | "instruction"; id: string; path: string };
+import type { DashboardActionResult } from "../cli/dashboard.js";
+type CatalogEntry = { kind: "skill" | "agent" | "instruction"; id?: string; path: string };
 type AddCatalogRequest = {
   name: string;
   repository: string;
   mode: "basic" | "custom";
   entries: CatalogEntry[];
 };
-type UserCatalog = { name: string; repository: string };
+type UserCatalog = {
+  name: string;
+  repository: string;
+  mode?: "basic" | "custom";
+  entries?: CatalogEntry[];
+};
+type CatalogFreshnessResult = { name: string; status: CatalogFreshnessStatus };
 type CatalogActionResult = {
   catalogs?: UserCatalog[];
   resources?: CatalogResource[];
   refreshed?: Array<{ name: string; count: number }>;
   failures?: Array<{ name: string; message: string }>;
+};
+type CatalogMutationResult = {
+  catalog: string;
+  count: number;
+  catalogs?: UserCatalog[];
+  resources?: CatalogResource[];
 };
 type CatalogRemovalState = {
   step: "select" | "confirm" | "working" | "result";
@@ -42,12 +58,6 @@ type CatalogRefreshState = {
 };
 
 const h = React.createElement;
-function catalogEntryId(kind: CatalogEntry["kind"], path: string) {
-  const segments = path.split("/");
-  if (kind === "skill") return segments[segments.length - 1] || "";
-  const filename = segments[segments.length - 1] || "";
-  return filename.replace(kind === "agent" ? /(?:\.agent)?\.md$/i : /(?:\.instructions)?\.md$/i, "");
-}
 
 
 export function Dashboard({
@@ -65,15 +75,12 @@ export function Dashboard({
       resource: CatalogResource,
       options: { scope?: string; tool?: string },
     ) => Promise<DashboardActionResult>;
-    addCatalog?: (request: AddCatalogRequest) => Promise<{
-      catalog: string;
-      count: number;
-      catalogs?: UserCatalog[];
-      resources?: CatalogResource[];
-    }>;
+    addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
+    updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     userCatalogs?: UserCatalog[];
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
+    checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
   };
   onFinish: (success: boolean) => void;
 }) {
@@ -83,12 +90,16 @@ export function Dashboard({
   const [screenMode, setScreenMode] = useState("inventory");
   const [query, setQuery] = useState("");
   const [filterMode, setFilterMode] = useState(false);
+  const [showDetails, setShowDetails] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogFilterMode, setCatalogFilterMode] = useState(false);
   const [catalogIndex, setCatalogIndex] = useState(0);
+  const [catalogManagementIndex, setCatalogManagementIndex] = useState(0);
   const [catalogCandidates, setCatalogCandidates] = useState(() => actions.catalogResources || []);
   const [userCatalogs, setUserCatalogs] = useState(() => actions.userCatalogs || []);
+  const [catalogFreshness, setCatalogFreshness] = useState<Record<string, CatalogFreshnessStatus>>({});
+  const freshnessRequest = useRef(0);
   const [catalogRemoval, setCatalogRemoval] = useState<CatalogRemovalState | null>(null);
   const [catalogRefresh, setCatalogRefresh] = useState<CatalogRefreshState | null>(null);
   const [inventoryCatalogFilter, setInventoryCatalogFilter] = useState("all");
@@ -108,19 +119,43 @@ export function Dashboard({
   const [lastActionFailed, setLastActionFailed] = useState(false);
   const [catalogWizard, setCatalogWizard] = useState<null | {
     step: string;
+    intent: "add" | "edit";
+    originalName: string | null;
     name: string;
     repository: string;
     mode: "basic" | "custom";
     kind: "skill" | "agent" | "instruction";
-    id: string;
     path: string;
     entries: CatalogEntry[];
+    entryIndex: number;
     message: string;
   }>(null);
   const migrationScopes = [...new Set(scanErrors
     .filter((error) => error.code === "INVENTORY_MIGRATION_REQUIRED")
     .map((error) => error.scope)
     .filter((scope) => ["project", "user"].includes(scope)))];
+
+  const checkCatalogFreshness = async (catalogs = userCatalogs) => {
+    const request = ++freshnessRequest.current;
+    const checking = Object.fromEntries(catalogs.map(({ name }) => [name, "checking" as const]));
+    setCatalogFreshness(checking);
+    if (!actions.checkCatalogFreshness) {
+      setCatalogFreshness(Object.fromEntries(catalogs.map(({ name }) => [name, "unknown" as const])));
+      return;
+    }
+    try {
+      const results = await actions.checkCatalogFreshness();
+      if (request !== freshnessRequest.current) return;
+      const statusByName = new Map(results.map(({ name, status }) => [name, status]));
+      setCatalogFreshness(Object.fromEntries(catalogs.map(({ name }) =>
+        [name, statusByName.get(name) || "unknown"])));
+    } catch {
+      if (request === freshnessRequest.current) {
+        setCatalogFreshness(Object.fromEntries(catalogs.map(({ name }) =>
+          [name, "unknown" as const])));
+      }
+    }
+  };
 
   const visibleInventory = filterInventory(
     installedResources, query, inventoryCatalogFilter, inventoryKindFilter,
@@ -137,25 +172,38 @@ export function Dashboard({
     setCatalogWizard({ ...wizard, step: "submitting", message: "" });
     setActionPending(true);
     try {
-      if (!actions.addCatalog) throw new Error("Dashboard catalog handler is unavailable.");
-      const result = await actions.addCatalog({
+      const request = {
         name: wizard.name.trim(),
         repository: wizard.repository.trim(),
         mode: wizard.mode,
         entries: wizard.mode === "custom" ? wizard.entries : [],
-      });
+      };
+      let result: CatalogMutationResult;
+      if (wizard.intent === "edit") {
+        if (!actions.updateCatalog || !wizard.originalName) {
+          throw new Error("Dashboard catalog update handler is unavailable.");
+        }
+        result = await actions.updateCatalog(wizard.originalName, request);
+      } else {
+        if (!actions.addCatalog) throw new Error("Dashboard catalog handler is unavailable.");
+        result = await actions.addCatalog(request);
+      }
       if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
-      if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+      const updatedCatalogs = Array.isArray(result.catalogs) ? [...result.catalogs] : userCatalogs;
+      if (Array.isArray(result.catalogs)) setUserCatalogs(updatedCatalogs);
+      void checkCatalogFreshness(updatedCatalogs);
       setLastActionFailed(false);
+      const action = wizard.intent === "edit" ? "updated" : "added";
       setCatalogWizard({
         ...wizard,
         step: "result",
-        message: `Catalog added: ${result.catalog} · ${result.count} resource${result.count === 1 ? "" : "s"} indexed.`,
+        message: `Catalog ${action}: ${result.catalog} · ${result.count} resource${result.count === 1 ? "" : "s"} indexed.`,
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setLastActionFailed(true);
-      setCatalogWizard({ ...wizard, step: "result", message: `Catalog add failed: ${detail}` });
+      const action = wizard.intent === "edit" ? "update" : "add";
+      setCatalogWizard({ ...wizard, step: "result", message: `Catalog ${action} failed: ${detail}` });
     } finally {
       setActionPending(false);
     }
@@ -167,8 +215,12 @@ export function Dashboard({
     try {
       if (!actions.removeCatalog) throw new Error("Dashboard catalog removal handler is unavailable.");
       const result = await actions.removeCatalog(name);
-      if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+      const updatedCatalogs = Array.isArray(result.catalogs)
+        ? [...result.catalogs]
+        : userCatalogs.filter((catalog) => catalog.name !== name);
+      if (Array.isArray(result.catalogs)) setUserCatalogs(updatedCatalogs);
       if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
+      void checkCatalogFreshness(updatedCatalogs);
       setCatalogRemoval({
         step: "result", index: 0, name,
         message: `Removed catalog ${name}. Installed artifacts were not removed.`,
@@ -193,8 +245,10 @@ export function Dashboard({
     try {
       if (!actions.refreshCatalog) throw new Error("Dashboard catalog refresh handler is unavailable.");
       const result = await actions.refreshCatalog(name);
-      if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+      const updatedCatalogs = Array.isArray(result.catalogs) ? [...result.catalogs] : userCatalogs;
+      if (Array.isArray(result.catalogs)) setUserCatalogs(updatedCatalogs);
       if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
+      void checkCatalogFreshness(updatedCatalogs);
       const count = result.refreshed?.reduce((total, catalog) => total + catalog.count, 0) || 0;
       const refreshed = result.refreshed?.length || 0;
       const failed = Boolean(result.failures?.length);
@@ -272,31 +326,64 @@ export function Dashboard({
       if (key.return || key.escape || (key.ctrl && character === "c")) onFinish(false);
       return;
     }
-    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending && character === "n" &&
-        screenMode === "inventory" && actions.addCatalog) {
+    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending &&
+        character === "m" && screenMode === "inventory" && !filterMode) {
+      setScreenMode("catalog-management");
+      setCatalogManagementIndex(0);
+      void checkCatalogFreshness();
+      return;
+    }
+    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending && character === "a" &&
+        screenMode === "catalog-management" && actions.addCatalog) {
       setCatalogWizard({
         step: "name",
+        intent: "add",
+        originalName: null,
         name: "",
         repository: "",
         mode: "basic",
         kind: "skill",
-        id: "",
         path: "",
         entries: [],
+        entryIndex: 0,
+        message: "",
+      });
+      return;
+    }
+    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending && character === "e" &&
+        screenMode === "catalog-management" && actions.updateCatalog && userCatalogs.length) {
+      const selected = userCatalogs[Math.min(catalogManagementIndex, userCatalogs.length - 1)];
+      setCatalogWizard({
+        step: "name",
+        intent: "edit",
+        originalName: selected.name,
+        name: selected.name,
+        repository: selected.repository,
+        mode: selected.mode || "basic",
+        kind: selected.entries?.[0]?.kind || "skill",
+        path: "",
+        entries: selected.mode === "custom" ? [...(selected.entries || [])] : [],
+        entryIndex: 0,
         message: "",
       });
       return;
     }
     if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending &&
-        character === "g" && screenMode === "inventory" && actions.refreshCatalog && userCatalogs.length) {
+        character === "r" && screenMode === "catalog-management" &&
+        actions.refreshCatalog && userCatalogs.length) {
+      const index = Math.min(catalogManagementIndex, userCatalogs.length - 1);
       setCatalogRefresh({
-        step: "scope", scope: "one", index: 0, name: "", message: "", failed: false,
+        step: "scope", scope: "one", index, name: "", message: "", failed: false,
       });
       return;
     }
     if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending &&
-        character === "r" && screenMode === "inventory" && actions.removeCatalog && userCatalogs.length) {
-      setCatalogRemoval({ step: "select", index: 0, name: userCatalogs[0].name, message: "", failed: false });
+        key.delete && screenMode === "catalog-management" &&
+        actions.removeCatalog && userCatalogs.length) {
+      const index = Math.min(catalogManagementIndex, userCatalogs.length - 1);
+      setCatalogRemoval({
+        step: "select", index, name: userCatalogs[index].name, message: "", failed: false,
+      });
       return;
     }
     if (catalogWizard) {
@@ -327,13 +414,36 @@ export function Dashboard({
       }
       if (catalogWizard.step === "entries") {
         if (character === "a") {
-          setCatalogWizard({ ...catalogWizard, step: "kind", kind: "skill", id: "", path: "" });
-        } else if (key.return) {
-          if (catalogWizard.entries.length) void submitCatalog(catalogWizard);
-          else setCatalogWizard({
-            ...catalogWizard,
-            message: "Add at least one explicit entry before finishing a custom catalog.",
+          setCatalogWizard({
+            ...catalogWizard, step: "kind", kind: "skill", path: "", message: "",
           });
+        } else if (catalogWizard.entries.length && key.upArrow) {
+          setCatalogWizard({
+            ...catalogWizard,
+            entryIndex: cycleIndex(catalogWizard.entries.length, catalogWizard.entryIndex, -1),
+          });
+        } else if (catalogWizard.entries.length && key.downArrow) {
+          setCatalogWizard({
+            ...catalogWizard,
+            entryIndex: cycleIndex(catalogWizard.entries.length, catalogWizard.entryIndex, 1),
+          });
+        } else if (key.delete && catalogWizard.entries.length) {
+          const entries = catalogWizard.entries.filter((_, index) => index !== catalogWizard.entryIndex);
+          setCatalogWizard({
+            ...catalogWizard,
+            entries,
+            entryIndex: Math.min(catalogWizard.entryIndex, Math.max(0, entries.length - 1)),
+            message: "",
+          });
+        } else if (key.return) {
+          if (catalogWizard.mode === "basic" || catalogWizard.entries.length) {
+            void submitCatalog(catalogWizard);
+          } else {
+            setCatalogWizard({
+              ...catalogWizard,
+              message: "Add at least one explicit entry before finishing a custom catalog.",
+            });
+          }
         }
         return;
       }
@@ -351,20 +461,33 @@ export function Dashboard({
           }
         } else if (catalogWizard.step === "mode") {
           if (catalogWizard.mode === "basic") void submitCatalog(catalogWizard);
-          else setCatalogWizard({ ...catalogWizard, step: "kind" });
+          else if (catalogWizard.intent === "edit") {
+            setCatalogWizard({ ...catalogWizard, step: "entries" });
+          } else {
+            setCatalogWizard({ ...catalogWizard, step: "kind" });
+          }
         } else if (catalogWizard.step === "kind") {
           setCatalogWizard({ ...catalogWizard, step: "path" });
         } else if (catalogWizard.step === "path") {
-          const path = catalogWizard.path.trim();
-          const id = catalogEntryId(catalogWizard.kind, path);
-          if (path && id && !path.startsWith("/") && !path.includes("\\") &&
-              !path.split("/").some((segment) => segment === ".." || segment === ".")) {
+          const path = catalogWizard.path.trim().replace(/\/+$/, "");
+          if (path && !path.startsWith("/") && !path.includes("\\") &&
+              !path.split("/").some((segment) => segment === ".." || segment === "." || !segment)) {
             const entries = [...catalogWizard.entries, {
-              kind: catalogWizard.kind, id, path,
+              kind: catalogWizard.kind, path,
             }];
-            setCatalogWizard({ ...catalogWizard, entries, step: "entries", id: "", path: "" });
+            setCatalogWizard({
+              ...catalogWizard,
+              entries,
+              entryIndex: entries.length - 1,
+              step: "entries",
+              path: "",
+              message: "",
+            });
           } else {
-            setCatalogWizard({ ...catalogWizard, message: "Enter a safe source path with a derivable ID." });
+            setCatalogWizard({
+              ...catalogWizard,
+              message: "Enter a safe repository-relative directory or Markdown file path.",
+            });
           }
         }
         return;
@@ -421,7 +544,12 @@ export function Dashboard({
           });
         } else if (key.return) {
           if (catalogRefresh.scope === "all") void runCatalogRefresh();
-          else setCatalogRefresh({ ...catalogRefresh, step: "select", name: userCatalogs[0].name });
+          else {
+            const index = Math.min(catalogRefresh.index, userCatalogs.length - 1);
+            setCatalogRefresh({
+              ...catalogRefresh, step: "select", index, name: userCatalogs[index].name,
+            });
+          }
         }
       } else if (key.escape) {
         setCatalogRefresh({ ...catalogRefresh, step: "scope" });
@@ -493,6 +621,8 @@ export function Dashboard({
         }
       } else if (key.escape) {
         setScreenMode("inventory");
+      } else if (character === "d") {
+        setShowDetails((value) => !value);
       } else if (character === "f") {
         setCatalogFilterMode(true);
       } else if (character === "c") {
@@ -550,6 +680,16 @@ export function Dashboard({
       }
       return;
     }
+    if (screenMode === "catalog-management") {
+      if (key.escape) setScreenMode("inventory");
+      else if (character === "d") setShowDetails((value) => !value);
+      else if (key.upArrow || key.downArrow) {
+        setCatalogManagementIndex(cycleIndex(
+          userCatalogs.length, catalogManagementIndex, key.downArrow ? 1 : -1,
+        ));
+      }
+      return;
+    }
 
     if (filterMode) {
       if (key.return) setFilterMode(false);
@@ -572,7 +712,12 @@ export function Dashboard({
       onFinish(!lastActionFailed);
     } else if (key.upArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, -1));
     else if (key.downArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, 1));
+    else if (character === "d") setShowDetails((value) => !value);
     else if (character === "f") setFilterMode(true);
+    else if (character === "m") {
+      setScreenMode("catalog-management");
+      setCatalogManagementIndex(0);
+    }
     else if (character === "c") {
       setInventoryCatalogFilter(cycleFilter(
         inventoryCatalogFilter, installedResources, "catalog", "kind", inventoryKindFilter,
@@ -617,11 +762,12 @@ export function Dashboard({
   } else if (catalogWizard) {
     modal = addCatalogModal({
       step: catalogWizard.step,
+      intent: catalogWizard.intent,
+      entryIndex: catalogWizard.entryIndex,
       name: catalogWizard.name,
       repository: catalogWizard.repository,
       mode: catalogWizard.mode,
       kind: catalogWizard.kind,
-      id: catalogWizard.id,
       path: catalogWizard.path,
       entries: catalogWizard.entries,
       message: catalogWizard.message,
@@ -659,7 +805,22 @@ export function Dashboard({
       columns,
     });
   }
-  if (screenMode === "catalog" || screenMode === "install-options") {
+  if (screenMode === "catalog-management") {
+    baseScreen = h(CatalogManagementScreen, {
+      catalogs: userCatalogs,
+      catalogResources: candidates,
+      installedResources,
+      selectedIndex: catalogManagementIndex,
+      freshness: catalogFreshness,
+      canAdd: typeof actions.addCatalog === "function",
+      canRemove: typeof actions.removeCatalog === "function" && userCatalogs.length > 0,
+      canEdit: typeof actions.updateCatalog === "function" && userCatalogs.length > 0,
+      canRefresh: typeof actions.refreshCatalog === "function" && userCatalogs.length > 0,
+      showDetails,
+      columns,
+      rows,
+    });
+  } else if (screenMode === "catalog" || screenMode === "install-options") {
     baseScreen = h(CatalogScreen, {
       candidates,
       resources: installedResources,
@@ -668,6 +829,7 @@ export function Dashboard({
       catalogFilter: catalogSourceFilter,
       kindFilter: catalogKindFilter,
       selectedIndex: activeCatalogIndex,
+      showDetails,
       columns,
       rows,
     });
@@ -682,9 +844,7 @@ export function Dashboard({
       selectedIndex: activeInventoryIndex,
       actionMessage,
       catalogAvailable: candidates.length > 0,
-      canRemoveCatalog: typeof actions.removeCatalog === "function" && userCatalogs.length > 0,
-      canRefreshCatalog: typeof actions.refreshCatalog === "function" && userCatalogs.length > 0,
-      canAddCatalog: typeof actions.addCatalog === "function",
+      showDetails,
       canExecute: typeof actions.execute === "function" && Boolean(selectedResource),
       columns,
       rows,
@@ -706,15 +866,12 @@ export async function runDashboard(
       resource: CatalogResource,
       options: { scope?: string; tool?: string },
     ) => Promise<DashboardActionResult>;
-    addCatalog?: (request: AddCatalogRequest) => Promise<{
-      catalog: string;
-      count: number;
-      catalogs?: UserCatalog[];
-      resources?: CatalogResource[];
-    }>;
+    addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
+    updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     userCatalogs?: UserCatalog[];
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
+    checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
   } = {},
 ): Promise<boolean> {
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") return false;

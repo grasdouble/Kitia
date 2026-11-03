@@ -8,6 +8,7 @@ const { spawnSync } = require("node:child_process");
 const { beforeEach, afterEach, test } = require("node:test");
 const Ajv = require("ajv");
 const { readInstallState } = require("../dist/catalog/inventory/index.js");
+const { CatalogError } = require("../dist/catalog/resources/index.js");
 const { acquireOperationLock, OPERATION_LOCK } = require("../dist/catalog/operation.js");
 const {
   CLI_DISCOVERY_SCHEMA_VERSION, CLI_REPORT_SCHEMA_VERSION,
@@ -53,7 +54,7 @@ function addAgent() {
 beforeEach(() => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-contract-"));
   catalog = path.join(temporary, "catalog");
-  sourceData = path.join(catalog, "source-data");
+  sourceData = path.join(temporary, "kitia-config", "source-catalogs");
   target = path.join(temporary, "target");
   home = path.join(temporary, "User profile");
   fs.mkdirSync(target);
@@ -61,13 +62,6 @@ beforeEach(() => {
   fs.cpSync(path.join(root, "dist"), path.join(catalog, "dist"), { recursive: true });
   fs.cpSync(path.join(root, "bin"), path.join(catalog, "bin"), { recursive: true });
   fs.mkdirSync(path.join(catalog, "catalogs"), { recursive: true });
-  writeJson(path.join(catalog, "catalogs/catalogSources.json"), {
-    catalog_version: 1,
-    sources: [{
-      name: "community",
-      repository: "https://github.com/example/community-skills",
-    }],
-  });
   writeJson(path.join(catalog, "dist/catalog-build.json"), {
     catalog: "grasdouble/Kitia", commit: "a".repeat(40), package_version: "0.2.0", dirty: false,
   });
@@ -85,6 +79,10 @@ beforeEach(() => {
   const skill = path.join(catalog, "catalogs/fixture/skills/contract-skill/SKILL.md");
   fs.mkdirSync(path.dirname(skill), { recursive: true });
   fs.writeFileSync(skill, "---\nname: contract-skill\ndescription: Contract fixture.\n---\n\nSynthetic body.\n");
+  writeJson(path.join(path.dirname(sourceData), "catalogSources.json"), {
+    catalog_version: 1,
+    sources: [{ name: "community", repository: "https://github.com/example/community-skills" }],
+  });
   writeJson(path.join(sourceData, "catalogSources.json"), {
     catalog_version: 1,
     sources: [{ name: "community", repository: "https://github.com/example/community-skills" }],
@@ -107,7 +105,7 @@ function run(args) {
   const result = spawnSync(process.execPath, [path.join(catalog, "bin/kitia.js"), ...args], {
     cwd: target, encoding: "utf8",
     env: { ...process.env, HOME: home, USERPROFILE: home,
-      KITIA_SOURCE_CATALOGS: sourceData,
+      KITIA_CONFIG_DIR: path.dirname(sourceData),
       NODE_PATH: path.join(root, "node_modules"), PATH: "", NO_COLOR: "1" },
   });
   if (result.error) throw result.error;
@@ -168,7 +166,7 @@ function snapshot(directory) {
 
 test("discovery keeps legacy arrays, source identity and metadata-free paths", () => {
   for (const args of [["list"], ["search", "fixture"]]) {
-    const result = run([...args, "--catalog", "internal", "--json"]);
+    const result = run([...args, "--json"]);
     assert.equal(result.status, 0, result.stderr);
     const data = JSON.parse(result.stdout);
     validate("cli-discovery", data);
@@ -194,25 +192,25 @@ test("discovery keeps legacy arrays, source identity and metadata-free paths", (
 });
 
 test("current reports preserve defaults, attention codes and dry-run action shapes", () => {
-  assertCompatible(report(["check", "--catalog", "internal", "--json"]), expectations.emptyCheck);
+  assertCompatible(report(["check", "--json"]), expectations.emptyCheck);
   for (const args of [["install", "contract-skill"], ["install", "skill", "contract-skill"]]) {
-    const preview = report([...args, "--catalog", "internal", "--dry-run", "--json"]);
+    const preview = report([...args, "--dry-run", "--json"]);
     assertCompatible(preview, expectations.installPreview);
     assert.deepEqual(fs.readdirSync(target), []);
   }
-  assert.equal(run(["install", "contract-skill", "--catalog", "internal"]).status, 0);
+  assert.equal(run(["install", "contract-skill"]).status, 0);
   assert.equal(fs.existsSync(path.join(target, ".claude")), false);
   validate("catalog-lock", JSON.parse(fs.readFileSync(path.join(target, ".agents/kitia-lock.json"), "utf8")));
-  assertCompatible(report(["check", "--catalog", "internal", "--json"]), expectations.currentCheck);
+  assertCompatible(report(["check", "--json"]), expectations.currentCheck);
   assertCompatible(report(["uninstall", "contract-skill", "--dry-run", "--json"]), expectations.uninstallPreview);
   const installed = path.join(target, ".agents/skills/contract-skill/SKILL.md");
   fs.appendFileSync(installed, "\nLocal customization.\n");
-  assertCompatible(report(["check", "--catalog", "internal", "--json"], 2), expectations.modifiedCheck);
-  assert.equal(run(["check", "--catalog", "internal"]).status, 1);
+  assertCompatible(report(["check", "--json"], 2), expectations.modifiedCheck);
+  assert.equal(run(["check"]).status, 1);
   const before = snapshot(target);
-  const conflict = report(["update", "--catalog", "internal", "--dry-run", "--json"], 1);
+  const conflict = report(["update", "--dry-run", "--json"], 1);
   assert.equal(conflict.errors[0].code, "LOCAL_CONFLICT");
-  const forced = report(["update", "--catalog", "internal", "--dry-run", "--force", "--json"]);
+  const forced = report(["update", "--dry-run", "--force", "--json"]);
   assert.ok(forced.actions.some((action) => action.action === "overwrite" && action.path.endsWith("/SKILL.md")));
   assert.deepEqual(snapshot(target), before);
   assertCompatible(report(["install", "contract-skill", "--json"], 1), expectations.invalidArguments);
@@ -240,7 +238,7 @@ test("community plans, diagnostics and partial discovery retain their public sha
 });
 
 test("user scope resolves a home with spaces and keeps project and personal lifecycles independent", () => {
-  const install = ["install", "skill", "contract-skill", "--catalog", "internal"];
+  const install = ["install", "skill", "contract-skill"];
   const scoped = ["--scope", "user"];
   const preview = report([...install, ...scoped, "--tool", "both", "--dry-run", "--json"]);
   assert.equal(preview.scope, "user");
@@ -534,7 +532,7 @@ test("version-1 inventories support personal agent ownership without rewriting o
 });
 
 test("schemas allow additive fields and extensible identities, but reject breaking shapes", () => {
-  const valid = report(["check", "--catalog", "internal", "--json"]);
+  const valid = report(["check", "--json"]);
   validate("cli-report", { ...valid, extra_advisory_field: true, resources: [{
     catalog: "future-catalog", kind: "future-kind", id: "sample", status: "current", extra: {},
   }] });
@@ -598,13 +596,13 @@ test("future inventory versions and unsupported resource shapes refuse mutations
     writeJson(path.join(target, ".agents/kitia-lock.json"), inventory);
     fs.writeFileSync(path.join(target, "user-file.txt"), "Preserve user content.");
     const before = snapshot(target);
-    const checked = report(["check", "--catalog", "internal", "--json"], 1);
+    const checked = report(["check", "--json"], 1);
     assert.equal(checked.errors[0].code, code);
     assert.match(checked.errors[0].message, message);
     assert.doesNotMatch(checked.errors[0].message, /Invalid installation state|restore it from version control/);
     for (const args of [
-      ["install", "contract-skill", "--catalog", "internal"],
-      ["update", "--catalog", "internal"],
+      ["install", "contract-skill"],
+      ["update"],
       ["uninstall", "legacy-skill"],
       ["install", "skill", "upstream-skill", "--catalog", "community"],
     ]) {
@@ -633,34 +631,49 @@ test("malformed current inventories remain errors, not supported-format migratio
   }
 });
 
-test("unsupported catalog formats and kinds are reported without rewriting their data", () => {
-  for (const [file, version, location] of [
-    ["catalog.json", 3, path.join(catalog, "catalogs/catalog.json")],
-    ["community.json", 2, path.join(sourceData, "community.json")],
-  ]) {
-    const original = fs.readFileSync(location, "utf8");
-    const data = JSON.parse(original);
-    data.catalog_version = version;
-    writeJson(location, data);
-    const before = fs.readFileSync(location, "utf8");
-    const result = run(["validate"]);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /not supported by this CLI/);
-    const source = file === "catalog.json" ? "internal" : "community";
-    const discovery = run(["list", "--catalog", source, "--json"]);
-    assert.equal(discovery.status, 1);
-    assert.deepEqual(JSON.parse(discovery.stdout), []);
-    assert.equal(JSON.parse(discovery.stderr.trim()).code, "UNSUPPORTED_CATALOG_VERSION");
-    assert.equal(fs.readFileSync(location, "utf8"), before);
-    fs.writeFileSync(location, original);
+test("malformed source inventory records fail with controlled invalid installation errors", () => {
+  for (const record of [null, 7]) {
+    writeJson(path.join(target, ".agents/kitia-lock.json"), {
+      lock_version: 1,
+      catalog: "grasdouble/Kitia",
+      resources: {},
+      sources: { community: { skills: { "upstream-skill": record } } },
+      bundles: {},
+      mcps: {},
+    });
+    assert.throws(() => readInstallState(target), (error) => {
+      assert.ok(error instanceof CatalogError);
+      assert.match(error.message, /Invalid installation state/);
+      return true;
+    });
   }
-  const location = path.join(catalog, "catalogs/catalog.json");
-  writeJson(location, { catalog_version: 2, resources: [{ kind: "future-kind", id: "new-resource" }] });
-  const partial = run(["list", "--json"]);
-  assert.equal(partial.status, 1);
-  assert.equal(JSON.parse(partial.stderr.trim()).code, "UNSUPPORTED_RESOURCE_KIND");
-  const before = snapshot(target);
-  const refused = report(["install", "new-resource", "--catalog", "internal", "--dry-run", "--json"], 1);
-  assert.equal(refused.errors[0].code, "UNSUPPORTED_RESOURCE_KIND");
-  assert.deepEqual(snapshot(target), before);
+});
+
+test("validation and discovery ignore repository manifests and inspect user catalogs only", () => {
+  const sourceIndex = path.join(sourceData, "community.json");
+  const originalSource = fs.readFileSync(sourceIndex, "utf8");
+  const data = JSON.parse(originalSource);
+  data.catalog_version = 2;
+  writeJson(sourceIndex, data);
+  const before = fs.readFileSync(sourceIndex, "utf8");
+  const validation = run(["validate"]);
+  assert.equal(validation.status, 1);
+  assert.match(validation.stderr, /not supported by this CLI/);
+  const unavailable = run(["list", "--catalog", "community", "--json"]);
+  assert.equal(unavailable.status, 1);
+  assert.deepEqual(JSON.parse(unavailable.stdout), []);
+  assert.equal(JSON.parse(unavailable.stderr.trim()).code, "UNSUPPORTED_CATALOG_VERSION");
+  assert.equal(fs.readFileSync(sourceIndex, "utf8"), before);
+  fs.writeFileSync(sourceIndex, originalSource);
+
+  const repositoryManifest = path.join(catalog, "catalogs/catalog.json");
+  writeJson(repositoryManifest, { catalog_version: 3, resources: [] });
+  const localValidation = run(["validate"]);
+  assert.equal(localValidation.status, 0, localValidation.stderr);
+  assert.match(localValidation.stdout, /Validated 1 resources across configured user catalogs/);
+  const discovery = run(["list", "--json"]);
+  assert.equal(discovery.status, 0, discovery.stderr);
+  const resources = JSON.parse(discovery.stdout);
+  assert.ok(resources.length > 0);
+  assert.ok(resources.every((resource) => resource.catalog === "community"));
 });

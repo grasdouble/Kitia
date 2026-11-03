@@ -1,6 +1,17 @@
 "use strict";
 
-import type { CatalogResource, CliOptions, JsonRecord, ScanError } from "../types.js";
+import type { CatalogResource } from "../catalog/entries.js";
+import type { CliReport } from "./report.js";
+import type { CliOptions } from "./arguments.js";
+import type { ScanError } from "../catalog/lifecycle.js";
+export interface DashboardActionResult {
+  code: number;
+  messages: string[];
+  resources: CatalogResource[];
+  errors: ScanError[];
+  postInstallEnvironment: string[];
+}
+
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -31,7 +42,7 @@ function requiredMcpEnvironment(resource: CatalogResource, resources: CatalogRes
 }
 
 function createDashboardActionHandler(
-  executeCommand: (options: CliOptions, catalogRoot: string, report: JsonRecord | null) => Promise<number>,
+  executeCommand: (options: CliOptions, catalogRoot: string, report: CliReport | null) => Promise<number>,
 ) {
   return async function executeDashboardAction(
     action: string,
@@ -45,7 +56,7 @@ function createDashboardActionHandler(
       warnings?: ScanError[];
     },
     installOptions: CliOptions = {},
-  ): Promise<JsonRecord> {
+  ): Promise<DashboardActionResult> {
     const removingUnmanaged = action === "remove-unmanaged";
     if (removingUnmanaged && resource.managed !== false) {
       throw new Error("Only unmanaged dashboard artifacts can be removed this way.");
