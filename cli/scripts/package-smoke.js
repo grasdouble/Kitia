@@ -50,15 +50,13 @@ try {
   const manifest = JSON.parse(fs.readFileSync(path.join(installedRoot, "package.json"), "utf8"));
   assert.deepEqual(manifest.bin, { kitia: "cli/bin/kitia.js" });
 
-  const cli = path.join(consumer, "node_modules/.bin/kitia");
-  execFileSync(cli, ["dashboard"], {
+  const cli = path.join(installedRoot, manifest.bin.kitia);
+  execFileSync(process.execPath, [cli, "dashboard"], {
     cwd: consumer,
     encoding: "utf8",
     env: consumerEnvironment,
   });
-  const listed = JSON.parse(execFileSync(cli, [
-    "list", "--json",
-  ], {
+  const listed = JSON.parse(execFileSync(process.execPath, [cli, "list", "--json"], {
     cwd: consumer,
     encoding: "utf8",
     env: consumerEnvironment,
