@@ -1,12 +1,12 @@
 name: Feature request
-description: Suggest an improvement to the CLI, catalogs, website, or developer workflow.
+description: Suggest an improvement to the CLI, catalogs, or developer workflow.
 title: "[Feature]: "
 body:
   - type: markdown
     attributes:
       value: |
-        Describe the user need first. This project maintains a Node.js catalog CLI
-        and a static catalog website; catalog listings do not install external tools.
+        Describe the user need first. This project maintains a Node.js catalog CLI.
+        Catalog listings do not install external tools.
 
   - type: dropdown
     id: area
@@ -15,7 +15,6 @@ body:
       options:
         - CLI
         - Catalog data or resource lifecycle
-        - Static website
         - Package or release
         - CI or developer workflow
         - Documentation

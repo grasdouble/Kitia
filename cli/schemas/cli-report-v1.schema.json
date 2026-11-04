@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:kitia:cli-report:1",
+  "title": "Kitia CLI JSON report, version 1",
+  "type": "object",
+  "required": ["schema_version", "command", "dry_run", "status", "resources", "actions", "warnings", "messages", "errors"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "command": { "type": "string", "minLength": 1 },
+    "dry_run": { "type": "boolean" },
+    "scope": { "enum": ["project", "user"] },
+    "target": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["ok", "attention", "error"] },
+    "resources": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/definitions/identity" },
+          {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["current", "attention", "planned"] },
+              "issues": { "type": "array", "items": { "$ref": "#/definitions/issue" } },
+              "unsupported_runtimes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        ]
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "path", "resource"],
+        "allOf": [
+          {
+            "if": { "properties": { "action": { "const": "delegate_install" } }, "required": ["action"] },
+            "then": {
+              "properties": { "command": { "$ref": "#/definitions/delegatedCommand" } },
+              "required": ["command"]
+            }
+          }
+        ],
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "path": { "type": ["string", "null"] },
+          "resource": { "anyOf": [{ "$ref": "#/definitions/identity" }, { "type": "null" }] },
+          "command": { "$ref": "#/definitions/delegatedCommand" }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "$ref": "#/definitions/diagnostic" } },
+    "messages": { "type": "array", "items": { "type": "string" } },
+    "errors": { "type": "array", "items": { "$ref": "#/definitions/diagnostic" } },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "message"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["ok", "warning", "error", "skipped"] },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "delegatedCommand": {
+      "type": "object",
+      "required": ["program", "args"],
+      "properties": {
+        "program": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "catalog": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "required": ["code", "paths"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "catalog": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,15 +1,18 @@
 {
-  "name": "lufa-ai",
-  "version": "0.1.0",
-  "type": "module",
-  "description": "Catalogue local d’artefacts pour agents IA et CLI d’installation.",
+  "name": "@grasdouble/kitia",
+  "version": "0.0.1",
+  "description": "Kitia — Your AI toolkit, in good hands.",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/grasdouble/Lufa-AI.git"
+    "url": "git+https://github.com/grasdouble/Kitia.git"
   },
-  "homepage": "https://github.com/grasdouble/Lufa-AI#readme",
+  "homepage": "https://github.com/grasdouble/Kitia#readme",
   "bugs": {
-    "url": "https://github.com/grasdouble/Lufa-AI/issues"
+    "url": "https://github.com/grasdouble/Kitia/issues"
   },
   "keywords": [
     "ai",
@@ -17,58 +20,60 @@
     "skills",
     "catalog"
   ],
-  "engines": {
-    "node": ">=24"
+  "bin": {
+    "kitia": "cli/bin/kitia.js"
   },
   "files": [
-    "dist/",
-    "schemas/",
-    "generated/",
-    "catalog/",
-    "README.md"
+    "cli/dist/cli/",
+    "cli/dist/catalog/",
+    "cli/dist/dashboard/",
+    "cli/bin/kitia.js",
+    "cli/migrations/",
+    "cli/schemas/",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "docs/cli-contract.md",
+    "docs/inventory-migrations.md"
   ],
-  "bin": {
-    "lufa": "./dist/lufa-command.js"
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
-    "format": "prettier --plugin prettier-plugin-astro --write \"src/**/*.{js,ts}\" \"tests/**/*.js\" \"scripts/**/*.js\" \"*.js\" \"*.json\" \"schemas/**/*.json\" \"catalog/**/*.{json,md}\" \"generated/**/*.json\" \"*.md\" \".github/**/*.yml\" \"docs/adr/**/*.md\" \"web/**/*.{astro,js,css,mjs}\"",
-    "format:check": "prettier --plugin prettier-plugin-astro --check \"src/**/*.{js,ts}\" \"tests/**/*.js\" \"scripts/**/*.js\" \"*.js\" \"*.json\" \"schemas/**/*.json\" \"catalog/**/*.{json,md}\" \"generated/**/*.json\" \"*.md\" \".github/**/*.yml\" \"docs/adr/**/*.md\" \"web/**/*.{astro,js,css,mjs}\"",
-    "lint": "eslint .",
-    "build": "node scripts/build.js",
-    "build:check": "node scripts/check-build.js",
-    "prepare": "husky",
-    "typecheck": "tsc --noEmit",
-    "smoke:git-source": "node scripts/git-source-smoke.js",
-    "test": "npm run web:build && npm run web:build:pages && npm run web:test-fixture && node --experimental-strip-types --test",
-    "catalog:validate": "npm run build && node dist/catalog-command.js validate",
-    "catalog:build": "npm run build && node dist/catalog-command.js build",
-    "catalog:check": "npm run build && node dist/catalog-command.js check",
-    "lufa": "npm run build --silent && node dist/lufa-command.js",
-    "pack:smoke": "node tests/pack-smoke.js",
-    "web:dev": "cd web && astro dev",
-    "registry:build": "node --experimental-strip-types scripts/export-registry.js",
-    "web:build": "npm run registry:build && cd web && astro build",
-    "web:build:pages": "npm run registry:build && node scripts/build-pages.js",
-    "web:test-fixture": "astro build --root tests/fixtures/web-security",
-    "check:quality": "npm run format:check && npm run lint && npm run typecheck",
-    "check:platform": "npm run build:check && npm run catalog:check && npm test && npm run pack:smoke",
-    "check": "npm run check:quality && npm run check:platform"
+    "build": "npm run cli:build && npm run web:build",
+    "prepare": "npm run cli:build && husky",
+    "test": "npm run docs:test && npm run cli:test",
+    "cli:build": "rimraf dist cli/dist && tsc -p tsconfig.json",
+    "cli:test": "npm run cli:build && node --test cli/test/source-catalogs.test.js cli/test/migrations.test.js",
+    "cli:test:contract": "npm run cli:build && node --test cli/test/source-catalogs.test.js",
+    "cli:test:package-smoke": "npm run cli:build && node cli/scripts/package-smoke.js",
+    "cli:validate": "npm run cli:build && node cli/bin/kitia.js validate",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "release": "changeset publish",
+    "docs:test": "node --test docs/test/documentation.test.js",
+    "web:build": "vite build --config web/vite.config.ts",
+    "web:dev": "vite --config web/vite.config.ts",
+    "web:test:termless": "node web/scripts/screenshots-generator/termless-preflight.js && npm run cli:build && node --test web/test/termless-dashboard.test.mjs",
+    "web:screenshots:update:termless": "node web/scripts/screenshots-generator/termless-preflight.js && npm run cli:build && node web/scripts/screenshots-generator/update-site-screenshots-termless.js"
   },
   "dependencies": {
-    "ajv": "^8.20.0",
-    "prettier": "^3.9.9",
-    "semver": "^7.8.5"
+    "ink": "8.0.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.5",
-    "@types/semver": "^7.8.0",
-    "astro": "^7.3.8",
-    "eslint": "^10.12.0",
-    "globals": "^17.13.0",
+    "@changesets/cli": "^3.0.3",
+    "@resvg/resvg-js": "2.6.2",
+    "@termless/core": "0.10.2",
+    "@termless/xtermjs": "0.10.2",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "ajv": "8.20.0",
     "husky": "^9.1.7",
-    "prettier-plugin-astro": "^1.1.1",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.1"
+    "rimraf": "^6.1.4",
+    "typescript": "5.9.3",
+    "vite": "^6.4.1"
   }
 }

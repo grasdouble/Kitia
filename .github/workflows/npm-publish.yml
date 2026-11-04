@@ -1,0 +1,36 @@
+name: Release to npm
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@^11.5.1
+      - run: npm ci
+      - run: npm test
+      - run: npm run cli:validate
+      - run: npm run cli:test:package-smoke
+      - name: Create version PR or publish
+        uses: changesets/action@v1
+        with:
+          version: npm run changeset:version
+          publish: npm run release
+          title: "chore: version packages"
+          commit: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem with the CLI, catalog, website, or packaging.
+description: Report a reproducible problem with the CLI, catalog, or packaging.
 title: "[Bug]: "
 body:
   - type: markdown
@@ -15,7 +15,6 @@ body:
       options:
         - CLI
         - Catalog data or resource installation
-        - Static website
         - Package or release
         - CI or catalog generation
         - Other
@@ -36,7 +35,7 @@ body:
     id: reproduction
     attributes:
       label: Steps to reproduce
-      description: Include the command, resource ID, or page URL where relevant.
+      description: Include the command or resource ID where relevant.
       placeholder: |
         1. Run ...
         2. Select ...
@@ -63,8 +62,8 @@ body:
   - type: input
     id: environment
     attributes:
-      label: Operating system or browser
-      placeholder: For example, macOS 15 or Firefox 140
+      label: Operating system or terminal
+      placeholder: For example, macOS 15 or zsh 5.9
 
   - type: textarea
     id: additional-context
