@@ -1,35 +1,13 @@
 # Changelog
 
-## Unreleased
-- Remove built-in catalog, local resource, MCP, and bundle support; retain user-configured external catalogs and unmanaged artifact discovery.
-- Keep the inventory at source-only version 1 during development; remove the built-in catalog without introducing a format migration.
-- Use Termless xterm.js screenshots directly in the website gallery; promote the pair only after complete-grid checks while preserving the original captures.
-- Show production update and uninstall shortcuts in Termless captures using the isolated showcase fixture's real action handler.
-- Match Termless screenshot geometry and ANSI palette to the reference while preserving raw Ink captures.
-- Use concise deterministic demo metadata so repository URL, source revision, and instruction ID fit in the Termless captures.
-- Show custom catalog source folders as `Catalog[folder]` in catalog browsing and details, using the saved custom path mappings.
-- Allocate wider Source and Kind columns in the catalog browser while preserving ID space at narrow widths.
-- Show catalog-browsing Installed, Source, Kind, ID columns and keep descriptions in selected-resource details.
-- Show inventory Status, Scope, Kind, ID, Catalog columns in that order and allocate remaining table width to Catalog.
-- Remove descriptions from inventory rows and show them in selected-resource details.
-- Reshape the interactive Ink dashboard with resource, managed, and review summary cards above the inventory.
-- Clarify confirmation modal choices with distinct selected and destructive-action styling.
-- Unify selection markers across install, catalog setup, removal, and refresh dialogs; show more install-description text.
-- Render modal choices and selectable catalog rows through shared Ink components.
-- Keep unmanaged artifact descriptions from Markdown frontmatter available in selected-resource details; retain paths when metadata is absent.
-- Keep catalog add/remove shortcuts in catalog management; open it from inventory with `M`.
-- Add a dedicated catalog-management screen with `A` add, `Delete` remove, `R` refresh, and remote freshness indicators.
-- Rename the product and CLI to Kitia; preserve existing `~/.config/kiti` catalogs on first use.
+## Current capabilities
 
-- Preserve configured external catalog names in installation inventories and refresh dashboard catalog data after actions.
-- Preserve source-repository metadata on tracked inventory rows so external catalog associations remain visible; keep `-` for unassociated artifacts.
-- List unmanaged skills, agents, and instructions in the dashboard with a `-` catalog label.
-- Allow explicit dashboard removal of detected unmanaged artifacts after confirmation; remove skill folders completely while preserving files outside them.
-- Show selected resource details in `TYPE - Name`, Catalog, Scope, Version, Locations, Details order, beside the inventory list on wide terminals and below it on narrow terminals.
-- Add dashboard onboarding for multiple user catalogs, with Basic discovery of skills, agents, and instructions plus Custom user-defined paths.
-- Show repository URLs while selecting a user catalog for dashboard removal; require confirmation and leave installed artifacts untouched.
-- Refresh one or all user catalog metadata indexes from the dashboard or CLI.
-- Treat instructions without scope metadata as global and report source-relative paths for metadata errors.
-- Open the dashboard when Kitia is invoked without a command.
-- Install and manage pinned external skills, agents, and instructions while keeping artifact bodies upstream.
-- Keep AI resource bodies upstream; catalogs are configured by users and stored locally.
+- Manage multiple user-configured GitHub catalogs with Basic discovery or Custom path mappings; catalog metadata stays local and resource bodies stay upstream.
+- Browse and search catalog skills, agents, and instructions; show or preview pinned source metadata and content.
+- Install, update, and uninstall external resources with dry-run plans, file fingerprint checks, operation locks, and protection for local modifications.
+- Choose project or user scope and Copilot, Claude, or both for supported resources; instructions are project-scoped.
+- Use the dashboard to inspect project and user inventories, filter by catalog or kind, view resource details, and manage catalogs.
+- Refresh one or all catalog indexes and inspect their remote freshness without changing installed resources.
+- Discover unmanaged skills, agents, and instructions in known install locations; remove them only through explicit confirmation.
+- Use `list`, `search`, `show`, `preview`, `check`, `doctor`, and `validate` with the documented JSON reports and exit codes.
+- Generate the website dashboard screenshots with the Termless xterm.js renderer and deterministic external-catalog demo data.
