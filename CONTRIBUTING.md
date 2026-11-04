@@ -1,57 +1,59 @@
 # Contributing
 
-Contributions improve Kitia's CLI, user-managed catalog adapters, documentation, and resource lifecycle.
-Kitia does not maintain AI resource bodies or a repository-owned catalog; resources remain in their upstream repositories.
+Contributions improve Kitia's CLI, catalog integrations, documentation, and resource lifecycle. Kitia does not maintain AI resource bodies or a built-in catalog; resource content remains in upstream repositories.
 
-External catalogs and lifecycle behavior can be tested with synthetic
-repositories in `cli/test/source-catalogs.test.js`; inventory migrations are
-covered in `cli/test/migrations.test.js`. Do not make tests depend on live
-repositories. Installed files should remain untouched when v1 inventory
-records are dropped by the v1→v2 migration, so verify they remain discoverable
-as unmanaged artifacts.
-## Validate changes
+## Development
+
+Kitia requires Node.js 22 or newer. Install dependencies and run the standard checks:
 
 ```sh
 npm ci
+npm run build
 npm run cli:validate
 npm test
 npm run cli:test:package-smoke
 ```
 
-## Versioning
+`npm test` runs documentation and CLI tests. For CLI or machine-readable output changes, preserve the [CLI compatibility contract](docs/cli-contract.md) and run `npm run cli:test:contract`.
 
-Add a Changesets entry for each user-facing change:
+Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; inventory migration behavior is covered by `cli/test/migrations.test.js`. When changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts.
+
+The optional Termless dashboard test and screenshot generator require Node.js 23.6 or newer:
+
+```sh
+npm run web:test:termless
+npm run web:screenshots:update:termless
+```
+
+The CLI lives in `cli/`, the website in `web/`, and shared documentation in `docs/`. The root package builds both; CLI output goes to `cli/dist/` and website output to `web/dist/`.
+
+## Versioning and releases
+
+Use [Changesets](https://github.com/changesets/changesets) for user-facing changes. Run:
 
 ```sh
 npm run changeset
 ```
 
-Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major`
-bump, then commit the generated Markdown file under `.changeset/`. The release
-workflow collects these entries into a version PR; do not edit package versions
-or the changelog manually for routine releases.
+Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the release workflow opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance.
 
-For a change to the CLI or its machine-readable output, preserve the
-[compatibility contract](docs/cli-contract.md) and run `npm run cli:test:contract`.
-Use synthetic fixtures for external catalogs and do not rely on live repositories in tests.
+### First npm publication
 
-## User-managed external catalogs
-
-From the interactive dashboard, press `N`, enter a GitHub repository, and
-choose Basic or Custom setup. Basic discovers nested `skills/**/SKILL.md`
-resources. Custom entries can be skills, agents, or instructions at
-user-selected repository-relative paths. External instructions without scope
-frontmatter apply globally; `apply_to`, `applyTo`, or `paths` can narrow the
-scope.
-
-The CLI's `catalog add <name> <https-github-url>` command performs Basic setup:
+The first publication is a one-time manual bootstrap from a trusted checkout. Use an npm account authorized to publish for the `grasdouble` organization. The repository `.npmrc` routes `@grasdouble` to the public npm registry:
 
 ```sh
-kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
-kitia catalog add matt-skills https://github.com/mattpocock/skills
-kitia catalog list
+npm login --registry=https://registry.npmjs.org
+npm publish
 ```
 
-The CLI stores each source, path mapping, and metadata-only index under
-`~/.config/kitia/` (override with `KITIA_CONFIG_DIR`). It keeps artifact bodies
-out of Kitia and pins each entry to a source commit.
+npm requires account 2FA or a granular token with 2FA bypass for publishing. New TOTP enrollment is not supported; configure a security key (such as Touch ID or a hardware key) in the npm account's **Two-Factor Authentication** settings and keep the recovery codes safe. Set the account to protect writes (`auth-and-writes`). See [npm's 2FA setup guide](https://docs.npmjs.com/configuring-two-factor-authentication/).
+
+After the package exists, configure its npm **Trusted Publisher** under **Settings → Trusted Publisher → GitHub Actions**:
+
+- Organization or user: `grasdouble`
+- Repository: `Kitia`
+- Workflow filename: `npm-publish.yml` (filename only)
+- Environment: leave unset
+- Allowed action: enable direct `npm publish`
+
+The workflow publishes through GitHub Actions OIDC; no npm token is stored in GitHub. It installs npm CLI 11.5.1 or newer, which is required for npm trusted publishing.
