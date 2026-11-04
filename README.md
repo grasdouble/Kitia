@@ -58,10 +58,20 @@ repositories. Multiple catalogs can be managed independently with
 
 ```sh
 npm ci
-npm run validate
-npm test
-npm run test:package-smoke
+npm run build                 # Build CLI and web
+npm run cli:validate          # Build and validate the CLI
+npm test                      # Docs and CLI tests
+npm run cli:test:package-smoke
+npm run web:build             # Build only the website
 ```
+
+### Project layout
+
+`cli/` contains the CLI source, tests, scripts, executable, migration code, and
+schemas. `web/` contains the website source, tests, screenshot assets, and
+website-specific scripts. `docs/` contains shared documentation and its link
+checks. The root `package.json` orchestrates both projects; the CLI compiles to
+`dist/` and the site builds independently to `web/dist/`.
 
 ### Updating website screenshots
 
@@ -70,13 +80,13 @@ with deterministic demo data. The screenshot generator promotes both images
 only after checking the complete inventory, catalog, and selected details.
 
 ```sh
-npm run test:termless
-npm run update:screenshots:termless
+npm run web:test:termless
+npm run web:screenshots:update:termless
 ```
 The Termless command builds before launching its in-process dashboard and
 requires Node.js >=23.6 for the pinned Termless development tools.
 
-`test:termless` is opt-in and requires Node.js **23.6 or newer**, as required
+`web:test:termless` is opt-in and requires Node.js **23.6 or newer**, as required
 by the pinned `@termless/core` 0.10.2 and `@termless/xtermjs` 0.10.2 packages.
 It uses Node's built-in `node:test` and `assert` (no Vitest) and tests the real
 `runDashboard()` component, production catalog/inventory discovery, key
@@ -86,17 +96,17 @@ opt-in Termless suite. The in-process xterm.js path feeds the original Ink ANSI
 bytes through xterm after applying PTY-style LF-to-CRLF line discipline; the
 raw stream remains available for semantic test assertions.
 
-`update:screenshots:termless` uses Termless' pinned xterm.js backend and
+`web:screenshots:update:termless` uses Termless' pinned xterm.js backend and
 `@resvg/resvg-js` to render a 1036×788 pair from a 120×45 terminal grid. Each
 image adds 12px of background padding around the unchanged 1012×764 terminal
 area. It uses Menlo at 14px, with cell dimensions 8.4333×16.9778px and no outer
 margin or scaling. The Termless feed remaps indexed ANSI colors to the
 reference palette (including background `#282c34`) without changing the
 captured Ink bytes. The generator verifies expected inventory/catalog rows in
-the parsed xterm grid before promoting to
-`site/assets/workspace-inventory-termless.png` and
-`site/assets/catalog-browser-termless.png`. The deterministic fixture keeps
-the catalog ID, repository URL, and dummy source ref fully visible; completeness
+the parsed xterm grid before promoting the completed screenshots to
+`web/assets/workspace-inventory-termless.png` and
+`web/assets/catalog-browser-termless.png`. The deterministic fixture keeps the
+catalog ID, repository URL, and dummy source ref fully visible; completeness
 checks verify the complete values. If the parser omits required cells, it writes
 only `*-termless-draft.png` review artifacts instead. The complete Termless pair
 is displayed directly in the website gallery.
@@ -105,10 +115,8 @@ The showcase wires the production action handler to temporary project and home
 directories, so update and uninstall shortcuts appear without targeting the
 real workspace.
 
-The original no-mock captures remain at `site/assets/workspace-inventory.png`
-and `site/assets/catalog-browser.png`; the gallery uses the generated Termless
-pair at `site/assets/workspace-inventory-termless.png` and
-`site/assets/catalog-browser-termless.png`.
+The generated Termless captures are maintained as website source assets in
+`web/assets/`. The site build bundles them into `dist/site/assets/`.
 
 Kitia does not maintain AI resource bodies or a built-in catalog. Connect
 external repositories from the dashboard or with `catalog add`; catalog

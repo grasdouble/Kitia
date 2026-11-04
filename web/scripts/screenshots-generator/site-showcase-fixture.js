@@ -3,7 +3,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const root = path.resolve(__dirname, "../..");
+const root = path.resolve(__dirname, "../../..");
 const catalogName = "MattPucock";
 const repository = "https://github.com/demo/skills";
 const sourceRepository = "demo/skills";
@@ -120,7 +120,7 @@ async function seedShowcase(directory) {
   await writeManagedSkill(project, resources[0]);
   await writeManagedSkill(home, resources[1]);
   const { recordSourceInstallation } = require(path.join(
-    root, "dist", "catalog", "sources", "installed.js",
+    root, "cli", "dist", "catalog", "sources", "installed.js",
   ));
   for (const [target, resource] of [[project, resources[0]], [home, resources[1]]]) {
     recordSourceInstallation({

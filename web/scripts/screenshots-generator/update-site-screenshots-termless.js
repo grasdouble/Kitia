@@ -15,7 +15,7 @@ const {
   waitForInkOutput,
 } = require("./site-showcase-terminal.js");
 
-const assets = path.join(root, "site", "assets");
+const assets = path.join(root, "web", "assets");
 const captures = [
   { name: "Termless inventory", staged: "workspace-inventory.png", output: "workspace-inventory-termless.png", draft: "workspace-inventory-termless-draft.png" },
   { name: "Termless catalog", staged: "catalog-browser.png", output: "catalog-browser-termless.png", draft: "catalog-browser-termless-draft.png" },
@@ -23,8 +23,8 @@ const captures = [
 const usage = `Capture Termless/xterm.js screenshots of Kitia's actual Ink dashboard.
 
 Usage:
-  npm run update:screenshots:termless
-  npm run update:screenshots:termless -- --help
+  npm run web:screenshots:update:termless
+  npm run web:screenshots:update:termless -- --help
 
 Requires Node.js >=23.6, a built checkout, and @resvg/resvg-js. The command
 uses the shared deterministic showcase fixture and writes a separate Termless
@@ -35,11 +35,11 @@ files and reports exactly which cells were missing. The original captures are un
 class CaptureError extends Error {}
 
 async function assertBuiltCheckout() {
-  for (const file of ["dist/cli/main.js", "dist/catalog/sources/installed.js"]) {
+  for (const file of ["cli/dist/cli/main.js", "cli/dist/catalog/sources/installed.js"]) {
     try {
       await fs.access(path.join(root, file));
     } catch {
-      throw new CaptureError(`Built CLI file is missing: ${file}. Run npm run build first.`);
+      throw new CaptureError(`Built CLI file is missing: ${file}. Run npm run cli:build first.`);
     }
   }
 }

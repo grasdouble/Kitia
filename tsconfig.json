@@ -3,13 +3,13 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "rootDir": "src",
-    "outDir": "dist",
+    "rootDir": "cli/src",
+    "outDir": "cli/dist",
     "types": ["node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": false,
     "noEmitOnError": true
   },
-  "include": ["src/**/*.ts", "src/**/*.mts"]
+  "include": ["cli/src/**/*.ts", "cli/src/**/*.mts"]
 }

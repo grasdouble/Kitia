@@ -4,8 +4,8 @@ Contributions improve Kitia's CLI, user-managed catalog adapters, documentation,
 Kitia does not maintain AI resource bodies or a repository-owned catalog; resources remain in their upstream repositories.
 
 External catalogs and lifecycle behavior can be tested with synthetic
-repositories in `tests/source-catalogs.test.js`; inventory migrations are
-covered in `tests/migrations.test.js`. Do not make tests depend on live
+repositories in `cli/test/source-catalogs.test.js`; inventory migrations are
+covered in `cli/test/migrations.test.js`. Do not make tests depend on live
 repositories. Installed files should remain untouched when v1 inventory
 records are dropped by the v1→v2 migration, so verify they remain discoverable
 as unmanaged artifacts.
@@ -13,13 +13,13 @@ as unmanaged artifacts.
 
 ```sh
 npm ci
-npm run validate
+npm run cli:validate
 npm test
-npm run test:package-smoke
+npm run cli:test:package-smoke
 ```
 
 For a change to the CLI or its machine-readable output, preserve the
-[compatibility contract](docs/cli-contract.md) and run `npm run test:contract`.
+[compatibility contract](docs/cli-contract.md) and run `npm run cli:test:contract`.
 Use synthetic fixtures for external catalogs and do not rely on live repositories in tests.
 
 ## User-managed external catalogs

@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(__dirname, "../..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 function markdownFiles(directory) {
@@ -20,7 +20,7 @@ test("local Markdown links resolve", () => {
     ...["README.md", "CONTRIBUTING.md", "CHANGELOG.md"]
       .map((file) => path.join(root, file)),
     ...markdownFiles(path.join(root, "docs")),
-    ...markdownFiles(path.join(root, "migrations")),
+    ...markdownFiles(path.join(root, "cli", "migrations")),
     ...markdownFiles(path.join(root, ".github")),
   ];
   for (const file of files) {
@@ -38,7 +38,7 @@ test("package, workflow, and docs agree on runtime and project identity", () => 
   const pkg = JSON.parse(read("package.json"));
   assert.equal(pkg.name, "kitia");
   assert.equal(pkg.engines.node, ">=22");
-  assert.deepEqual(pkg.bin, { kitia: "./bin/kitia.js" });
+  assert.deepEqual(pkg.bin, { kitia: "./cli/bin/kitia.js" });
   assert.match(pkg.repository.url, /github\.com\/grasdouble\/Kitia\.git$/);
   assert.match(read("README.md"), /^# Kitia/m);
 });
