@@ -236,7 +236,7 @@ function migrateInstallations({
 }
 
 function printHelp() {
-  console.log(`Usage: npx --yes github:grasdouble/Kitia migrate [--dry-run | --apply]
+  console.log(`Usage: npx --yes @grasdouble/kitia migrate [--dry-run | --apply]
 
 Inspect registered consecutive inventory migrations. The current source-only
 format is version 1; no historical migrations are registered. --apply creates backups before writing.`);

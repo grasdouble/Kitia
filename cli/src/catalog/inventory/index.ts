@@ -178,7 +178,7 @@ function readInstallState(targetRoot: string): InstallState {
   const version = state.lock_version;
   if (typeof version === "number" && Number.isSafeInteger(version) && version > 0 && version < CURRENT_INVENTORY_VERSION) {
     throw new CatalogError(
-      `Installation inventory version ${version} must be migrated before using this CLI. Run npx --yes github:grasdouble/Kitia migrate --apply; inventories already at the current version are skipped.`,
+      `Installation inventory version ${version} must be migrated before using this CLI. Run npx --yes @grasdouble/kitia migrate --apply; inventories already at the current version are skipped.`,
       "INVENTORY_MIGRATION_REQUIRED",
     );
   }

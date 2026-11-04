@@ -18,6 +18,19 @@ npm test
 npm run cli:test:package-smoke
 ```
 
+## Versioning
+
+Add a Changesets entry for each user-facing change:
+
+```sh
+npm run changeset
+```
+
+Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major`
+bump, then commit the generated Markdown file under `.changeset/`. The release
+workflow collects these entries into a version PR; do not edit package versions
+or the changelog manually for routine releases.
+
 For a change to the CLI or its machine-readable output, preserve the
 [compatibility contract](docs/cli-contract.md) and run `npm run cli:test:contract`.
 Use synthetic fixtures for external catalogs and do not rely on live repositories in tests.

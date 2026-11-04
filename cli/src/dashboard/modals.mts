@@ -197,7 +197,7 @@ export function inventoryMigrationModal({ scopes, columns }: { scopes: string[];
     "",
     "Run this from the current project directory:",
     {
-      text: "npx --yes github:grasdouble/Kitia migrate --apply",
+      text: "npx --yes @grasdouble/kitia migrate --apply",
       color: "cyan",
       bold: true,
     },

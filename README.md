@@ -13,12 +13,12 @@ their source repositories, while Kitia keeps user-managed catalog metadata.
 Add external catalogs, then search and inspect their resources:
 
 ```sh
-npx --yes github:grasdouble/Kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
-npx --yes github:grasdouble/Kitia catalog add matt-skills https://github.com/mattpocock/skills
-npx --yes github:grasdouble/Kitia catalog list
-npx --yes github:grasdouble/Kitia search "documentation" --catalog ai-kit
-npx --yes github:grasdouble/Kitia show skill create-readme --catalog ai-kit
-npx --yes github:grasdouble/Kitia preview skill create-readme --catalog ai-kit
+npx --yes @grasdouble/kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
+npx --yes @grasdouble/kitia catalog add matt-skills https://github.com/mattpocock/skills
+npx --yes @grasdouble/kitia catalog list
+npx --yes @grasdouble/kitia search "documentation" --catalog ai-kit
+npx --yes @grasdouble/kitia show skill create-readme --catalog ai-kit
+npx --yes @grasdouble/kitia preview skill create-readme --catalog ai-kit
 ```
 
 
@@ -27,9 +27,9 @@ npx --yes github:grasdouble/Kitia preview skill create-readme --catalog ai-kit
 Install a catalog resource without copying its source into Kitia:
 
 ```sh
-npx --yes github:grasdouble/Kitia install skill create-readme --catalog ai-kit --tool both --dry-run
-npx --yes github:grasdouble/Kitia install skill create-readme --catalog ai-kit --tool both
-npx --yes github:grasdouble/Kitia check
+npx --yes @grasdouble/kitia install skill create-readme --catalog ai-kit --tool both --dry-run
+npx --yes @grasdouble/kitia install skill create-readme --catalog ai-kit --tool both
+npx --yes @grasdouble/kitia check
 ```
 
 Installations default to project scope and Copilot. Select `--tool claude`,
@@ -64,6 +64,21 @@ npm test                      # Docs and CLI tests
 npm run cli:test:package-smoke
 npm run web:build             # Build only the website
 ```
+
+## Publish
+
+The package is `@grasdouble/kitia`; releases are managed with
+[Changesets](https://github.com/changesets/changesets). Each user-facing change
+should include a changeset file. On `main`, the release workflow opens or
+updates a version PR from pending changesets. Merge that PR to update the
+version and changelog; the same workflow then publishes the package to npm with
+provenance.
+
+The workflow uses npm trusted publishing through GitHub Actions OIDC. Configure
+the trusted publisher for repository `grasdouble/Kitia` and workflow file
+`.github/workflows/npm-publish.yml`; leave the environment unset because this
+workflow does not use a GitHub environment. No npm access token is stored in
+GitHub.
 
 ### Project layout
 
