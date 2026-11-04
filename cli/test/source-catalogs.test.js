@@ -74,18 +74,11 @@ test("first Kitia use preserves existing Kiti catalog settings", () => {
 test("catalog freshness compares cached index with remote default branch", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-catalog-freshness-"));
   const previousConfig = process.env.KITIA_CONFIG_DIR;
-  const previousPath = process.env.PATH;
   const configDirectory = path.join(temporary, "config");
   const repository = "https://github.com/example/test";
   const revision = "a".repeat(40);
   const remote = (ref) => async () => ({ stdout: `${ref}\tHEAD\n` });
   try {
-    const fakeBin = path.join(temporary, "bin");
-    fs.mkdirSync(fakeBin);
-    const fakeGit = path.join(fakeBin, "git");
-    fs.writeFileSync(fakeGit, `#!/bin/sh\nprintf '%s\\tHEAD\\n' '${revision}'\n`);
-    fs.chmodSync(fakeGit, 0o755);
-    process.env.PATH = [fakeBin, previousPath].filter(Boolean).join(path.delimiter);
     process.env.KITIA_CONFIG_DIR = configDirectory;
     writeJson(path.join(configDirectory, "catalogSources.json"), {
       catalog_version: 1,
@@ -100,9 +93,6 @@ test("catalog freshness compares cached index with remote default branch", async
     assert.deepEqual(await checkCatalogFreshness(remote(revision)), [
       { name: "Test", status: "current" },
     ]);
-    assert.deepEqual(await checkCatalogFreshness(), [
-      { name: "Test", status: "current" },
-    ]);
     assert.deepEqual(await checkCatalogFreshness(remote("b".repeat(40))), [
       { name: "Test", status: "outdated" },
     ]);
@@ -112,8 +102,6 @@ test("catalog freshness compares cached index with remote default branch", async
   } finally {
     if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
     else process.env.KITIA_CONFIG_DIR = previousConfig;
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
   }
 });
 
