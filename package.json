@@ -2,6 +2,10 @@
   "name": "@grasdouble/kitia",
   "version": "0.0.1",
   "description": "Kitia — Your AI toolkit, in good hands.",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/grasdouble/Kitia.git"

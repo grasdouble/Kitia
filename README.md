@@ -74,11 +74,30 @@ updates a version PR from pending changesets. Merge that PR to update the
 version and changelog; the same workflow then publishes the package to npm with
 provenance.
 
-The workflow uses npm trusted publishing through GitHub Actions OIDC. Configure
-the trusted publisher for repository `grasdouble/Kitia` and workflow file
-`.github/workflows/npm-publish.yml`; leave the environment unset because this
-workflow does not use a GitHub environment. No npm access token is stored in
-GitHub.
+Before configuring trusted publishing, bootstrap the package once: it does not
+yet exist on npm. From a trusted local checkout, use an npm account authorized
+to publish to the `grasdouble` organization:
+
+```sh
+npm login --registry=https://registry.npmjs.org
+npm publish
+```
+
+The package's `publishConfig` pins publication to the public npm registry even
+if local npm configuration maps `@grasdouble` to another registry.
+
+Then open `https://www.npmjs.com/package/@grasdouble/kitia` → **Settings** →
+**Trusted Publisher** → **GitHub Actions**, and enter:
+
+- Organization or user: `grasdouble`
+- Repository: `Kitia`
+- Workflow filename: `npm-publish.yml` (filename only)
+- Environment: leave unset
+- Allowed action: enable direct `npm publish`
+
+Save the publisher. The package then uses GitHub Actions OIDC; no npm access
+token is stored in GitHub. The release workflow installs npm CLI 11.5.1+,
+required for npm trusted publishing.
 
 ### Project layout
 
