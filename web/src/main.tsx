@@ -26,6 +26,7 @@ function ProductPreview() {
 
 function Workflow() {
   const steps = [
+    ['Install the CLI', 'Install Kitia once globally, then run kitia from your terminal. For a one-off, prefix commands with npx --yes @grasdouble/kitia.', 'npm install --global @grasdouble/kitia'],
     ['Connect repositories you trust', 'Add external GitHub catalogs yourself. Use basic discovery or map the paths you want.', 'kitia catalog add <name> <github-url>'],
     ['Inspect before installing', 'Search the catalog, inspect metadata, and preview resource files before choosing an install.', 'kitia search "documentation"'],
     ['Keep changes accountable', 'Preview a plan with dry-run. Kitia tracks managed files and protects untracked or locally modified content.', 'kitia install skill <id> --dry-run'],

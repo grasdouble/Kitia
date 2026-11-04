@@ -8,20 +8,23 @@ Kitia is a CLI for discovering and managing skills, agents, and instructions fro
 
 ## Quick start
 
-Requires Node.js 22 or newer. Add a catalog, inspect a resource, then preview an installation:
+Requires Node.js 22 or newer. For regular use, install Kitia globally:
 
 ```sh
-npx --yes @grasdouble/kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
-npx --yes @grasdouble/kitia search "documentation" --catalog ai-kit
-npx --yes @grasdouble/kitia preview skill create-readme --catalog ai-kit
-npx --yes @grasdouble/kitia install skill create-readme --catalog ai-kit --tool both --dry-run
+npm install --global @grasdouble/kitia
+kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
+kitia search "documentation" --catalog ai-kit
+kitia preview skill create-readme --catalog ai-kit
+kitia install skill create-readme --catalog ai-kit --tool both --dry-run
 ```
 
-Remove `--dry-run` to install. By default, Kitia installs to the current project for Copilot. Choose `--tool claude`, `--tool copilot`, or `--tool both`; skills can also be installed for your user account with `--scope user`.
+After the dry run, remove `--dry-run` to install. Global installation adds the `kitia` command; if your shell cannot find it, add npm's global executable directory to `PATH`. To run Kitia without a global install, use `npx --yes @grasdouble/kitia <command>` instead.
+
+By default, Kitia installs to the current project for Copilot. Choose `--tool claude`, `--tool copilot`, or `--tool both`; skills can also be installed for your user account with `--scope user`.
 
 ## Manage catalogs and resources
 
-Use `npx --yes @grasdouble/kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository:
+Run `kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository. Without a global install, run `npx --yes @grasdouble/kitia dashboard` instead.
 
 - **Basic** discovers skills recursively under `skills/**/SKILL.md`.
 - **Custom** maps selected repository-relative paths for skills, agents, and instructions. Multiple paths can be registered in one catalog.
