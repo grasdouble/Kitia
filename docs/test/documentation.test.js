@@ -40,7 +40,7 @@ test("package, workflow, and docs agree on runtime and project identity", () => 
   assert.equal(pkg.version, "0.0.1");
   assert.equal(JSON.parse(read("package-lock.json")).version, pkg.version);
   assert.equal(pkg.engines.node, ">=22");
-  assert.deepEqual(pkg.bin, { kitia: "./cli/bin/kitia.js" });
+  assert.deepEqual(pkg.bin, { kitia: "cli/bin/kitia.js" });
   assert.match(pkg.repository.url, /github\.com\/grasdouble\/Kitia\.git$/);
   assert.match(read("README.md"), /^# Kitia/m);
 });

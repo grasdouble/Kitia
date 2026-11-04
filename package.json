@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/grasdouble/Kitia.git"
+    "url": "git+https://github.com/grasdouble/Kitia.git"
   },
   "homepage": "https://github.com/grasdouble/Kitia#readme",
   "bugs": {
@@ -21,7 +21,7 @@
     "catalog"
   ],
   "bin": {
-    "kitia": "./cli/bin/kitia.js"
+    "kitia": "cli/bin/kitia.js"
   },
   "files": [
     "cli/dist/cli/",

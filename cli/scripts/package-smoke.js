@@ -48,7 +48,7 @@ try {
   npm(["install", "--no-audit", "--no-fund", path.join(temporary, archive.filename)], consumer);
   const installedRoot = path.join(consumer, "node_modules/@grasdouble/kitia");
   const manifest = JSON.parse(fs.readFileSync(path.join(installedRoot, "package.json"), "utf8"));
-  assert.deepEqual(manifest.bin, { kitia: "./cli/bin/kitia.js" });
+  assert.deepEqual(manifest.bin, { kitia: "cli/bin/kitia.js" });
 
   const cli = path.join(consumer, "node_modules/.bin/kitia");
   execFileSync(cli, ["dashboard"], {
