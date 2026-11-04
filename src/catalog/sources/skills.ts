@@ -136,9 +136,6 @@ function materializeSourceFile(resource, content, relativePath) {
 }
 function assertSourceFileCanBeInstalled(resource, target) {
   const state = readInstallState(target);
-  if (state.resources[`${resource.kind}:${resource.id}`]) {
-    throw new CatalogError(`${resource.kind} ID '${resource.id}' is already installed as a locally managed resource.`, "LOCAL_CONFLICT");
-  }
   for (const [catalog, collections] of Object.entries(state.sources || {})) {
     if (catalog !== sourceCatalogName(resource) && collections[`${resource.kind}s`]?.[resource.id]) {
       throw new CatalogError(`${resource.kind}:${resource.id} is already tracked from another source catalog.`, "LOCAL_CONFLICT");
@@ -151,7 +148,7 @@ function assertSourceSkillCanBeInstalled(resource: CatalogResource, target: stri
   const key = sourceSkillKey(resource);
   const anotherSource = [...sourceSkillRecords(state).keys()].some((installedKey) =>
     installedKey !== key && installedKey.endsWith(`:${resource.id}`));
-  if (state.resources[`skill:${resource.id}`] || anotherSource) {
+  if (anotherSource) {
     throw new CatalogError(
       `Skill ID '${resource.id}' is already tracked from another catalog in this target; remove it before installing from ${catalogLabel(resource)}.`,
       "LOCAL_CONFLICT",
@@ -504,7 +501,6 @@ function formatSourceResource(resource: CatalogResource): string {
 
 function runSourceCommand(
   options: CliOptions,
-  catalogRoot: string,
   invokeGhSkill?: (args: string[], cwd: string) => number,
 ): number {
   invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, options);

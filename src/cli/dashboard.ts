@@ -9,7 +9,6 @@ export interface DashboardActionResult {
   messages: string[];
   resources: CatalogResource[];
   errors: ScanError[];
-  postInstallEnvironment: string[];
 }
 
 const fs = require("node:fs");
@@ -19,40 +18,18 @@ const { parseArguments } = require("./arguments.js");
 const { catalogEntries, formatDashboardRows } = require("./catalog.js");
 const { loadCommandCatalogs } = require("../catalog/loading.js");
 const { acquireOperationLock } = require("../catalog/operation.js");
-const {
-  findInstalledProvenance, readInstallState, trackedPaths,
-} = require("../catalog/inventory/index.js");
+const { readInstallState, trackedPaths } = require("../catalog/inventory/index.js");
 const { collectInstalledScopes } = require("../catalog/lifecycle.js");
-const { readBuildInfo } = require("../catalog/resources/files.js");
-
-function requiredMcpEnvironment(resource: CatalogResource, resources: CatalogResource[]): string[] {
-  const mcpIds = resource.kind === "mcp"
-    ? [resource.id]
-    : resource.kind === "bundle"
-      ? (resource.resources || [])
-        .filter((member) => member.kind === "mcp")
-        .map((member) => member.id)
-      : [];
-  return [...new Set(mcpIds.flatMap((id) => {
-    const mcp = resources.find((entry) => entry.kind === "mcp" && entry.id === id);
-    return Object.values(mcp?.inputs || {})
-      .filter((input) => input.secret && input.required)
-      .map((input) => input.target_env);
-  }))];
-}
 
 function createDashboardActionHandler(
-  executeCommand: (options: CliOptions, catalogRoot: string, report: CliReport | null) => Promise<number>,
+  executeCommand: (options: CliOptions, report: CliReport | null) => Promise<number>,
 ) {
   return async function executeDashboardAction(
     action: string,
     resource: CatalogResource,
     dashboardOptions: CliOptions,
-    catalogRoot: string,
     catalogs: {
-      resources: CatalogResource[];
       sourceResources: CatalogResource[];
-      allResources: CatalogResource[];
       warnings?: ScanError[];
     },
     installOptions: CliOptions = {},
@@ -75,7 +52,6 @@ function createDashboardActionHandler(
         else args.push("--target", dashboardOptions.target);
         if (action === "install") args.push("--tool", installOptions.tool || "copilot");
         const parsed = parseArguments(args);
-        if (["bundle", "mcp"].includes(resource.kind)) parsed.yes = true;
         parsed.nonInteractive = true;
         parsed.offline = dashboardOptions.offline;
         parsed.sourceResources = catalogs.sourceResources;
@@ -95,9 +71,6 @@ function createDashboardActionHandler(
         }
         const current = collectInstalledScopes(
           { project: dashboardOptions.target, user: dashboardOptions.userTarget || os.homedir() },
-          catalogs.resources,
-          catalogRoot,
-          readBuildInfo(catalogRoot),
           catalogs.sourceResources,
         ).resources.find((entry) =>
           entry.managed === false && entry.scope === scope &&
@@ -105,17 +78,7 @@ function createDashboardActionHandler(
         if (!current?.paths?.length) {
           throw new Error(`${resource.kind}:${resource.id} is no longer detected as unmanaged; nothing was removed.`);
         }
-        const sourceCollections = Object.values(state.sources || {}) as Array<
-          Record<string, Record<string, { files?: Record<string, unknown> }>>
-        >;
-        const sourceTrackedPaths = sourceCollections.flatMap((collections) =>
-          Object.values(collections).flatMap((records) =>
-            Object.values(records).flatMap((record) => Object.keys(record.files || {}))));
-        const protectedPaths = new Set([...trackedPaths(state), ...sourceTrackedPaths]);
-        const legacy = findInstalledProvenance(targetRoot, protectedPaths, undefined, { scope });
-        for (const entries of legacy.values()) {
-          for (const { path: relativePath } of entries) protectedPaths.add(relativePath);
-        }
+        const protectedPaths = trackedPaths(state);
         const assertSafePath = (absolutePath, directory) => {
           let ancestor = absolutePath;
           while (ancestor !== targetRoot) {
@@ -175,33 +138,26 @@ function createDashboardActionHandler(
           },
           error: (message: string) => messages.push(message),
         };
-        code = await executeCommand(options, catalogRoot, null);
+        code = await executeCommand(options, null);
       }
     } finally {
       release?.();
     }
 
-    const currentCatalogs = loadCommandCatalogs({ command: "list" }, catalogRoot, () => {});
+    const currentCatalogs = loadCommandCatalogs({ command: "list" }, () => {});
     const result = collectInstalledScopes(
       { project: dashboardOptions.target, user: dashboardOptions.userTarget || os.homedir() },
-      currentCatalogs.resources,
-      catalogRoot,
-      readBuildInfo(catalogRoot),
       currentCatalogs.sourceResources,
     );
     result.errors.push(...(catalogs.warnings || []).map((warning) => ({ ...warning, scope: "catalog" })));
-    const postInstallEnvironment = ["install", "update"].includes(action) && code === 0
-      ? requiredMcpEnvironment(resource, currentCatalogs.resources)
-      : [];
     return {
       code,
       messages,
       resources: formatDashboardRows(
         result.resources,
-        catalogEntries(currentCatalogs.resources, currentCatalogs.sourceResources),
+        catalogEntries(currentCatalogs.sourceResources),
       ),
       errors: result.errors,
-      postInstallEnvironment,
     };
   };
 }

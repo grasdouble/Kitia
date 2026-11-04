@@ -13,7 +13,7 @@
 - [ ] `npm test`
 - [ ] `npm run validate` (catalog or resource changes)
 - [ ] `npm run test:contract` (CLI or inventory contract changes)
-- [ ] `npm run test:package` (package or CLI distribution changes)
+- [ ] `npm run test:package-smoke` (package or CLI distribution changes)
 - [ ] Other or not applicable (explain)
 
 ## Compatibility and data safety

@@ -33,28 +33,26 @@ not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
 
 `--scope project|user` is an additive option for `install`, `update`,
-`uninstall`, `check`, and `doctor`. Source skill lifecycle commands use the
+`uninstall`, `check`, and `doctor`. External source lifecycle commands use the
 generic commands with `--catalog <source-name>`.
-Omitting it preserves all project defaults. User scope supports skills, agents,
-MCPs and bundles without instructions,
-resolves the target with Node.js `os.homedir()`, and rejects `--target`.
-Locally managed and source user skills use `.agents/skills` (Copilot) and
-`.claude/skills` (Claude), relative to that home. Source delegation specifies
-`--dir` explicitly so upstream defaults cannot change the managed location.
-User agents use `.copilot/agents/<id>.agent.md` for Copilot CLI and
-`.claude/agents/<id>.md` for Claude Code. Personal Copilot agent discovery in
-IDEs is not guaranteed. Instructions and tracked project-style agents with
-`.github/agents` files are excluded from user-scope checks and maintenance.
-Installing a personal agent cannot silently replace such a project-style
-record, even with `--force`; explicit cleanup with `--target` is required.
-Inventories and operation locks are target-local, so the two scopes are
-managed independently. Inventory format upgrades are explicit; see the
-[inventory migration guide](inventory-migrations.md).
+Omitting scope preserves project defaults. User scope supports skills and
+agents, resolves the target with Node.js `os.homedir()`, and rejects `--target`.
+Source delegation specifies `--dir` explicitly so upstream defaults cannot
+change the managed location. User agents use `.copilot/agents/<id>.agent.md`
+for Copilot CLI and `.claude/agents/<id>.md` for Claude Code. Instructions are
+project-only. Inventories and operation locks are target-local, so the two
+scopes are managed independently. Inventory format upgrades are explicit; see
+the [inventory migration guide](inventory-migrations.md).
 Read-only commands and previews do not create home configuration directories.
 `dashboard` reads both scopes; if one inventory is unsupported, it displays the
 other scope and reports the failing scope explicitly instead of rewriting it.
-Dashboard actions require confirmation and use the normal lifecycle checks,
+Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
+
+Dashboard inventory includes known install locations for skills, agents, and
+instructions. Files without a Kitia installation record appear as unmanaged
+artifacts and can be explicitly removed after confirmation; they are not
+updated or uninstalled as managed resources.
 New installations can choose project/user scope and Copilot/Claude/both
 clients; instructions remain project-scoped. Press `F` to enter filter mode and
 `D` to toggle the selected resource's details panel in inventory and catalog
@@ -102,21 +100,11 @@ mapping, and catalogs whose saved custom configuration is unavailable retain
 the plain catalog name.
 
 
-For automation, specify the kind and source catalog when selecting a user-managed
-catalog resource: `install skill <id> --catalog <source-name>`. Adding catalog
-content can make an unqualified ID ambiguous. Unknown kinds are never reinterpreted
-as another kind.
+For automation, specify the kind and source catalog when selecting a
+user-managed resource: `install skill <id> --catalog <source-name>`. Adding
+catalog content can make an unqualified ID ambiguous. Unknown kinds are never
+reinterpreted as another kind.
 
-Uninstalling a locally managed resource required by one or more installed bundles
-offers a cascade in an interactive terminal and lists the bundles and additional
-dependencies before asking for confirmation. Non-interactive removal requires
-`uninstall <kind> <id> --cascade`; without it, the CLI refuses and names the
-dependent bundles. `--dry-run --json` shows the cascade plan without changing
-files or inventory, and does not require `--cascade`. The cascade removes the
-selected resource and dependent bundles in one planned operation, while
-preserving dependencies still used elsewhere or installed independently.
-`--force` is still required to remove locally modified resource files and does
-not override MCP configuration conflicts.
 
 
 ## User-registered catalogs
@@ -177,64 +165,15 @@ Discovery schema versions are identified by the schema filename; the public
 discovery payload remains an unwrapped JSON array. Report envelopes include
 their schema version in `schema_version`.
 
-### MCP and bundle setup
-
-`bundle` and `mcp` are local resource kinds for discovery, show/preview and the
-generic install/update/uninstall commands. Bundle recipes reference local
-skills/agents/instructions/MCPs. MCPs can be installed independently, for example
-`install mcp <mcp-id> --scope user --tool both`.
-MCP and bundle targets are exclusively Copilot CLI (`--tool copilot`) and Claude Code
-CLI (`--tool claude`), or both CLI clients (`--tool both`). Bundle compatibility
-keys refer only to these CLIs, not their desktop applications or IDE integrations.
-Other applications may discover the same files; that does not extend bundle
-support or imply an additional runtime target.
-See [bundle setup](bundles.md) for configuration paths, ownership and limitations.
-
-`--input <mcp-id>.<input>=<value>` supplies non-secret parameters to an MCP/bundle
-install/update; secret inputs are rejected without echoing their values.
-`--yes` confirms the setup plan for non-interactive execution. Both options
-require MCP/bundle installation/update; previews need neither confirmation nor
-secret variables. A missing required ordinary input is an execution error,
-or a warning in a dry-run plan. Stdio MCP entries invoke the declared executable
-directly, with `${VARIABLE}` secret references (or `${VARIABLE:-}` for optional
-secrets) resolved by the CLI at startup, never by the installer. No JavaScript
-launcher is generated. Missing-variable diagnostics depend on the client/server;
-the catalog no longer enforces an early runtime check through a launcher.
-HTTP entries register their HTTPS URL without executable checks. Installation
-never starts servers, downloads packages, probes endpoints or completes OAuth.
-
-MCP/bundle setup tracks dependency ownership and native MCP entries. Native MCP
-records have an empty `files` map because only server entries are managed.
-Modified or untracked launchers are never removed. Unknown inventory versions
-and resource kinds fail before any delegation.
-MCP JSON files are shared containers: the CLI owns only its recorded server
-entries, not other servers or client settings. Direct dependency removal is
-blocked while bundles reference it. `--force` never takes over a pre-existing
-MCP or replaces a locally modified MCP entry.
-
-Independent MCP records set `standalone: true` and retain their `tool` and
-`scope`. Bundled-only MCPs set `standalone: false`. Removing a bundle preserves an
-independently installed MCP. Updating a dependency does not promote ownership;
-explicit installation does. Standalone MCP removal is refused while any bundle
-still references it. MCP setup adds requested runtimes to existing registrations,
-without silently pruning the other client. Narrowing that set requires explicit
-uninstall/reinstall after dependent bundles are removed.
-
-MCP resource IDs are stable across metadata updates. Bundle recipes reference
-resources available to the local resource machinery.
-
 Reports and discovery keep their version-1 envelopes and arrays. Source-backed
-resource identities include their configured catalog; local resource identities
-omit a catalog. Configured-resource previews add MCP, bundle, and local dependency
-identities; shared client configuration actions may have a null resource identity.
-Additional error codes include `MISSING_CONFIGURATION` and `MISSING_PREREQUISITE`.
+resource identities include their configured catalog. External-resource
+previews include source identity; unknown inventory versions and resource kinds
+fail before any delegation.
 
 `list --json` and `search --json` emit a single JSON array on stdout, including
 an empty array when there are no results. Aggregate discovery entries include
-`catalog`; use `--catalog <source-name>` to discover and search entries in a
-configured source. The default `community` source retains its upstream-reference
-fields. Machine-specific
-`source` paths are not emitted in machine-readable output.
+the configured catalog name and source metadata where available.
+
 
 `check --json`, `doctor --json`, and `install/update/uninstall --dry-run --json`
 emit one object with these required fields:

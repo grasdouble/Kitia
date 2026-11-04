@@ -1,15 +1,13 @@
 "use strict";
 const fs = require("node:fs");
 
-const { CatalogError, loadCatalog } = require("./resources/index.js");
+const { CatalogError } = require("./resources/index.js");
 const { readInstallState } = require("./inventory/index.js");
 const { loadUserSourceConfiguration, userCatalogIndexDirectory } = require("./sources/config.js");
 const { sourceResourceRecords, inventorySourceNames } = require("./sources/installed.js");
 const { loadSourceCatalogsFromDirectory } = require("./sources/loader.js");
-import type { CatalogResource } from "./entries.js";
-import type { InstallState } from "./inventory/files.js";
 
-function sourceResourcesFromInventory(state: InstallState): CatalogResource[] {
+function sourceResourcesFromInventory(state) {
   return [...sourceResourceRecords(state)].map(([key, record]) => {
     const [catalog, kind, id] = key.split(":");
     return {
@@ -26,34 +24,27 @@ function sourceResourcesFromInventory(state: InstallState): CatalogResource[] {
   });
 }
 
-function loadCommandCatalogs(options, root, warn) {
+function loadCommandCatalogs(options, warn = (_warning) => {}) {
   const { command, catalog, kind, id } = options;
   const sources = loadUserSourceConfiguration();
   const sourceNames = sources.map(({ name }) => name);
-  const localResources = !catalog && !["list", "search", "validate", "dashboard", "uninstall"].includes(command);
   let names;
   if (command === "validate") names = catalog ? [catalog] : sourceNames;
   else if (catalog) names = [catalog];
   else if (["check", "dashboard"].includes(command) || (command === "update" && !id)) {
     names = sourceNames;
-  }
-  else if (command === "update" || command === "uninstall") {
+  } else if (command === "update" || command === "uninstall") {
     const state = readInstallState(fs.realpathSync(options.target));
     const sourceRecords = sourceResourceRecords(state);
-    const installedSources = inventorySourceNames(state).filter((name) =>
+    names = inventorySourceNames(state).filter((name) =>
       (command === "uninstall" || sourceNames.includes(name)) &&
       [...sourceRecords.keys()].some((key) => key.startsWith(`${name}:`) &&
         (!id || key.split(":")[2] === id) && (!kind || key.split(":")[1] === kind)));
-    names = installedSources;
   } else names = sourceNames;
 
-  const loaded = { resources: localResources ? loadCatalog(root) : [], sourceResources: [], unavailable: [] };
+  const loaded = { sourceResources: [], unavailable: [] };
   if (command === "uninstall") {
     const state = readInstallState(fs.realpathSync(options.target));
-    if (!catalog) loaded.resources = Object.keys(state.resources).map((key) => {
-      const [resourceKind, resourceId] = key.split(":");
-      return { kind: resourceKind, id: resourceId, catalog: "internal", description: "Tracked local installation." };
-    });
     const installedSourceNames = inventorySourceNames(state);
     names = names.filter((name) => installedSourceNames.includes(name) || name === options.catalog);
     loaded.sourceResources = sourceResourcesFromInventory(state)
@@ -72,12 +63,9 @@ function loadCommandCatalogs(options, root, warn) {
       : []);
     return sourceResources;
   };
-  const loaders = {};
-  for (const source of sources) {
-    loaders[source.name] = () => {
-      loaded.sourceResources.push(...loadSources().filter((resource) => resource.catalog === source.name));
-    };
-  }
+  const loaders = Object.fromEntries(sources.map((source) => [source.name, () => {
+    loaded.sourceResources.push(...loadSources().filter((resource) => resource.catalog === source.name));
+  }]));
   for (const name of names) {
     const loader = loaders[name];
     if (!loader) throw new CatalogError(`Unknown catalog: ${name}`, "INVALID_ARGUMENT");
@@ -96,6 +84,5 @@ function loadCommandCatalogs(options, root, warn) {
   }
   return loaded;
 }
-
 
 module.exports = { loadCommandCatalogs };

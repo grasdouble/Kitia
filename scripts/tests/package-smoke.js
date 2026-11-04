@@ -6,12 +6,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(__dirname, "../..");
 const npmCli = process.env.npm_execpath;
-if (!npmCli) throw new Error("Run the package smoke test with npm run test:package.");
+if (!npmCli) throw new Error("Run the package smoke test with npm run test:package-smoke.");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-package-test-"));
-const buildFile = path.join(root, "dist/catalog-build.json");
-const previousBuild = fs.existsSync(buildFile) ? fs.readFileSync(buildFile) : null;
 const npm = (args, cwd) => execFileSync(process.execPath, [npmCli, "--silent", ...args], {
   cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
 });
@@ -26,7 +24,6 @@ try {
     "README.md",
     "bin/kitia.js",
     "dist/cli/main.js",
-    "dist/catalog/resources/install-plan.js",
     "docs/cli-contract.md",
     "schemas/catalog-lock-v1.schema.json",
     "migrations/run.js",
@@ -39,6 +36,14 @@ try {
 
   const consumer = path.join(temporary, "consumer");
   fs.mkdirSync(consumer);
+  const home = path.join(temporary, "home");
+  fs.mkdirSync(home);
+  const consumerEnvironment = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    KITIA_CONFIG_DIR: path.join(temporary, "config"),
+  };
   fs.writeFileSync(path.join(consumer, "package.json"), '{"private":true}\n');
   npm(["install", "--no-audit", "--no-fund", path.join(temporary, archive.filename)], consumer);
   const installedRoot = path.join(consumer, "node_modules/kitia");
@@ -46,16 +51,19 @@ try {
   assert.deepEqual(manifest.bin, { kitia: "./bin/kitia.js" });
 
   const cli = path.join(consumer, "node_modules/.bin/kitia");
+  execFileSync(cli, ["dashboard"], {
+    cwd: consumer,
+    encoding: "utf8",
+    env: consumerEnvironment,
+  });
   const listed = JSON.parse(execFileSync(cli, [
     "list", "--json",
   ], {
     cwd: consumer,
     encoding: "utf8",
-    env: { ...process.env, KITIA_CONFIG_DIR: path.join(temporary, "config") },
+    env: consumerEnvironment,
   }));
   assert.deepEqual(listed, []);
 } finally {
-  if (previousBuild) fs.writeFileSync(buildFile, previousBuild);
-  else fs.rmSync(buildFile, { force: true });
   fs.rmSync(temporary, { recursive: true, force: true });
 }

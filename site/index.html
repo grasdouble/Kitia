@@ -3,137 +3,75 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f6f7f1">
-    <meta name="description" content="Kitia brings your AI resource catalogs together. Discover, preview, and manage skills, agents, and instructions from the command line.">
-    <title>Kitia — Your AI toolkit, in good hands.</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231c3d34'/%3E%3Cpath d='M18 45V19h8v13l12-13h10L35 32l14 13H38L26 34v11z' fill='%23d2f36b'/%3E%3C/svg%3E">
+    <meta name="theme-color" content="#f3f1eb">
+    <meta name="description" content="Kitia connects external catalogs of skills, agents, and instructions to Claude Code and GitHub Copilot—while resource content stays in its upstream repository.">
+    <title>Kitia — Choose your AI resources</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231b302b'/%3E%3Cpath d='M18 45V19h8v13l12-13h10L35 32l14 13H38L26 34v11z' fill='%23d4e8bb'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="nav shell" aria-label="Main navigation">
-        <a class="brand" href="#top" aria-label="Kitia home">
-          <span class="brand-mark" aria-hidden="true">K</span>
-          <span>kitia<span class="brand-period">.</span></span>
-        </a>
-        <div class="nav-links">
-          <a href="#how-it-works">How it works</a>
-          <a href="#features">Why Kitia</a>
-          <a href="https://github.com/grasdouble/Kitia#readme">Docs</a>
-        </div>
-        <a class="nav-cta" href="https://github.com/grasdouble/Kitia">View on GitHub <span aria-hidden="true">↗</span></a>
+        <a class="brand" href="#top" aria-label="Kitia home"><span class="brand-mark" aria-hidden="true">K</span><span>kitia<span class="brand-period">.</span></span></a>
+        <div class="nav-links"><a href="#approach">Approach</a><a href="#workflow">Workflow</a><a href="#commands">Commands</a></div>
+        <a class="nav-cta" href="https://github.com/grasdouble/Kitia">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
 
     <main id="main">
       <section class="hero shell" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> The open-source AI resource manager</div>
-          <h1 id="hero-title">Your AI toolkit,<br>in <span>good hands.</span></h1>
-          <p class="hero-intro">Find the skills, agents, and instructions you need—across your catalogs, from one thoughtful CLI.</p>
-          <div class="hero-actions">
-            <a class="button button-primary" href="#get-started">Get started <span aria-hidden="true">→</span></a>
-            <a class="button button-quiet" href="https://github.com/grasdouble/Kitia">Explore the repository <span aria-hidden="true">↗</span></a>
-          </div>
-          <div class="hero-note"><span class="sparkle" aria-hidden="true">✳</span> Catalog metadata stays local. Resource content stays upstream.</div>
-        </div>
-
-        <div class="terminal-card" aria-label="Example Kitia command line search">
-          <div class="terminal-topbar">
-            <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-            <span>your terminal</span>
-            <span class="terminal-kebab" aria-hidden="true">•••</span>
-          </div>
-          <div class="terminal-body">
-            <p class="terminal-muted"># Inspect a resource from an external catalog</p>
-            <p class="terminal-command"><span class="prompt">$</span> npx --yes github:grasdouble/Kitia<br><span class="terminal-indent">show skill create-readme --catalog ai-kit</span></p>
-            <div class="terminal-rule"></div>
-            <p class="result-label">Example resource <span>· ai-kit</span></p>
-            <div class="result-row"><span class="result-icon icon-skill">S</span><span><b>create-readme</b><small>Skill from an external catalog</small></span><span class="result-kind">SKILL</span></div>
-            <p class="terminal-footer"><span class="tiny-check">✓</span> Preview first. Install when you’re ready.</p>
-          </div>
-          <div class="terminal-sticker" aria-hidden="true"><span>your<br>workflow,<br>your way</span><svg viewBox="0 0 72 72" fill="none"><path d="M9 35c14-1 27-9 37-21-3 15-11 27-24 34 9-2 19-1 31 5-18 2-34-4-44-18Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="m43 15 9-4-2 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> An open-source resource manager</p>
+          <h1 id="hero-title">Bring your AI resources <em>into focus.</em></h1>
+          <p class="hero-intro">Browse external catalogs of skills, agents, and instructions. Choose what belongs in Claude Code or GitHub Copilot—with your sources and files under your control.</p>
+          <div class="hero-actions"><a class="button button-primary" href="#workflow">Explore the workflow <span aria-hidden="true">↓</span></a><a class="text-link" href="https://github.com/grasdouble/Kitia#readme">Read the README <span aria-hidden="true">↗</span></a></div>
+          <div class="hero-note"><span aria-hidden="true">01</span> Metadata stays local. Resource bodies stay upstream.</div>
         </div>
       </section>
 
-      <section class="ticker" aria-label="Supported resource types">
-        <div class="ticker-inner shell">
-          <span>ONE CLI FOR YOUR AI RESOURCES</span><i aria-hidden="true">✳</i><b>Skills</b><i aria-hidden="true">✳</i><b>Agents</b><i aria-hidden="true">✳</i><b>Instructions</b><i aria-hidden="true">✳</i><span>CLAUDE CODE + GITHUB COPILOT</span>
+      <div class="trust-strip" aria-label="Resource types and supported tools"><div class="shell strip-inner"><span>ONE TOOL FOR THE RESOURCES YOU CHOOSE</span><div><b>Skills</b><i>·</i><b>Agents</b><i>·</i><b>Instructions</b></div><span>CLAUDE CODE <i>+</i> GITHUB COPILOT</span></div></div>
+      <section class="screen-gallery shell" aria-labelledby="screens-title">
+        <div class="gallery-heading">
+          <p class="eyebrow eyebrow-dark">REAL KITIA DASHBOARD · DEMO DATA</p>
+          <h2 id="screens-title">Kitia in action.</h2>
+          <p>These views use Kitia's real Ink CLI with isolated, deterministic demo resources—not live user catalog data.</p>
+        </div>
+        <figure class="screen-figure workspace-figure">
+          <div class="capture-label"><span>REAL INK DASHBOARD · TERMLESS · DEMO DATA</span><span>01 / 02 · INVENTORY</span></div>
+          <a class="screen-image-link" href="./assets/workspace-inventory-termless.png" target="_blank" rel="noopener" aria-label="Open full-size Termless workspace inventory screenshot with demo data">
+            <img src="./assets/workspace-inventory-termless.png" alt="Termless xterm.js rendering of Kitia's actual Ink dashboard, showing project ask-matt selected beside the inventory rows for user grill-me and unmanaged herdr." fetchpriority="high">
+          </a>
+          <figcaption><span>Workspace · demo inventory</span><span>Termless xterm.js rendering; selected project ask-matt, user grill-me, and unmanaged herdr.</span></figcaption>
+        </figure>
+        <figure class="screen-figure catalog-figure">
+          <div class="capture-label"><span>REAL INK DASHBOARD · TERMLESS · DEMO DATA</span><span>02 / 02 · CATALOG</span></div>
+          <a class="screen-image-link" href="./assets/catalog-browser-termless.png" target="_blank" rel="noopener" aria-label="Open full-size Termless catalog browser screenshot with demo data">
+            <img src="./assets/catalog-browser-termless.png" alt="Termless xterm.js rendering of Kitia's actual CATALOG RESOURCES screen with deterministic mock skills, an agent, and an instruction.">
+          </a>
+          <figcaption><span>Catalog browser · demo index</span><span>Termless xterm.js rendering of the isolated metadata-only mock catalog.</span></figcaption>
+        </figure>
+      </section>
+
+      <section class="section shell workflow" id="workflow" aria-labelledby="workflow-title">
+        <div class="section-intro"><p class="eyebrow eyebrow-dark">A simpler way to stay deliberate</p><h2 id="workflow-title">Your sources.<br><em>Your call.</em></h2><p>Kitia helps you discover and manage AI resources without turning your workflow into another hosted service.</p></div>
+        <div class="workflow-list">
+          <article><span class="step">01</span><div><h3>Connect repositories you trust</h3><p>Add external GitHub catalogs yourself. Use basic discovery or map the paths you want.</p><code>kitia catalog add &lt;name&gt; &lt;github-url&gt;</code></div></article>
+          <article><span class="step">02</span><div><h3>Inspect before installing</h3><p>Search the catalog, inspect metadata, and preview resource files before choosing an install.</p><code>kitia search "documentation"</code></div></article>
+          <article><span class="step">03</span><div><h3>Keep changes accountable</h3><p>Preview a plan with dry-run. Kitia tracks managed files and protects untracked or locally modified content.</p><code>kitia install skill &lt;id&gt; --dry-run</code></div></article>
         </div>
       </section>
 
-      <section class="section shell" id="how-it-works" aria-labelledby="how-title">
-        <div class="section-heading">
-          <p class="eyebrow eyebrow-dark">A calmer way to work with AI resources</p>
-          <h2 id="how-title">From scattered catalogs<br>to <span>ready when you are.</span></h2>
-          <p>Kitia connects the resources you already trust to the tools you already use.</p>
-        </div>
-        <div class="steps-grid">
-          <article class="step-card">
-            <div class="step-top"><span class="step-number">01</span><span class="step-symbol symbol-catalog" aria-hidden="true">↗</span></div>
-            <h3>Bring your catalogs</h3>
-            <p>Connect external GitHub repositories with a quick command or the interactive dashboard. Choose automatic discovery or map the paths you want.</p>
-            <code>kitia catalog add &lt;name&gt; &lt;github-url&gt;</code>
-          </article>
-          <article class="step-card step-featured">
-            <div class="step-top"><span class="step-number">02</span><span class="step-symbol symbol-search" aria-hidden="true">⌕</span></div>
-            <h3>Find the right fit</h3>
-            <p>Search and inspect catalog entries before you install. Preview resource files and see where an installation will go.</p>
-            <code>kitia search "documentation"</code>
-          </article>
-          <article class="step-card">
-            <div class="step-top"><span class="step-number">03</span><span class="step-symbol symbol-install" aria-hidden="true">↓</span></div>
-            <h3>Install with confidence</h3>
-            <p>Choose your tool and scope. Kitia tracks what it manages and protects files it doesn’t own.</p>
-            <code>kitia install skill &lt;id&gt; --dry-run</code>
-          </article>
-        </div>
+      <section class="principles" id="approach" aria-labelledby="approach-title">
+        <div class="shell principles-layout"><div><p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> The Kitia approach</p><h2 id="approach-title">Connection, not custody.</h2><p class="principle-lede">Kitia brings catalog metadata into your local configuration. The resource bodies remain in the repositories that publish them.</p><a class="light-link" href="https://github.com/grasdouble/Kitia/blob/main/docs/cli-contract.md">Read the CLI contract <span aria-hidden="true">↗</span></a></div><dl class="principle-details"><div><dt>Local metadata</dt><dd>Catalog definitions and metadata-only indexes live in your user configuration.</dd></div><div><dt>Upstream content</dt><dd>Skill, agent, and instruction bodies stay in their source repositories.</dd></div><div><dt>Explicit choices</dt><dd>You choose the catalogs and resources to add, preview, install, and manage.</dd></div><div><dt>Conflict-aware</dt><dd>Managed-file tracking helps avoid overwriting content Kitia does not own.</dd></div></dl></div>
       </section>
 
-      <section class="feature-band" id="features" aria-labelledby="feature-title">
-        <div class="feature-layout shell">
-          <div class="feature-copy">
-            <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Thoughtfully by design</p>
-            <h2 id="feature-title">Useful tools.<br><span>Under your control.</span></h2>
-            <p class="feature-lede">Kitia manages the connection—not the content. Your catalogs remain yours, and upstream resources stay where their authors maintain them.</p>
-            <a class="text-link" href="https://github.com/grasdouble/Kitia/blob/main/docs/cli-contract.md">Read the CLI contract <span aria-hidden="true">→</span></a>
-          </div>
-          <div class="feature-list">
-            <article class="feature-item"><span class="feature-check" aria-hidden="true">↗</span><div><h3>Your sources, your choice</h3><p>Add multiple catalogs, configure custom paths, and refresh their metadata when you want.</p></div></article>
-            <article class="feature-item"><span class="feature-check" aria-hidden="true">⌁</span><div><h3>Know what will change</h3><p>Preview lifecycle plans with <code>--dry-run</code> before making changes.</p></div></article>
-            <article class="feature-item"><span class="feature-check" aria-hidden="true">✓</span><div><h3>Respect existing work</h3><p>Managed-file tracking detects conflicts and protects untracked or locally modified content.</p></div></article>
-            <article class="feature-item"><span class="feature-check" aria-hidden="true">⌘</span><div><h3>Works across your tools</h3><p>Manage project or user resources for Claude Code and GitHub Copilot.</p></div></article>
-          </div>
-        </div>
+      <section class="section shell commands" id="commands" aria-labelledby="commands-title"><div class="command-heading"><div><p class="eyebrow eyebrow-dark">Made for the terminal</p><h2 id="commands-title">One clear step<br>at a time.</h2></div><p>Use Kitia's CLI or interactive dashboard to browse and manage resources across Claude Code and GitHub Copilot.</p></div>
+        <div class="command-list"><article><span>DISCOVER</span><code>kitia catalog list</code><p>See the catalogs you have configured.</p></article><article><span>INSPECT</span><code>kitia preview skill &lt;id&gt;</code><p>Review resource files before installation.</p></article><article><span>PLAN</span><code>kitia install skill &lt;id&gt; --dry-run</code><p>Inspect a lifecycle plan without changing files.</p></article></div>
       </section>
 
-      <section class="section commands-section shell" aria-labelledby="commands-title">
-        <div class="section-heading heading-row">
-          <div><p class="eyebrow eyebrow-dark">Small commands, clear intent</p><h2 id="commands-title">Your workflow,<br><span>from the terminal.</span></h2></div>
-          <p>Browse with the CLI or open the interactive dashboard. Either way, stay in control of every change.</p>
-        </div>
-        <div class="command-grid">
-          <article class="command-card"><span class="command-index">01 / DISCOVER</span><h3>Search catalogs</h3><p>Find relevant resources by name or purpose.</p><code><em>$</em> kitia search "testing"</code></article>
-          <article class="command-card"><span class="command-index">02 / INSPECT</span><h3>See before you install</h3><p>Inspect metadata or preview the resource files.</p><code><em>$</em> kitia preview skill &lt;id&gt;</code></article>
-          <article class="command-card"><span class="command-index">03 / MANAGE</span><h3>Keep things in order</h3><p>Check, update, or remove Kitia-managed resources.</p><code><em>$</em> kitia check</code></article>
-        </div>
-      </section>
-
-      <section class="get-started" id="get-started" aria-labelledby="start-title">
-        <div class="get-started-inner shell">
-          <div><p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Your AI toolkit, in good hands.</p><h2 id="start-title">Ready to make room<br>for <span>better workflows?</span></h2><p>Start with a catalog you already use. No extra service, no bundled resource content.</p></div>
-          <div class="start-actions"><a class="button button-lime" href="https://github.com/grasdouble/Kitia#readme">Get Kitia on GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/grasdouble/Kitia/blob/main/CONTRIBUTING.md">Contribute to the project <span aria-hidden="true">→</span></a></div>
-        </div>
-        <div class="orbit orbit-one" aria-hidden="true">✳</div><div class="orbit orbit-two" aria-hidden="true">✳</div>
-      </section>
+      <section class="closing" aria-labelledby="closing-title"><div class="shell closing-inner"><div><p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Open source · Your tools · Your choice</p><h2 id="closing-title">Start with a catalog<br>you already trust.</h2></div><div class="closing-actions"><a class="button button-light" href="https://github.com/grasdouble/Kitia#readme">Get started on GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/grasdouble/Kitia/blob/main/docs/cli-contract.md">Explore the CLI contract <span aria-hidden="true">→</span></a></div></div></section>
     </main>
-
-    <footer class="site-footer shell">
-      <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">K</span><span>kitia<span class="brand-period">.</span></span></a>
-      <p>Open-source CLI for the AI resources you choose.</p>
-      <div class="footer-links"><a href="https://github.com/grasdouble/Kitia">GitHub</a><a href="https://github.com/grasdouble/Kitia/blob/main/README.md">Documentation</a><a href="https://github.com/grasdouble/Kitia/issues">Issues</a></div>
-      <span class="copyright">© Kitia contributors</span>
-    </footer>
+    <footer class="site-footer shell"><a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">K</span><span>kitia<span class="brand-period">.</span></span></a><p>Open-source CLI for the AI resources you choose.</p><div class="footer-links"><a href="https://github.com/grasdouble/Kitia">Repository</a><a href="https://github.com/grasdouble/Kitia#readme">README</a><a href="https://github.com/grasdouble/Kitia/blob/main/docs/cli-contract.md">CLI contract</a></div><span class="copyright">© Kitia contributors</span></footer>
   </body>
 </html>

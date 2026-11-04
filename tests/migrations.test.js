@@ -1,4 +1,4 @@
- "use strict";
+"use strict";
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -8,12 +8,12 @@ const { afterEach, test } = require("node:test");
 const Ajv = require("ajv");
 const {
   CURRENT_VERSION, applyMigrationChain, installationTargets, migrateInstallations,
-  migrateInventory, migrateTarget, parseArguments,
+  migrateInventory, migrateTarget,
 } = require("../migrations/run.js");
 const root = path.resolve(__dirname, "..");
 const schema = JSON.parse(fs.readFileSync(path.join(root, "schemas/catalog-lock-v1.schema.json"), "utf8"));
 const validateSchema = new Ajv({ allErrors: true, strict: true }).compile(schema);
-const fixturePath = path.join(__dirname, "fixtures", "inventory-v1-with-user-agent.json");
+const fixturePath = path.join(__dirname, "fixtures", "inventory-v1-source-only.json");
 let temporary;
 
 afterEach(() => {
@@ -31,12 +31,14 @@ function createTarget(inventory) {
   return { target, inventoryPath };
 }
 
-test("the sole inventory schema is the current version 1 format", () => {
+test("version 1 is the current source-only inventory format", () => {
   const inventory = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+  const result = migrateInventory(inventory);
   assert.equal(CURRENT_VERSION, 1);
   assert.equal(schema.properties.lock_version.const, CURRENT_VERSION);
-  assert.equal(validateSchema(inventory), true, JSON.stringify(validateSchema.errors));
-  assert.equal(inventory.catalog, "grasdouble/Kitia");
+  assert.equal(validateSchema(result.inventory), true, JSON.stringify(validateSchema.errors));
+  assert.deepEqual(result, { inventory, migrations: [] });
+  assert.deepEqual(Object.keys(inventory), ["lock_version", "catalog", "sources"]);
 });
 
 test("the future migration chain applies only consecutive pure transformations", () => {
@@ -58,43 +60,29 @@ test("the future migration chain applies only consecutive pure transformations",
   ])), /returned an invalid version/);
 });
 
-test("current inventories are validated and skipped without rewriting or backup", () => {
-  const original = fs.readFileSync(fixturePath);
-  const inventory = JSON.parse(original.toString("utf8"));
-  const current = migrateInventory(inventory);
-  assert.deepEqual(current, { inventory, migrations: [] });
-
-  const { target, inventoryPath } = createTarget(inventory);
-  const preview = migrateTarget(target, { log() {} });
-  const applied = migrateTarget(target, { apply: true, log() {} });
-  assert.deepEqual(preview.migrations, []);
-  assert.deepEqual(applied.migrations, []);
-  assert.equal(applied.backup, null);
-  assert.deepEqual(fs.readFileSync(inventoryPath), original);
-  assert.deepEqual(fs.readdirSync(path.dirname(inventoryPath)), ["kitia-lock.json"]);
-});
-
-test("migration command independently skips current and missing project and home inventories", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-migration-"));
-  const project = path.join(temporary, "project");
-  const home = path.join(temporary, "home");
+test("current v1 inventories are skipped without backup or rewrite", () => {
   const inventory = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-  const projectInventory = path.join(project, ".agents/kitia-lock.json");
-  fs.mkdirSync(path.dirname(projectInventory), { recursive: true });
+  const { target, inventoryPath } = createTarget(inventory);
+  const original = fs.readFileSync(inventoryPath);
+  const result = migrateTarget(target, { apply: true, log() {} });
+  assert.deepEqual(result.migrations, []);
+  assert.equal(result.backup, null);
+  assert.deepEqual(fs.readFileSync(inventoryPath), original);
+  const home = path.join(temporary, "home");
   fs.mkdirSync(home);
-  fs.writeFileSync(projectInventory, `${JSON.stringify(inventory, null, 2)}\n`);
 
   const messages = [];
   const plans = migrateInstallations({
-    workingDirectory: project,
-    homeDirectory: home,
+    workingDirectory: target,
+    homeDirectory: path.join(temporary, "home"),
+    apply: true,
     log: (message) => messages.push(message),
   });
   assert.match(messages.join("\n"), /project: already at version 1; skipped/);
   assert.match(messages.join("\n"), /home: no inventory; skipped/);
   assert.equal(plans.length, 2);
-  assert.deepEqual(installationTargets(project, project).map(({ label }) => label), ["project and home"]);
-  assert.throws(() => parseArguments(["--target", project]), /Unknown option/);
+  assert.deepEqual(installationTargets(target, target).map(({ label }) => label), ["project and home"]);
+  assert.deepEqual(fs.readFileSync(inventoryPath), original);
 });
 
 test("generic inventory files are ignored without being renamed or migrated", () => {

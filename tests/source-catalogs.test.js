@@ -23,7 +23,6 @@ const {
   checkInstalledResources, readInstalledSourceSkills, runSourceCommand,
   uninstallSourceResource, updateSourceResources,
 } = require("../dist/cli/main.js");
-const { uninstallResource } = require("../dist/catalog/lifecycle.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 const { cycleFilter, filterInventory, inventoryCatalogLabel } = require("../dist/dashboard/helpers.mjs");
 
@@ -165,18 +164,18 @@ test("user catalogs can be added, listed and removed without repository manifest
     return { code, logs, errors };
   };
   try {
-    const added = run(["add", "internal", repository]);
+    const added = run(["add", "team-alpha", repository]);
     assert.equal(added.code, 0, added.errors.join("\n"));
-    assert.match(added.logs.join("\n"), /Added catalog internal/);
-    assert.deepEqual(run(["list"]).logs, [`internal\t${repository}`]);
-    assert.equal(fs.existsSync(path.join(configDirectory, "source-catalogs", "internal.json")), true);
-    assert.equal(parseArguments(["list", "--catalog", "internal"]).catalog, "internal");
-    const loaded = loadCommandCatalogs({ command: "list", catalog: "internal" }, process.cwd(), () => {});
+    assert.match(added.logs.join("\n"), /Added catalog team-alpha/);
+    assert.deepEqual(run(["list"]).logs, [`team-alpha\t${repository}`]);
+    assert.equal(fs.existsSync(path.join(configDirectory, "source-catalogs", "team-alpha.json")), true);
+    assert.equal(parseArguments(["list", "--catalog", "team-alpha"]).catalog, "team-alpha");
+    const loaded = loadCommandCatalogs({ command: "list", catalog: "team-alpha" }, () => {});
     assert.ok(loaded.sourceResources.length > 0);
-    assert.ok(loaded.sourceResources.every((resource) => resource.catalog === "internal"));
-    assert.equal(run(["remove", "internal"]).code, 0);
+    assert.ok(loaded.sourceResources.every((resource) => resource.catalog === "team-alpha"));
+    assert.equal(run(["remove", "team-alpha"]).code, 0);
     assert.deepEqual(loadUserSourceConfiguration(), []);
-    assert.equal(fs.existsSync(path.join(configDirectory, "source-catalogs", "internal.json")), false);
+    assert.equal(fs.existsSync(path.join(configDirectory, "source-catalogs", "team-alpha.json")), false);
   } finally {
     for (const [key, value] of Object.entries(previousEnvironment)) {
       if (value === undefined) delete process.env[key];
@@ -614,7 +613,7 @@ test("user registries load metadata for multiple independently named catalogs", 
   const originalConfig = process.env.KITIA_CONFIG_DIR;
   process.env.KITIA_CONFIG_DIR = temporary;
   try {
-    const loaded = loadCommandCatalogs({ command: "list" }, path.resolve(__dirname, ".."));
+    const loaded = loadCommandCatalogs({ command: "list" });
     assert.deepEqual(loaded.sourceResources.map(({ catalog, id }) => `${catalog}:${id}`).sort(), [
       "team-alpha:demo-team-alpha",
       "team-beta:demo-team-beta",
@@ -654,7 +653,7 @@ test("source catalogs load from the user registry without repository manifests",
   const originalConfig = process.env.KITIA_CONFIG_DIR;
   process.env.KITIA_CONFIG_DIR = temporary;
   try {
-    const loaded = loadCommandCatalogs({ command: "list" }, path.resolve(__dirname, ".."));
+    const loaded = loadCommandCatalogs({ command: "list" });
     assert.deepEqual(loaded.sourceResources.map(({ catalog, id }) => `${catalog}:${id}`).sort(), [
       "team-alpha:demo-team-alpha",
       "team-beta:demo-team-beta",
@@ -695,15 +694,12 @@ test("source skills can be uninstalled from inventory after their catalog is rem
   fs.writeFileSync(path.join(target, ".agents/kitia-lock.json"), JSON.stringify({
     lock_version: 1,
     catalog: "grasdouble/Kitia",
-    resources: {},
-    bundles: {},
-    mcps: {},
     sources: { retired: { skills: { "retired-skill": record } } },
   }));
 
   const loaded = loadCommandCatalogs({
     command: "uninstall", kind: "skill", target,
-  }, process.cwd(), () => assert.fail("uninstall must not need source discovery"));
+  }, () => assert.fail("uninstall must not need source discovery"));
   assert.deepEqual(loaded.sourceResources.map(({ catalog, id }) => `${catalog}:${id}`), [
     "retired:retired-skill",
   ]);
@@ -729,9 +725,6 @@ test("identical skill IDs from different sources cannot collide in one installat
   fs.writeFileSync(path.join(target, ".agents/kitia-lock.json"), JSON.stringify({
     lock_version: 1,
     catalog: "grasdouble/Kitia",
-    resources: {},
-    bundles: {},
-    mcps: {},
     sources: { "team-beta": { skills: { "demo-skill": record } } },
   }));
 
@@ -748,7 +741,7 @@ test("identical skill IDs from different sources cannot collide in one installat
       source_path: "skills/demo-skill", source_ref: "a".repeat(40),
       license_status: "MIT",
     }],
-  }, process.cwd(), () => assert.fail("a colliding install must not invoke gh")), /already tracked from another catalog/);
+  }, () => assert.fail("a colliding install must not invoke gh")), /already tracked from another catalog/);
 });
 
 test("configured source skills use the same pinned install, check, update and uninstall lifecycle", () => {
@@ -794,15 +787,12 @@ test("configured source skills use the same pinned install, check, update and un
   assert.equal(runSourceCommand({
     action: "install", id: sourceResource.id, catalog: sourceResource.catalog,
     resource: sourceResource, target, tool: "copilot",
-  }, temporary, invoke), 0);
+  }, invoke), 0);
   const state = readInstallState(target);
   assert.equal(state.sources["team-alpha"].skills["demo-skill"].source_ref, sourceResource.source_ref);
   assert.equal(state.source_skills, undefined);
   assert.equal(readInstalledSourceSkills(target, [sourceResource]).length, 1);
-  const buildInfo = { commit: "b".repeat(40), package_version: "test", dirty: false };
-  const checked = checkInstalledResources(
-    target, [], temporary, buildInfo, [sourceResource], { catalog: "team-alpha" },
-  );
+  const checked = checkInstalledResources(target, [sourceResource], { catalog: "team-alpha" });
   assert.equal(checked.updateAvailable, false);
   assert.equal(
     checked.resources.find((resource) => resource.id === sourceResource.id).version,
@@ -814,41 +804,11 @@ test("configured source skills use the same pinned install, check, update and un
   assert.match(updateSourceResources(installed, target, {}, invoke).join("\n"), /Updated team-alpha catalog skill/);
   assert.equal(installedRef, updatedResource.source_ref);
   assert.equal(checkInstalledResources(
-    target, [], temporary, buildInfo, [updatedResource], { catalog: "team-alpha" },
+    target, [updatedResource], { catalog: "team-alpha" },
   ).updateAvailable, false);
   assert.match(uninstallSourceResource(updatedResource, target).join("\n"), /Removed team-alpha catalog skill entry point/);
   assert.equal(fs.existsSync(path.join(target, ".agents/skills/demo-skill")), false);
   assert.equal(readInstalledSourceSkills(target, []).length, 0);
-});
-test("uninstalling a locally managed skill removes its entire directory", () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-managed-skill-uninstall-"));
-  const target = path.join(temporary, "project");
-  const skillDirectory = path.join(target, ".agents/skills/managed-skill");
-  fs.mkdirSync(skillDirectory, { recursive: true });
-  const relativePath = ".agents/skills/managed-skill/SKILL.md";
-  fs.writeFileSync(path.join(skillDirectory, "SKILL.md"), "Managed skill body.");
-  fs.writeFileSync(path.join(skillDirectory, "local-note.txt"), "Additional file.");
-  writeJson(path.join(target, ".agents/kitia-lock.json"), {
-    lock_version: 1,
-    catalog: "grasdouble/Kitia",
-    resources: {
-      "skill:managed-skill": {
-        tool: "copilot",
-        standalone: false,
-        digest: "a".repeat(64),
-        commit: "b".repeat(40),
-        version: "1.0.0",
-        files: { [relativePath]: installedFingerprint(target, relativePath) },
-      },
-    },
-    sources: {},
-    bundles: {},
-    mcps: {},
-  });
-
-  const messages = uninstallResource("skill", "managed-skill", target);
-  assert.equal(fs.existsSync(skillDirectory), false);
-  assert.match(messages.join("\n"), /Removed skill directory: \.agents\/skills\/managed-skill/);
 });
 
 
@@ -1140,7 +1100,6 @@ test("catalog browser renders mapped source folders and keeps repository-less na
       catalog: "BasicCatalog", kind: "skill", id: "basic-skill",
       source_path: "skills/basic-skill", managed: true,
     },
-    { catalog: "Kitia", kind: "skill", id: "local-skill", source_path: "skills/local-skill", managed: true },
   ];
   const input = new PassThrough();
   input.isTTY = true;
@@ -1169,14 +1128,14 @@ test("catalog browser renders mapped source folders and keeps repository-less na
   assert.ok(plain().split(/\r?\n/).some((line) =>
     line.includes("MattPucock[productivity]") && line.includes("grill-me")));
   assert.ok(plain().split(/\r?\n/).some((line) => line.includes("basic-skill") && line.includes("BasicCatalog")));
-  assert.ok(plain().split(/\r?\n/).some((line) => line.includes("local-skill") && line.includes("Kitia")));
+  assert.equal(plain().split(/\r?\n/).some((line) => line.includes("Kitia")), false);
   assert.match(plain(), /CATALOG[^\n]*\n[^\n]*MattPucock\[productivity\]/);
 
   input.write("f");
   await new Promise((resolve) => setTimeout(resolve, 50));
   for (const character of "MattPucock[productivity]") input.write(character);
   await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.match(plain(), /AVAILABLE\s+1\/3/);
+  assert.match(plain(), /AVAILABLE\s+1\/2/);
   assert.ok(plain().split(/\r?\n/).some((line) =>
     line.includes("MattPucock[productivity]") && line.includes("grill-me")));
   input.write("\x1b");
@@ -1204,7 +1163,7 @@ test("dashboard refreshes its source catalog set before rebuilding installed ski
     writeJson(path.join(configDirectory, "catalogSources.json"), registry);
     writeJson(path.join(catalogDirectory, "catalogSources.json"), registry);
     writeJson(path.join(catalogDirectory, "Test.json"), createSourceIndex(repository, "Test", source));
-    const resource = loadCommandCatalogs({ command: "list" }, process.cwd(), () => {})
+    const resource = loadCommandCatalogs({ command: "list" }, () => {})
       .sourceResources.find(({ id }) => id === "demo-skill");
     assert.ok(resource);
 
@@ -1232,8 +1191,7 @@ test("dashboard refreshes its source catalog set before rebuilding installed ski
       "install",
       resource,
       { target, userTarget },
-      process.cwd(),
-      { resources: [], sourceResources: [], allResources: [] },
+      { sourceResources: [resource] },
       { scope: "project", tool: "copilot" },
     );
 
@@ -1307,9 +1265,7 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
   } } };
   writeJson(path.join(target, ".agents/kitia-lock.json"), state);
 
-  const result = collectInstalledScopes(
-    { project: target }, [], process.cwd(), { dirty: false }, [externalResource],
-  );
+  const result = collectInstalledScopes({ project: target }, [externalResource]);
   const unmanaged = result.resources.filter((resource) => resource.managed === false);
   assert.deepEqual(
     unmanaged.map(({ kind, id, catalog }) => `${catalog}:${kind}:${id}`).sort(),
@@ -1380,15 +1336,13 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
   assert.equal(runSourceCommand({
     action: "install", id: sourceResource.id, catalog: sourceResource.catalog,
     resource: sourceResource, target, tool: "copilot",
-  }, temporary, invokeInstall), 0);
+  }, invokeInstall), 0);
   writeArtifact(".agents/skills/manual-skill/SKILL.md", [
     "---", "name: manual-skill", "description: Installed outside Kitia.", "metadata:",
     ...sourceMetadata, "---", "", "Untracked source content.", "",
   ]);
 
-  const result = collectInstalledScopes(
-    { user: target }, [], process.cwd(), { dirty: false }, [sourceResource],
-  );
+  const result = collectInstalledScopes({ user: target }, [sourceResource]);
   const tracked = result.resources.find((resource) => resource.id === "grill-me");
   assert.equal(tracked.catalog, "MattPucock");
   assert.equal(tracked.source_repository, sourceResource.source_repository);
@@ -1551,8 +1505,7 @@ test("removing an unmanaged skill deletes its entire detected folder", async () 
     "remove-unmanaged",
     { catalog: "-", kind: "skill", id: "manual-skill", scope: "project", managed: false },
     { target, userTarget },
-    process.cwd(),
-    { resources: [], sourceResources: [], allResources: [] },
+    { sourceResources: [] },
   );
   assert.equal(result.code, 0);
   assert.equal(fs.existsSync(skillDirectory), false);

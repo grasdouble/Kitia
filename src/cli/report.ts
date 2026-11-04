@@ -9,7 +9,6 @@ export interface CliReportIdentity {
 export interface CliReportResource extends CliReportIdentity {
   status?: string;
   issues?: ResourceIssue[];
-  unsupported_runtimes?: string[];
 }
 
 export interface CliReportAction {

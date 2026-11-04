@@ -1,30 +1,21 @@
 # Installation inventory formats
 
-The CLI records managed files, ownership, and content fingerprints in
-`.agents/kitia-lock.json`. The current and only supported format is version 1,
-defined by [`schemas/catalog-lock-v1.schema.json`](../schemas/catalog-lock-v1.schema.json).
-It stores locally managed resources, configured source records, bundles, and MCP state.
+The CLI records managed source files and ownership fingerprints in
+`.agents/kitia-lock.json`. The current development format is version 1, defined
+by [`schemas/catalog-lock-v1.schema.json`](../schemas/catalog-lock-v1.schema.json).
+It stores configured external source records only: skills, agents, and
+instructions.
 
-This repository is not yet in production, so it ships no historical inventory
-schemas or migration transformations. `Kitia migrate` remains as the runner for
-future upgrades; today, it reports current inventories as skipped.
+This development checkout no longer supports internal catalog resources,
+bundles, or MCPs. Older local lock files that contain `resources`, `bundles`, or
+`mcps` fields are incompatible with this source-only format. Back up and remove
+only `.agents/kitia-lock.json` to resume with an empty inventory; installed
+files are left untouched and can be rediscovered as unmanaged artifacts.
 
-When a later format is introduced, add only the adjacent transformation
-`migrations/v1-to-v2.js`, register it in `MIGRATIONS` in `migrations/run.js`,
-and add deterministic tests. The runner previews by default, validates the
-converted inventory, creates a timestamped backup before writing, and refuses
-to proceed if an active catalog operation lock exists or records conflict.
-
-Preview the project and user inventories:
-
-```sh
-npx --yes github:grasdouble/Kitia migrate
-```
-
-Apply only after reviewing the preview:
-
-```sh
-npx --yes github:grasdouble/Kitia migrate --apply
-```
+No historical migrations are shipped. `Kitia migrate` remains the runner for
+future inventory format changes; current version 1 inventories are skipped.
+The runner validates any converted inventory, creates a timestamped backup
+before writing, and refuses to proceed if an operation lock exists or records
+conflict.
 
 Do not edit `lock_version` by hand or use `--force` as a migration mechanism.

@@ -11,7 +11,12 @@
   "bugs": {
     "url": "https://github.com/grasdouble/Kitia/issues"
   },
-  "keywords": ["ai", "agents", "skills", "catalog"],
+  "keywords": [
+    "ai",
+    "agents",
+    "skills",
+    "catalog"
+  ],
   "bin": {
     "kitia": "./bin/kitia.js"
   },
@@ -22,22 +27,21 @@
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "docs/cli-contract.md",
-    "docs/bundles.md",
     "docs/inventory-migrations.md",
     "migrations/",
-    "schemas/",
-    "scripts/prepare-catalog.js"
+    "schemas/"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "node scripts/clean-build.js && tsc -p tsconfig.json",
-    "prepare": "npm run build && node scripts/prepare-catalog.js && husky",
-    "postpack": "node scripts/prepare-catalog.js --clean",
-    "test": "npm run build && node --test tests/catalog.test.js tests/documentation.test.js tests/technical.test.js tests/contract.test.js tests/bundles.test.js tests/source-catalogs.test.js tests/migrations.test.js",
-    "test:contract": "npm run build && node --test tests/contract.test.js",
-    "test:package": "node scripts/package-smoke.js",
+    "build": "rimraf dist && tsc -p tsconfig.json",
+    "prepare": "npm run build && husky",
+    "test": "npm run build && node --test tests/documentation.test.js tests/source-catalogs.test.js tests/migrations.test.js",
+    "test:contract": "npm run build && node --test tests/source-catalogs.test.js",
+    "test:termless": "node scripts/screenshots-generator/termless-preflight.js && npm run build && node --test tests/termless-dashboard.test.mjs",
+    "test:package-smoke": "node scripts/tests/package-smoke.js",
+    "update:screenshots:termless": "node scripts/screenshots-generator/termless-preflight.js && npm run build && node scripts/screenshots-generator/update-site-screenshots-termless.js",
     "validate": "npm run build && node bin/kitia.js validate"
   },
   "dependencies": {
@@ -46,10 +50,14 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "@termless/core": "0.10.2",
+    "@termless/xtermjs": "0.10.2",
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "ajv": "8.20.0",
     "husky": "^9.1.7",
+    "rimraf": "^6.1.4",
     "typescript": "5.9.3"
   }
 }

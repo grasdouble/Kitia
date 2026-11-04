@@ -208,7 +208,7 @@ export function InventoryScreen({
       ? selected.issues.map(issueLine).join(" · ")
       : "Healthy · no recorded issues";
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
-  const detailVersion = selected?.version || selected?.source_ref || selected?.commit;
+  const detailVersion = selected?.version || selected?.source_ref;
   const displayVersion = typeof detailVersion === "string" && detailVersion
     ? detailVersion.slice(0, 7)
     : "-";
@@ -310,7 +310,7 @@ export function InventoryScreen({
     "M catalogs",
     ["F filter", ...(resources.length ? ["C catalog", "K kind"] : []), "D details"].join(" - "),
     "↑↓ navigate - Q quit",
-  ].filter(Boolean).join(" | ");
+  ].filter(Boolean).join("|");
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
     h(Text, { dimColor: true, bold: true }, fitText("KITIA  /  PROJECT WORKSPACE  ·  RESOURCES", columns - 2)),

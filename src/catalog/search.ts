@@ -9,7 +9,7 @@ function matchesSearchText(query = "", values = []) {
 function matchesSearch(resource, query = "") {
   return matchesSearchText(query, [
     resource.id, resource.description, resource.category, resource.owner,
-    resource.use_when, resource.group, resource.catalogId || resource.catalog,
+    resource.use_when, resource.catalog,
     resource.license_status, resource.source_repository, ...(resource.tags || []),
   ]);
 }

@@ -60,9 +60,58 @@ repositories. Multiple catalogs can be managed independently with
 npm ci
 npm run validate
 npm test
-npm run test:package
+npm run test:package-smoke
 ```
 
-Kitia does not maintain AI resource bodies. Connect external repositories from the dashboard or with `catalog add`; catalog metadata is stored in your local user registry.
+### Updating website screenshots
+
+The website gallery uses Termless' xterm.js renderer for the real Ink dashboard
+with deterministic demo data. The screenshot generator promotes both images
+only after checking the complete inventory, catalog, and selected details.
+
+```sh
+npm run test:termless
+npm run update:screenshots:termless
+```
+The Termless command builds before launching its in-process dashboard and
+requires Node.js >=23.6 for the pinned Termless development tools.
+
+`test:termless` is opt-in and requires Node.js **23.6 or newer**, as required
+by the pinned `@termless/core` 0.10.2 and `@termless/xtermjs` 0.10.2 packages.
+It uses Node's built-in `node:test` and `assert` (no Vitest) and tests the real
+`runDashboard()` component, production catalog/inventory discovery, key
+transitions, colors, and selected details. Kitia's runtime requirement remains
+Node.js 22 or newer; the normal `npm test` suite remains independent of this
+opt-in Termless suite. The in-process xterm.js path feeds the original Ink ANSI
+bytes through xterm after applying PTY-style LF-to-CRLF line discipline; the
+raw stream remains available for semantic test assertions.
+
+`update:screenshots:termless` uses Termless' pinned xterm.js backend and
+`@resvg/resvg-js` to render a 1036×788 pair from a 120×45 terminal grid. Each
+image adds 12px of background padding around the unchanged 1012×764 terminal
+area. It uses Menlo at 14px, with cell dimensions 8.4333×16.9778px and no outer
+margin or scaling. The Termless feed remaps indexed ANSI colors to the
+reference palette (including background `#282c34`) without changing the
+captured Ink bytes. The generator verifies expected inventory/catalog rows in
+the parsed xterm grid before promoting to
+`site/assets/workspace-inventory-termless.png` and
+`site/assets/catalog-browser-termless.png`. The deterministic fixture keeps
+the catalog ID, repository URL, and dummy source ref fully visible; completeness
+checks verify the complete values. If the parser omits required cells, it writes
+only `*-termless-draft.png` review artifacts instead. The complete Termless pair
+is displayed directly in the website gallery.
+
+The showcase wires the production action handler to temporary project and home
+directories, so update and uninstall shortcuts appear without targeting the
+real workspace.
+
+The original no-mock captures remain at `site/assets/workspace-inventory.png`
+and `site/assets/catalog-browser.png`; the gallery uses the generated Termless
+pair at `site/assets/workspace-inventory-termless.png` and
+`site/assets/catalog-browser-termless.png`.
+
+Kitia does not maintain AI resource bodies or a built-in catalog. Connect
+external repositories from the dashboard or with `catalog add`; catalog
+metadata is stored in your local user registry.
 See [contribution guidance](CONTRIBUTING.md), the [CLI contract](docs/cli-contract.md),
-and [catalog setup](docs/bundles.md).
+and [inventory migration guide](docs/inventory-migrations.md).

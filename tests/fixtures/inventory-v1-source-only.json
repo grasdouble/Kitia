@@ -1,0 +1,21 @@
+{
+  "lock_version": 1,
+  "catalog": "grasdouble/Kitia",
+  "sources": {
+    "team-alpha": {
+      "skills": {
+        "upstream-skill": {
+          "source_repository": "example/skills",
+          "source_path": "skills/upstream-skill",
+          "source_ref": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "files": {
+            ".agents/skills/upstream-skill/SKILL.md": {
+              "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "executable": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

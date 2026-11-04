@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Remove built-in catalog, local resource, MCP, and bundle support; retain user-configured external catalogs and unmanaged artifact discovery.
+- Keep the inventory at source-only version 1 during development; remove the built-in catalog without introducing a format migration.
+- Use Termless xterm.js screenshots directly in the website gallery; promote the pair only after complete-grid checks while preserving the original captures.
+- Show production update and uninstall shortcuts in Termless captures using the isolated showcase fixture's real action handler.
+- Match Termless screenshot geometry and ANSI palette to the reference while preserving raw Ink captures.
+- Use concise deterministic demo metadata so repository URL, source revision, and instruction ID fit in the Termless captures.
 - Show custom catalog source folders as `Catalog[folder]` in catalog browsing and details, using the saved custom path mappings.
 - Allocate wider Source and Kind columns in the catalog browser while preserving ID space at narrow widths.
 - Show catalog-browsing Installed, Source, Kind, ID columns and keep descriptions in selected-resource details.
@@ -19,7 +25,6 @@
 - Preserve source-repository metadata on tracked inventory rows so external catalog associations remain visible; keep `-` for unassociated artifacts.
 - List unmanaged skills, agents, and instructions in the dashboard with a `-` catalog label.
 - Allow explicit dashboard removal of detected unmanaged artifacts after confirmation; remove skill folders completely while preserving files outside them.
-- Remove managed skill directories and their contents when uninstalling locally managed or external skills.
 - Show selected resource details in `TYPE - Name`, Catalog, Scope, Version, Locations, Details order, beside the inventory list on wide terminals and below it on narrow terminals.
 - Add dashboard onboarding for multiple user catalogs, with Basic discovery of skills, agents, and instructions plus Custom user-defined paths.
 - Show repository URLs while selecting a user catalog for dashboard removal; require confirmation and leave installed artifacts untouched.
@@ -28,7 +33,3 @@
 - Open the dashboard when Kitia is invoked without a command.
 - Install and manage pinned external skills, agents, and instructions while keeping artifact bodies upstream.
 - Keep AI resource bodies upstream; catalogs are configured by users and stored locally.
-- Add catalog browsing, lifecycle management, configurable external skill indexes, MCP, and bundle support.
-- Reset the installation inventory to a Kitia-owned version 1 format.
-  Keep the adjacent-version migration runner for future format changes; no
-  historical migrations are shipped.

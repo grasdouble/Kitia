@@ -11,7 +11,7 @@ import {
 } from "./screens.mjs";
 import {
   ModalOverlay, addCatalogModal, confirmationModal, inventoryMigrationModal,
-  optionsModal, postInstallModal, removeCatalogModal, refreshCatalogModal,
+  optionsModal, removeCatalogModal, refreshCatalogModal,
   type PendingDashboardAction,
 } from "./modals.mjs";
 
@@ -115,7 +115,6 @@ export function Dashboard({
   const [confirmation, setConfirmation] = useState<PendingDashboardAction | null>(null);
   const [confirmationChoice, setConfirmationChoice] = useState(0);
   const [confirmationStage, setConfirmationStage] = useState(1);
-  const [postInstallEnvironment, setPostInstallEnvironment] = useState<string[] | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const [actionPending, setActionPending] = useState(false);
   const [lastActionFailed, setLastActionFailed] = useState(false);
@@ -311,9 +310,6 @@ export function Dashboard({
       setActionMessage(failed
         ? `Action failed${result.code ? ` (exit ${result.code})` : ""}${outcome ? `: ${outcome}` : "."}`
         : outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
-      setPostInstallEnvironment(result.code === 0 && result.postInstallEnvironment?.length
-        ? result.postInstallEnvironment
-        : null);
     } catch (error) {
       if (!(error instanceof Error)) throw error;
       setLastActionFailed(true);
@@ -564,10 +560,6 @@ export function Dashboard({
       }
       return;
     }
-    if (postInstallEnvironment) {
-      if (key.return || key.escape || input === " ") setPostInstallEnvironment(null);
-      return;
-    }
     if (confirmation) {
       if ((key.ctrl && character === "c") || key.escape || character === "n") {
         if (confirmation.action === "install") setScreenMode("install-options");
@@ -788,8 +780,6 @@ export function Dashboard({
       state: catalogRefresh,
       columns,
     });
-  } else if (postInstallEnvironment) {
-    modal = postInstallModal({ environment: postInstallEnvironment, columns });
   } else if (confirmation) {
     modal = confirmationModal({
       confirmation,

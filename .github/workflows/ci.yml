@@ -25,5 +25,5 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run validate
-      - run: npm run test:package
+      - run: npm run test:package-smoke
 

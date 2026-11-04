@@ -4,20 +4,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { CatalogError, isWithin, LOCK_PATH, addPlanEntry } = require("../resources/index.js");
-import type { BundleMember } from "../entries.js";
 import type { FileFingerprint, InstallPlanEntry } from "../plan.js";
 
 export type InstallationTool = "claude" | "copilot" | "both";
 export type InventoryScope = "project" | "user";
-
-export interface ResourceInventoryRecord {
-  tool: InstallationTool;
-  digest: string;
-  commit: string;
-  version: string;
-  files: Record<string, FileFingerprint>;
-  standalone: boolean;
-}
 
 export interface SourceResourceInventoryRecord {
   source_repository: string;
@@ -28,36 +18,12 @@ export interface SourceResourceInventoryRecord {
   files: Record<string, FileFingerprint>;
 }
 
-export interface BundleInventoryRecord {
-  tool: InstallationTool;
-  scope: InventoryScope;
-  digest: string;
-  resources: BundleMember[];
-}
-
-export type McpConfigurationRecord =
-  | { managed: true; sha256: string }
-  | { managed: false; sha256?: unknown };
-
-export interface McpInventoryRecord {
-  server: string;
-  digest: string;
-  values: Record<string, string>;
-  configurations: Record<string, McpConfigurationRecord>;
-  files: Record<string, FileFingerprint>;
-  standalone?: boolean;
-  tool?: InstallationTool;
-  scope?: InventoryScope;
-}
-
 export interface InstallState {
   lock_version: number;
   catalog: string;
-  resources: Record<string, ResourceInventoryRecord>;
-  bundles?: Record<string, BundleInventoryRecord>;
-  mcps?: Record<string, McpInventoryRecord>;
-  sources?: Record<string, Record<string, Record<string, SourceResourceInventoryRecord>>>;
+  sources: Record<string, Record<string, Record<string, SourceResourceInventoryRecord>>>;
 }
+
 
 export interface PlanAction {
   action: string;
@@ -165,7 +131,11 @@ function inspectInstalledFiles(targetRoot: string, record: { files: Record<strin
 }
 
 function trackedPaths(state: InstallState) {
-  return new Set(Object.values(state.resources).flatMap((record) => Object.keys(record.files)));
+  return new Set(Object.values(state.sources).flatMap((collections) =>
+    Object.values(collections).flatMap((records) =>
+      Object.values(records).flatMap((record) => Object.keys(record.files)),
+    ),
+  ));
 }
 
 function writeInstallPlan(

@@ -1,8 +1,5 @@
 {
   "lock_version": 1,
   "catalog": "grasdouble/Kitia",
-  "resources": {},
-  "sources": {},
-  "bundles": {},
-  "mcps": {}
+  "sources": {}
 }

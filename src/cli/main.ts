@@ -5,7 +5,7 @@ const path = require("node:path");
 const { acquireOperationLock } = require("../catalog/operation.js");
 const commandApi = require("./commands.js");
 const { CLI_REPORT_SCHEMA_VERSION } = require("./schema-versions.js");
-const { CATALOG_ROOT, resourceOwnsPath, readInstallState, parseArguments, executeCommand } = commandApi;
+const { readInstallState, parseArguments, executeCommand } = commandApi;
 import type { CliReport } from "./report.js";
 
 function createReport(command: string, dryRun = false): CliReport {
@@ -15,7 +15,7 @@ function createReport(command: string, dryRun = false): CliReport {
   };
 }
 
-async function main(args: string[] = process.argv.slice(2), catalogRoot: string = CATALOG_ROOT): Promise<number> {
+async function main(args: string[] = process.argv.slice(2)): Promise<number> {
   let release;
   let report: CliReport | undefined;
   try {
@@ -29,20 +29,15 @@ async function main(args: string[] = process.argv.slice(2), catalogRoot: string 
       }
       options.nonInteractive = true;
       options.onResource = (resource) => {
-        const { source, catalog, ...identity } = resource;
-        const entry = source || catalog !== "internal" ? { ...identity, catalog } : identity;
+        const { source: _source, ...entry } = resource;
         if (!report.resources.some((existing) => existing.catalog === entry.catalog &&
             existing.kind === entry.kind && existing.id === entry.id)) report.resources.push(entry);
       };
       options.onAction = (action) => {
-        const requested = action.resource;
-        const owner = requested && (report.resources.find((resource) =>
-          resource.catalog === requested.catalog && resource.kind === requested.kind && resource.id === requested.id) ||
-          report.resources.find((resource) => resource.kind === requested.kind && resource.id === requested.id)) ||
-          report.resources.find((resource) =>
-            action.path && resourceOwnsPath(`${resource.kind}:${resource.id}`, action.path));
-        report.actions.push({ ...action, resource: owner
-          ? { ...(owner.catalog ? { catalog: owner.catalog } : {}), kind: owner.kind, id: owner.id } : null });
+        const resource = action.resource;
+        report.actions.push({ ...action, resource: resource
+          ? { catalog: resource.catalog, kind: resource.kind, id: resource.id }
+          : null });
       };
       options.output = {
         log: (message) => report.messages.push(message),
@@ -53,7 +48,7 @@ async function main(args: string[] = process.argv.slice(2), catalogRoot: string 
       release = acquireOperationLock(options.target);
       readInstallState(fs.realpathSync(options.target));
     }
-    const code = await executeCommand(options, catalogRoot, report);
+    const code = await executeCommand(options, report);
     if (release) {
       const unlock = release;
       release = undefined;

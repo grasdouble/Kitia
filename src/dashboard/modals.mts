@@ -94,8 +94,7 @@ export function optionsModal({
   errors: ScanError[];
   columns: number;
 }) {
-  const source = resource.catalog === "internal" && !resource.source_repository
-    ? "-" : (resource.catalog || "-").toUpperCase();
+  const source = (resource.catalog || "-").toUpperCase();
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
   const contentWidth = Math.max(1, modalWidth - 8);
   const scopeChoices = resource.kind === "instruction" ? ["project"] : ["project", "user"];
@@ -109,9 +108,6 @@ export function optionsModal({
     `${source} / ${resource.kind}:${resource.id}`,
     ...wrapText(resource.description || "No description available.", contentWidth, 3),
     { text: `License: ${resource.license_status || "not declared"}`, dimColor: true },
-    ...(["bundle", "mcp"].includes(resource.kind)
-      ? [{ text: "Clients: Copilot CLI / Claude Code CLI only.", dimColor: true }]
-      : []),
     ...(scopeError
       ? [{ text: `${scope.toUpperCase()} unavailable: ${scopeError.code}`, color: "redBright" }]
       : alreadyInstalled
@@ -185,21 +181,6 @@ export function confirmationModal({
   );
 }
 
-export function postInstallModal({ environment, columns }: { environment: string[]; columns: number }) {
-  const modalWidth = Math.min(64, columns - 4);
-  const contentWidth = Math.max(1, modalWidth - 8);
-  return modalFrame("MCP POST-INSTALL SETUP", [
-    { text: "REQUIRED ENVIRONMENT", bold: true },
-    ...wrapText(
-        "Set these required environment variables in the environment used to launch the configured MCP client:",
-        contentWidth,
-      ).map((line) => ({ text: line, color: "redBright" })),
-    ...environment.map((name) => ({ text: `  ${name}`, color: "redBright" })),
-    { text: "Restart the CLI and approve the MCP server.", color: "redBright" },
-    { text: "[ OK ]", color: "cyan", bold: true },
-    "ENTER / ESC TO CLOSE",
-  ], columns, "redBright");
-}
 
 export function inventoryMigrationModal({ scopes, columns }: { scopes: string[]; columns: number }) {
   const affectedScopes = [...new Set(scopes.filter((scope) => ["project", "user"].includes(scope)))];

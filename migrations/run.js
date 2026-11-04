@@ -238,9 +238,8 @@ function migrateInstallations({
 function printHelp() {
   console.log(`Usage: npx --yes github:grasdouble/Kitia migrate [--dry-run | --apply]
 
-Inspect and apply registered consecutive inventory migrations. The current
-format is version 1; no historical migrations are registered. --apply creates
-backups before writing.`);
+Inspect registered consecutive inventory migrations. The current source-only
+format is version 1; no historical migrations are registered. --apply creates backups before writing.`);
 }
 
 function main(args = process.argv.slice(2)) {
