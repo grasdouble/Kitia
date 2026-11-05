@@ -49,7 +49,7 @@
     "cli:test:package-smoke": "npm run cli:build && node cli/scripts/package-smoke.js",
     "cli:validate": "npm run cli:build && node cli/bin/kitia.js validate",
     "changeset": "changeset",
-    "changeset:version": "changeset version",
+    "changeset:version": "changeset version && npm install --package-lock-only --ignore-scripts",
     "release": "changeset publish",
     "docs:test": "node --test docs/test/documentation.test.js",
     "web:build": "vite build --config web/vite.config.ts",
