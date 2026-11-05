@@ -11,6 +11,7 @@ const lifecycleApi = require("../catalog/lifecycle.js");
 const { acquireOperationLock } = require("../catalog/operation.js");
 const { loadCommandCatalogs } = require("../catalog/loading.js");
 const { diagnose } = require("../catalog/doctor.js");
+const { userCatalogDirectory } = require("../catalog/sources/config.js");
 const {
   manageCatalogCommand, addCatalog, updateCatalog, refreshCatalogs, checkCatalogFreshness, removeCatalog,
 } = require("../catalog/sources/manage.js");
@@ -49,8 +50,29 @@ function selectedSourceResource(resources, options) {
   );
 }
 
+
+function shouldShowOnboarding() {
+  return process.stdin.isTTY && process.stdout.isTTY &&
+    !fs.existsSync(require("node:path").join(userCatalogDirectory(), "onboarding-complete"));
+}
+
+function markOnboardingComplete() {
+  const directory = userCatalogDirectory();
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(require("node:path").join(directory, "onboarding-complete"), "1\n");
+}
+
+
 async function executeCommand(options, report) {
   const output = options.output || console;
+  if (options.command === "onboarding") {
+    options.command = "dashboard";
+    options.showOnboarding = true;
+  } else if (options.command === "dashboard") {
+    options.showOnboarding = shouldShowOnboarding();
+  }
+  if (options.showOnboarding && process.stdin.isTTY && process.stdout.isTTY &&
+      typeof process.stdin.setRawMode === "function") markOnboardingComplete();
   if (options.scope === "user") output.log(`User scope: ${options.target}`);
   if (options.command === "help") {
     printHelp();
@@ -116,6 +138,7 @@ async function executeCommand(options, report) {
         name, repository, mode, entries,
       }));
       const completed = await browseInstalledResources(rows, process.stdin, process.stdout, result.errors, {
+        showOnboarding: options.showOnboarding,
         catalogResources: sourceResources,
         addCatalog: async (request) => {
           const catalog = addCatalog(request.name, request.repository, {

@@ -99,6 +99,18 @@ export function ScreenFrame({ columns, rows, children }: {
   }, children);
 }
 
+function DashboardHeader({ versionLabel, screenName, metadata, columns }: {
+  versionLabel: string;
+  screenName: string;
+  metadata: string;
+  columns: number;
+}) {
+  return h(Box, { flexDirection: "column" },
+    h(Text, { dimColor: true, bold: true }, fitText(`Kitia - ${versionLabel}`, columns - 2)),
+    h(Text, { bold: true, color: "cyan" }, fitText(screenName, columns - 2)),
+    h(Text, { dimColor: true }, fitText(metadata, columns - 2)));
+}
+
 export function InventoryScreen({
   resources,
   errors,
@@ -107,6 +119,7 @@ export function InventoryScreen({
   catalogFilter,
   kindFilter,
   selectedIndex,
+  versionLabel,
   actionMessage,
   catalogAvailable,
   canExecute,
@@ -115,6 +128,7 @@ export function InventoryScreen({
   rows,
   userCatalogs = [],
   inventoryLabels: suppliedInventoryLabels,
+  tourStep,
 }: {
   resources: CatalogResource[];
   errors: ScanError[];
@@ -123,6 +137,7 @@ export function InventoryScreen({
   catalogFilter: string;
   kindFilter: string;
   selectedIndex: number;
+  versionLabel: string;
   actionMessage: string;
   catalogAvailable: boolean;
   canExecute: boolean;
@@ -131,6 +146,7 @@ export function InventoryScreen({
   rows: number;
   userCatalogs?: InventoryCatalogConfiguration[];
   inventoryLabels?: Map<CatalogResource, string>;
+  tourStep?: number | null;
 }) {
   const inventoryLabels = suppliedInventoryLabels || inventoryCatalogLabels(resources, userCatalogs);
   const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels);
@@ -248,7 +264,7 @@ export function InventoryScreen({
   const detailsVerticalOverhead = showDetails && !inventorySideBySide ? selectionContent.length + 4 : 0;
   const viewport = Math.max(
     1,
-    rows - (3 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead + 1),
+    rows - (4 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead + 1),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
@@ -278,6 +294,7 @@ export function InventoryScreen({
   const resourcePanel = h(Panel, {
     title: "INVENTORY",
     width: inventorySideBySide ? inventoryListWidth : undefined,
+    color: tourStep === 0 ? "yellow" : "cyan",
     marginTop: 1,
   },
   h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${resources.length} · ${pageRange}`, listContentWidth)),
@@ -309,15 +326,16 @@ export function InventoryScreen({
     ].filter(Boolean).join(" - "),
     "M catalogs",
     ["F filter", ...(resources.length ? ["C catalog", "K kind"] : []), "D details"].join(" - "),
-    "↑↓ navigate - Q quit",
+    "↑↓ navigate - ? guide - Q quit",
   ].filter(Boolean).join("|");
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
-    h(Text, { dimColor: true, bold: true }, fitText("KITIA  /  PROJECT WORKSPACE  ·  RESOURCES", columns - 2)),
-    h(Text, { bold: true, color: "cyan" }, fitText(
-      `${managedResources.length ? "AI resource inventory" : "No managed resources"}  ·  ${managedResources.length} managed  ·  ${unmanaged} unmanaged`,
-      columns - 2,
-    )),
+    h(DashboardHeader, {
+      versionLabel,
+      screenName: "INVENTORY",
+      metadata: `RESOURCES ${visible.length}/${resources.length} · ${pageRange} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()}`,
+      columns,
+    }),
     panels,
     warnings,
     inventoryPanels,
@@ -337,9 +355,12 @@ export function CatalogScreen({
   catalogFilter,
   kindFilter,
   selectedIndex,
+  versionLabel,
+  screenName,
   showDetails,
   columns,
   rows,
+  tourStep,
 }: {
   candidates: CatalogResource[];
   resources: CatalogResource[];
@@ -349,9 +370,12 @@ export function CatalogScreen({
   catalogFilter: string;
   kindFilter: string;
   selectedIndex: number;
+  versionLabel: string;
+  screenName: string;
   showDetails: boolean;
   columns: number;
   rows: number;
+  tourStep?: number | null;
 }) {
   const candidateLabels = inventoryCatalogLabels(candidates, catalogs);
   const candidateLabel = (resource: CatalogResource) =>
@@ -387,7 +411,7 @@ export function CatalogScreen({
     : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
   const viewport = Math.max(
     1,
-    rows - (9 + (showDetails && !detailsSideBySide ? entryContent.length + 4 : 0)),
+    rows - (10 + (showDetails && !detailsSideBySide ? entryContent.length + 4 : 0)),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
@@ -428,6 +452,7 @@ export function CatalogScreen({
   const resourcePanel = h(Panel, {
     title: "CATALOG RESOURCES",
     width: detailsSideBySide ? listWidth : undefined,
+    color: tourStep === 1 ? "yellow" : "cyan",
     marginTop: 1,
   },
   h(Text, { color: "gray" },
@@ -451,16 +476,17 @@ export function CatalogScreen({
   }, resourcePanel, entryPanel);
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
-    h(Text, { bold: true, color: "cyan" }, "INSTALL FROM CATALOG"),
-    h(Text, null, fitText(
-      `AVAILABLE  ${visible.length}/${candidates.length}  ·  ${pageRange}  ·  CATALOG ${catalogFilter.toUpperCase()}  ·  KIND ${kindFilter.toUpperCase()}`,
-      columns - 2,
-    )),
+    h(DashboardHeader, {
+      versionLabel,
+      screenName,
+      metadata: `AVAILABLE ${visible.length}/${candidates.length} · ${pageRange} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()}`,
+      columns,
+    }),
     catalogPanels,
     shortcutHint(
       filterMode
         ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR"
-        : "C catalog - K kind - F filter - D details | ↑↓ navigate - ENTER select - ESC back",
+        : "C catalog - K kind - F filter - D details | ↑↓ navigate - ENTER select - ? guide - ESC back",
       columns - 2,
     ),
   );
@@ -477,9 +503,11 @@ export function CatalogManagementScreen({
   canRemove,
   canEdit,
   canRefresh,
+  versionLabel,
   showDetails,
   columns,
   rows,
+  tourStep,
 }: {
   catalogs: Array<{ name: string; repository: string }>;
   catalogResources: CatalogResource[];
@@ -490,9 +518,11 @@ export function CatalogManagementScreen({
   canRemove: boolean;
   canEdit: boolean;
   canRefresh: boolean;
+  versionLabel: string;
   showDetails: boolean;
   columns: number;
   rows: number;
+  tourStep?: number | null;
 }) {
   const activeIndex = Math.min(selectedIndex, Math.max(0, catalogs.length - 1));
   const selected = catalogs[activeIndex];
@@ -567,7 +597,7 @@ export function CatalogManagementScreen({
     : detailValue("catalog-empty", "Add a user catalog to browse and install external resources.", detailsContentWidth, 2);
   const viewport = Math.max(
     1,
-    rows - (detailsSideBySide || !showDetails ? 10 : detailsContent.length + 12),
+    rows - (detailsSideBySide || !showDetails ? 11 : detailsContent.length + 13),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
   const page = catalogs.slice(first, first + viewport);
@@ -604,12 +634,13 @@ export function CatalogManagementScreen({
       ...(canEdit && selected ? ["E edit selected"] : []),
       ...(canRefresh && selected ? ["R refresh"] : []),
     ].join(" - "),
-    "D details - ↑↓ navigate - ESC inventory - Q quit",
+    "D details - ↑↓ navigate - ? guide - ESC inventory - Q quit",
   ].filter(Boolean).join(" | ");
 
   const catalogPanel = h(Panel, {
     title: `CONNECTED CATALOGS ${catalogs.length}`,
     width: detailsSideBySide ? listWidth : undefined,
+    color: tourStep === 2 ? "yellow" : "cyan",
     marginTop: 1,
   },
   h(Text, { bold: true }, tableHeader),
@@ -629,11 +660,12 @@ export function CatalogManagementScreen({
   }, catalogPanel, detailsPanel);
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
-    h(Text, { bold: true, color: "cyan" }, fitText("KITIA  /  CATALOG MANAGEMENT", columns - 2)),
-    h(Text, { dimColor: true }, fitText(
-      `USER CATALOGS  ${catalogs.length}  ·  Refreshing indexes does not update installed resources`,
-      columns - 2,
-    )),
+    h(DashboardHeader, {
+      versionLabel,
+      screenName: "CATALOG MANAGEMENT",
+      metadata: `USER CATALOGS ${catalogs.length}`,
+      columns,
+    }),
     catalogPanels,
     shortcutHint(shortcuts, columns - 2),
   );
