@@ -2,6 +2,7 @@
   "name": "@grasdouble/kitia",
   "version": "1.0.0",
   "description": "Kitia — Your AI toolkit, in good hands.",
+  "license": "MIT",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"

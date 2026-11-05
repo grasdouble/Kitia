@@ -21,6 +21,7 @@ try {
   const packed = new Set(archive.files.map(({ path: file }) => file));
   for (const file of [
     "package.json",
+    "LICENSE",
     "README.md",
     "cli/bin/kitia.js",
     "cli/dist/cli/main.js",
