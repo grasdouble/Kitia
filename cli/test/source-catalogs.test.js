@@ -70,6 +70,62 @@ test("first Kitia use preserves existing Kiti catalog settings", () => {
   }
 });
 
+test("onboarding defaults its project scan to the current directory", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-onboarding-target-"));
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(temporary);
+    const options = parseArguments(["onboarding"]);
+    assert.equal(options.target, ".");
+    assert.deepEqual(collectInstalledScopes({ project: options.target, user: temporary }, []).errors, []);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("dashboard shows the installed and available versions with the changelog link", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const previousVersion = process.env.KITIA_INSTALLED_VERSION;
+  const previousFetch = global.fetch;
+  process.env.KITIA_INSTALLED_VERSION = "1.0.0";
+  global.fetch = async () => ({ ok: true, json: async () => ({ version: "1.0.2" }) });
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  try {
+    const done = runDashboard([], input, output);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+    assert.match(plain(), /NEW VERSION AVAILABLE/);
+    assert.match(plain(), /Installed: 1\.0\.0/);
+    assert.match(plain(), /Available: 1\.0\.2/);
+    assert.match(plain(), /github\.com\/grasdouble\/Kitia\/blob\/main\/CHANGELOG\.md#102/);
+    input.write("\x1b");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    input.write("q");
+    assert.equal(await done, true);
+  } finally {
+    input.destroy();
+    output.destroy();
+    if (previousVersion === undefined) delete process.env.KITIA_INSTALLED_VERSION;
+    else process.env.KITIA_INSTALLED_VERSION = previousVersion;
+    global.fetch = previousFetch;
+  }
+});
+
+test("no-argument CLI defaults to the dashboard", () => {
+  assert.deepEqual(parseArguments([]), { command: "dashboard", target: "." });
+});
+
 
 test("catalog freshness compares cached index with remote default branch", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-catalog-freshness-"));
@@ -1116,7 +1172,6 @@ test("catalog browser renders mapped source folders and keeps repository-less na
   assert.ok(plain().split(/\r?\n/).some((line) =>
     line.includes("MattPucock[productivity]") && line.includes("grill-me")));
   assert.ok(plain().split(/\r?\n/).some((line) => line.includes("basic-skill") && line.includes("BasicCatalog")));
-  assert.equal(plain().split(/\r?\n/).some((line) => line.includes("Kitia")), false);
   assert.match(plain(), /CATALOG[^\n]*\n[^\n]*MattPucock\[productivity\]/);
 
   input.write("f");

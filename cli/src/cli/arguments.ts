@@ -49,6 +49,7 @@ function resolveCatalogName(value: string): string | undefined {
 }
 
 function parseArguments(args: string[]): CliOptions {
+  if (args.length === 0) args = ["dashboard"];
   const extras: CliOptions = {};
   const command = args[0];
   const discovery = ["list", "search"].includes(command);
@@ -128,8 +129,10 @@ function parseCommandArguments(args: string[]): CliOptions {
     if (action === "add" && name && repository) return { command, action, name, repository };
     throw new CatalogError(usage);
   }
-  if (!command) return { command: "dashboard", target: "." };
-  if (command === "--help" || command === "-h") return { command: "help" };
+  if (command === "onboarding") {
+    if (remaining.length) throw new CatalogError("Usage: kitia onboarding");
+    return { command, target: "." };
+  }
   if (command === "validate") {
     if (remaining.length) throw new CatalogError("validate does not accept arguments");
     return { command };
@@ -224,6 +227,7 @@ function parseCommandArguments(args: string[]): CliOptions {
 
 function printHelp() {
   console.log(`Usage:
+  Kitia onboarding                 Show the getting-started guide again
   Kitia [dashboard] [--non-interactive] (dashboard is the default command)
   Kitia list [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--json]
   Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--json]

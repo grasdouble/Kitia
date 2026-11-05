@@ -15,6 +15,14 @@ JavaScript SDK. The `cli/bin/` entry point is the supported executable.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
+On interactive dashboard launch, Kitia checks npm for a newer stable release.
+Every dashboard screen uses a consistent three-line header: Kitia/version,
+screen name, then screen-specific metadata. While the request is pending, the
+version line is `Kitia - Checking version update`; afterward it shows
+`Kitia - <version>` or `Kitia - <version> - New version available`. Check
+failures are silent. Other commands and non-interactive launches skip the
+check.
+
 | Command family | Contract |
 |---|---|
 | no command | Opens the dashboard by default; equivalent to `dashboard` |

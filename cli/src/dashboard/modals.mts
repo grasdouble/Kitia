@@ -374,6 +374,52 @@ export function refreshCatalogModal({
   );
 }
 
+export function onboardingModal(step: number) {
+  const tour = [
+    {
+      title: "1/3 · INVENTORY",
+      description: "Your installed resources live here. The highlighted list shows status, scope, kind, and catalog; move the selection to inspect an item.",
+      shortcut: "↑ / ↓ move · F filter · C catalog · K kind · D details",
+    },
+    {
+      title: "2/3 · CATALOG",
+      description: "Browse resources available to install. Select a resource with Enter to choose its scope and runtime before installing.",
+      shortcut: "A from inventory · F filter · C catalog · K kind · Enter select",
+    },
+    {
+      title: "3/3 · CATALOG MANAGEMENT",
+      description: "Manage the GitHub catalogs that supply resources. Refreshing updates the catalog index; it does not change installed resources.",
+      shortcut: "M from inventory · A add · E edit · R refresh · Delete remove",
+    },
+  ][step];
+  return modalFrame(tour.title, [
+    tour.description,
+    "",
+    tour.shortcut,
+    "",
+    step < 2 ? "ENTER / SPACE / → NEXT · ← BACK · ESC FINISH" : "ENTER / SPACE / ← BACK · ESC FINISH",
+  ], 76, "yellow", 76);
+}
+
+export function versionAvailableModal(
+  installedVersion: string,
+  availableVersion: string,
+  changelogUrl: string,
+  columns: number,
+) {
+  return modalFrame("NEW VERSION AVAILABLE", [
+    "A newer version of Kitia is available.",
+    "",
+    `Installed: ${installedVersion}`,
+    `Available: ${availableVersion}`,
+    "",
+    "Changelog for this version:",
+    changelogUrl,
+    "",
+    "ENTER / ESC CLOSE",
+  ], columns, "green", 76);
+}
+
 function fixedModalText(text, props) {
   return h(Box, { flexShrink: 0 }, h(Text, props, text));
 }

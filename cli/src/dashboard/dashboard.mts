@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { render, useInput, useWindowSize } from "ink";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
@@ -11,7 +11,8 @@ import {
 } from "./screens.mjs";
 import {
   ModalOverlay, addCatalogModal, confirmationModal, inventoryMigrationModal,
-  optionsModal, removeCatalogModal, refreshCatalogModal,
+  onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal,
+  versionAvailableModal,
   type PendingDashboardAction,
 } from "./modals.mjs";
 
@@ -83,16 +84,58 @@ export function Dashboard({
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
     checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
+    showOnboarding?: boolean;
   };
   onFinish: (success: boolean) => void;
 }) {
   const { columns = 80, rows = 24 } = useWindowSize();
+  const installedVersion = process.env.KITIA_INSTALLED_VERSION || "unknown";
+  const [versionLabel, setVersionLabel] = useState("Checking version update");
+  const [versionNotice, setVersionNotice] = useState<{
+    installed: string;
+    available: string;
+    changelogUrl: string;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    const compare = (left: string, right: string) => {
+      const a = left.split(".").map(Number);
+      const b = right.split(".").map(Number);
+      for (let index = 0; index < 3; index += 1) {
+        if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
+      }
+      return 0;
+    };
+    void fetch("https://registry.npmjs.org/@grasdouble%2Fkitia/latest", {
+      signal: AbortSignal.timeout(1500),
+      headers: { accept: "application/json" },
+    }).then(async (response) => {
+      if (!response.ok) throw new Error("npm registry unavailable");
+      const { version } = await response.json();
+      if (installedVersion !== "unknown" && compare(version, installedVersion) > 0) {
+        setVersionLabel(`${installedVersion} - New version available`);
+        const heading = version.toLowerCase().replace(/[^a-z0-9-]/g, "");
+        setVersionNotice({
+          installed: installedVersion,
+          available: version,
+          changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/CHANGELOG.md#${heading}`,
+        });
+      } else {
+        setVersionLabel(installedVersion);
+      }
+    }).catch(() => {
+      if (active) setVersionLabel(installedVersion);
+    });
+    return () => { active = false; };
+  }, [installedVersion]);
   const [installedResources, setInstalledResources] = useState(() => [...resources]);
   const [scanErrors, setScanErrors] = useState(() => [...errors]);
   const [screenMode, setScreenMode] = useState("inventory");
   const [query, setQuery] = useState("");
   const [filterMode, setFilterMode] = useState(false);
   const [showDetails, setShowDetails] = useState(true);
+  const [tourStep, setTourStep] = useState<number | null>(actions.showOnboarding ? 0 : null);
+  const tourStepRef = useRef<number | null>(actions.showOnboarding ? 0 : null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogFilterMode, setCatalogFilterMode] = useState(false);
@@ -323,6 +366,41 @@ export function Dashboard({
     const character = input.toLocaleLowerCase();
     if (migrationScopes.length) {
       if (key.return || key.escape || (key.ctrl && character === "c")) onFinish(false);
+      return;
+    }
+    if (versionNotice) {
+      if (key.return || key.escape || input === " ") setVersionNotice(null);
+      return;
+    }
+    const activeTourStep = tourStepRef.current;
+    if (activeTourStep !== null) {
+      if (key.escape) {
+        tourStepRef.current = null;
+        setTourStep(null);
+        setScreenMode("inventory");
+      } else if (key.leftArrow) {
+        const previous = Math.max(0, activeTourStep - 1);
+        tourStepRef.current = previous;
+        setTourStep(previous);
+        setScreenMode(previous === 0 ? "inventory" : previous === 1 ? "catalog" : "catalog-management");
+      } else if (key.return || key.rightArrow || input === " ") {
+        if (activeTourStep === 2) {
+          tourStepRef.current = null;
+          setTourStep(null);
+          setScreenMode("inventory");
+        } else {
+          const next = activeTourStep + 1;
+          tourStepRef.current = next;
+          setTourStep(next);
+          setScreenMode(next === 1 ? "catalog" : "catalog-management");
+        }
+      }
+      return;
+    }
+    if (character === "?" && !filterMode && !catalogFilterMode) {
+      tourStepRef.current = 0;
+      setTourStep(0);
+      setScreenMode("inventory");
       return;
     }
     if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending &&
@@ -809,9 +887,11 @@ export function Dashboard({
       canRemove: typeof actions.removeCatalog === "function" && userCatalogs.length > 0,
       canEdit: typeof actions.updateCatalog === "function" && userCatalogs.length > 0,
       canRefresh: typeof actions.refreshCatalog === "function" && userCatalogs.length > 0,
+      versionLabel,
       showDetails,
       columns,
       rows,
+      tourStep,
     });
   } else if (screenMode === "catalog" || screenMode === "install-options") {
     baseScreen = h(CatalogScreen, {
@@ -823,9 +903,12 @@ export function Dashboard({
       catalogFilter: catalogSourceFilter,
       kindFilter: catalogKindFilter,
       selectedIndex: activeCatalogIndex,
+      versionLabel,
+      screenName: screenMode === "install-options" ? "INSTALL OPTIONS" : "INSTALL FROM CATALOG",
       showDetails,
       columns,
       rows,
+      tourStep,
     });
   } else {
     baseScreen = h(InventoryScreen, {
@@ -836,6 +919,7 @@ export function Dashboard({
       catalogFilter: inventoryCatalogFilter,
       kindFilter: inventoryKindFilter,
       selectedIndex: activeInventoryIndex,
+      versionLabel,
       actionMessage,
       catalogAvailable: candidates.length > 0,
       showDetails,
@@ -843,8 +927,19 @@ export function Dashboard({
       columns,
       rows,
       userCatalogs,
+      tourStep,
       inventoryLabels,
     });
+  }
+  if (versionNotice && !migrationScopes.length) {
+    modal = versionAvailableModal(
+      versionNotice.installed,
+      versionNotice.available,
+      versionNotice.changelogUrl,
+      columns,
+    );
+  } else if (tourStep !== null) {
+    modal = onboardingModal(tourStep);
   }
   const overlay = modal && h(ModalOverlay, { modal, columns, rows });
   return h(ScreenFrame, { columns, rows }, baseScreen, overlay);
@@ -868,6 +963,7 @@ export async function runDashboard(
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
     checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
+    showOnboarding?: boolean;
   } = {},
 ): Promise<boolean> {
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") return false;
