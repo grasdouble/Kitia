@@ -1,6 +1,6 @@
 {
   "name": "@grasdouble/kitia",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Kitia — Your AI toolkit, in good hands.",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
