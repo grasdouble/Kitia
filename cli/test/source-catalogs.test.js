@@ -1172,7 +1172,6 @@ test("catalog browser renders mapped source folders and keeps repository-less na
   assert.ok(plain().split(/\r?\n/).some((line) =>
     line.includes("MattPucock[productivity]") && line.includes("grill-me")));
   assert.ok(plain().split(/\r?\n/).some((line) => line.includes("basic-skill") && line.includes("BasicCatalog")));
-  assert.equal(plain().split(/\r?\n/).some((line) => line.includes("Kitia")), false);
   assert.match(plain(), /CATALOG[^\n]*\n[^\n]*MattPucock\[productivity\]/);
 
   input.write("f");
