@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+### Patch Changes
+
+- 02a46d9: Include the MIT license metadata and license file in the published npm package.
+
 ## 1.0.0
 
 ### Major Changes
