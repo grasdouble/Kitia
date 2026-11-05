@@ -112,7 +112,7 @@ export function Dashboard({
     }).then(async (response) => {
       if (!response.ok) throw new Error("npm registry unavailable");
       const { version } = await response.json();
-      if (compare(version, installedVersion) > 0) {
+      if (installedVersion !== "unknown" && compare(version, installedVersion) > 0) {
         setVersionLabel(`${installedVersion} - New version available`);
         const heading = version.toLowerCase().replace(/[^a-z0-9-]/g, "");
         setVersionNotice({
