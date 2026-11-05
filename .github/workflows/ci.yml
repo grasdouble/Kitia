@@ -18,13 +18,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.17.0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run cli:validate
-      - run: npm run cli:test:package-smoke
-      - run: npm run web:build
-
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm run cli:validate
+      - run: pnpm run cli:test:package-smoke
+      - run: pnpm run web:build

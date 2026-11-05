@@ -7,10 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const npmCli = process.env.npm_execpath;
-if (!npmCli) throw new Error("Run the package smoke test with npm run cli:test:package-smoke.");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-package-test-"));
-const npm = (args, cwd) => execFileSync(process.execPath, [npmCli, "--silent", ...args], {
+const npm = (args, cwd) => execFileSync("npm", args, {
   cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
 });
 

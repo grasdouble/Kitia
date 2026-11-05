@@ -16,20 +16,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.17.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+          cache: pnpm
       - run: npm install --global npm@^11.5.1
-      - run: npm ci
-      - run: npm test
-      - run: npm run cli:validate
-      - run: npm run cli:test:package-smoke
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm run cli:validate
+      - run: pnpm run cli:test:package-smoke
       - name: Create version PR or publish
         uses: changesets/action@v1
         with:
-          version: npm run changeset:version
-          publish: npm run release
+          version: pnpm run changeset:version
+          publish: pnpm run release
           title: "chore: version packages"
           commit: "chore: version packages"
         env:

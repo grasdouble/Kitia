@@ -287,7 +287,7 @@ distributed.
 
 ## Regression gate
 
-`npm run cli:test:contract` exercises the CLI executable in isolated synthetic
+`pnpm run cli:test:contract` exercises the CLI executable in isolated synthetic
 catalogs, validates complete JSON reports against the schemas and compares
 stable fields against committed version-1 expectations. Human-readable text
 and object/array ordering are deliberately not frozen.
