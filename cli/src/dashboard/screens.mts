@@ -1,6 +1,6 @@
 "use strict";
 
-import React, { type ReactNode } from "react";
+import React, { type ReactNode, useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
@@ -12,6 +12,68 @@ import {
 import type { InventoryCatalogConfiguration } from "./helpers.mjs";
 
 const h = React.createElement;
+
+const kitiaWordmark = [
+  "█  ▄▀  ▀█▀  ▀▀█▀▀  ▀█▀  ▄▀▀▀▄",
+  "█▀▀▄    █     █     █   █▀▀▀█",
+  "▀   ▀  ▀▀▀    ▀    ▀▀▀  ▀   ▀",
+];
+
+const titleColorStops = [[34, 211, 238], [167, 139, 250], [244, 114, 182]];
+const titleColors = Array.from({ length: 96 }, (_, index) => {
+  const segment = Math.floor(index / 32);
+  const start = titleColorStops[segment];
+  const end = titleColorStops[(segment + 1) % titleColorStops.length];
+  return `#${start.map((channel, component) =>
+    Math.round(channel + (end[component] - channel) * (index % 32) / 32)
+      .toString(16).padStart(2, "0")).join("")}`;
+});
+
+function AnimatedTitle({ width, versionLabel, screenName, metadata, phase }: {
+  width: number;
+  phase: number;
+  versionLabel: string;
+  screenName: string;
+  metadata: string;
+}) {
+  const pixelTitle = width >= kitiaWordmark[0].length;
+  return h(Box, { width, flexDirection: "column" },
+    ...(pixelTitle
+      ? kitiaWordmark.map((line, row) => h(Text, { key: row },
+        ...Array.from(line, (character, column) => h(Text, {
+          key: column,
+          color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
+        }, character))))
+      : [h(Text, { key: "compact", color: "cyan", bold: true }, fitText(`KITIA  ${versionLabel}`, width))]),
+    h(Text, { color: "cyan", bold: pixelTitle }, fitText(
+      pixelTitle ? `${versionLabel} · ${screenName}` : screenName, width,
+    )),
+    h(Text, { dimColor: true }, fitText(metadata, width)),
+    ...(!pixelTitle ? [h(Text, { key: "blank-1" }, " "), h(Text, { key: "blank-2" }, " ")] : []));
+}
+
+function AnimatedBrand({ art, catWidth, textWidth, versionLabel, screenName, metadata }: {
+  art: string[];
+  catWidth: number;
+  textWidth: number;
+  versionLabel: string;
+  screenName: string;
+  metadata: string;
+}) {
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setPhase((value) => (value + 1) % titleColors.length), 60);
+    return () => clearInterval(timer);
+  }, []);
+  return h(Box, { flexDirection: "row", height: 5, flexShrink: 0 },
+    h(Box, { width: catWidth, marginRight: 2, flexDirection: "column" },
+      ...art.map((line, row) => h(Text, { key: row, bold: true, wrap: "truncate-end" },
+        ...Array.from(line.slice(0, catWidth), (character, column) => h(Text, {
+          key: column,
+          color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
+        }, character))))),
+    h(AnimatedTitle, { width: textWidth, versionLabel, screenName, metadata, phase }));
+}
 
 const shortcutKey = /^(?:Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])$/;
 
@@ -41,6 +103,7 @@ function Panel({
 }) {
   return h(Box, {
     flexDirection: "column",
+    flexShrink: 0,
     borderStyle: "single",
     borderColor: color,
     paddingX: 1,
@@ -105,10 +168,56 @@ function DashboardHeader({ versionLabel, screenName, metadata, columns }: {
   metadata: string;
   columns: number;
 }) {
-  return h(Box, { flexDirection: "column" },
-    h(Text, { dimColor: true, bold: true }, fitText(`Kitia - ${versionLabel}`, columns - 2)),
-    h(Text, { bold: true, color: "cyan" }, fitText(screenName, columns - 2)),
-    h(Text, { dimColor: true }, fitText(metadata, columns - 2)));
+  const [grooming, setGrooming] = useState<{ activity: "idle" | "lick" | "scratch" | "wink"; frame: number }>({
+    activity: "idle", frame: 0,
+  });
+  const availableWidth = Math.max(1, columns - 2);
+  const catWidth = Math.min(18, Math.max(1, availableWidth - 3));
+  const textWidth = Math.max(1, availableWidth - catWidth - 2);
+  useEffect(() => {
+    let activityTimer: ReturnType<typeof setTimeout>;
+    let frameTimer: ReturnType<typeof setInterval> | undefined;
+    const scheduleAnimation = () => {
+      activityTimer = setTimeout(() => {
+        const activities = ["lick", "scratch", "wink"] as const;
+        const activity = activities[Math.floor(Math.random() * activities.length)];
+        setGrooming({ activity, frame: 0 });
+        if (activity !== "wink") {
+          frameTimer = setInterval(() => {
+            setGrooming((current) => ({ activity, frame: (current.frame + 1) % 2 }));
+          }, 300);
+        }
+        activityTimer = setTimeout(() => {
+          clearInterval(frameTimer);
+          setGrooming({ activity: "idle", frame: 0 });
+          scheduleAnimation();
+        }, activity === "wink" ? 180 : 2000 + Math.random() * 2000);
+      }, 10000 + Math.random() * 10000);
+    };
+    scheduleAnimation();
+    return () => {
+      clearTimeout(activityTimer);
+      clearInterval(frameTimer);
+    };
+  }, []);
+  const sittingFrame = [
+    "       /\\_/\\",
+    grooming.activity === "wink" ? "      (=o.-=)" : "      (=o.o=)",
+    "      /:>^<:\\    )",
+    "     / .| |. \\  /",
+    "     \\__|_|__/_/",
+  ];
+  const lickingFrames = [
+    ["       /\\_/\\", "      (=-.-=)", "      /: v( )   )", "     / .| . \\  /", "     \\__|_|__/_/"],
+    ["       /\\_/\\", "      (=-.-=)", "      /: -( )   )", "     / .| . \\  /", "     \\__|_|__/_/"],
+  ];
+  const scratchingFrames = [
+    ["       /\\_/\\", "      (=o.-=)()", "      /:>^< /   )", "     / .| ./ \\ /", "     \\__|_|__/_/"],
+    ["       /\\_/\\ ()", "      (=o.-=) /", "      /:>^< /   )", "     / .| ./ \\ /", "     \\__|_|__/_/"],
+  ];
+  const art = grooming.activity === "lick" ? lickingFrames[grooming.frame]
+    : grooming.activity === "scratch" ? scratchingFrames[grooming.frame] : sittingFrame;
+  return h(AnimatedBrand, { art, catWidth, textWidth, versionLabel, screenName, metadata });
 }
 
 export function InventoryScreen({
@@ -176,7 +285,7 @@ export function InventoryScreen({
   const summaryCards = [
     { title: "RESOURCES", value: resources.length, note: `${catalogCount} catalog(s) connected`, color: "cyan" },
     { title: "MANAGED", value: managedResources.length, note: `${current} current · ${unmanaged} unmanaged`, color: "green" },
-    { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} attention`, color: needsReview ? "yellow" : "green" },
+    { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} warning(s)`, color: needsReview ? "yellow" : "green" },
   ];
   const panels = h(Box, {
     flexDirection: sideBySide ? "row" : "column",
@@ -259,12 +368,12 @@ export function InventoryScreen({
         row.label === "STATUS" ? colorForStatus(selectedStatus) : "gray",
       )
       : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
-  const summaryPanelRows = sideBySide ? 5 : 15;
+  const summaryPanelRows = sideBySide ? 5 : 17;
   const warningPanelRows = errors.length ? errors.length + 4 : 0;
   const detailsVerticalOverhead = showDetails && !inventorySideBySide ? selectionContent.length + 4 : 0;
   const viewport = Math.max(
     1,
-    rows - (4 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead + 1),
+    rows - (6 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead + 1),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
@@ -411,7 +520,7 @@ export function CatalogScreen({
     : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
   const viewport = Math.max(
     1,
-    rows - (10 + (showDetails && !detailsSideBySide ? entryContent.length + 4 : 0)),
+    rows - (12 + (showDetails && !detailsSideBySide ? entryContent.length + 4 : 0)),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
@@ -597,7 +706,7 @@ export function CatalogManagementScreen({
     : detailValue("catalog-empty", "Add a user catalog to browse and install external resources.", detailsContentWidth, 2);
   const viewport = Math.max(
     1,
-    rows - (detailsSideBySide || !showDetails ? 11 : detailsContent.length + 13),
+    rows - (detailsSideBySide || !showDetails ? 13 : detailsContent.length + 15),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
   const page = catalogs.slice(first, first + viewport);
