@@ -8,9 +8,15 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-package-test-"));
-const npm = (args, cwd) => execFileSync("npm", args, {
-  cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-});
+const windows = process.platform === "win32";
+const npmCli = windows
+  ? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")
+  : "npm";
+const npm = (args, cwd) => execFileSync(
+  windows ? process.execPath : npmCli,
+  windows ? [npmCli, ...args] : args,
+  { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+);
 
 try {
   const [archive] = JSON.parse(npm([
