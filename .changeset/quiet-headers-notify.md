@@ -2,4 +2,4 @@
 "@grasdouble/kitia": minor
 ---
 
-Standardize dashboard headers, notify users when an npm update is available, and add an interactive first-run dashboard tour with highlighted screens that can be reopened with `kitia onboarding` or `?`. Ensure `kitia onboarding` scans the current project directory and restore the no-argument `kitia` dashboard default. Show an explicit popup with installed and available versions plus the corresponding changelog link when an update is found.
+Add versioned catalog configuration import/export commands; imports merge validated definitions, skip conflicting names or repositories, refresh newly added catalogs, and summarize additions, ignored entries, and refresh failures. The dashboard imports pasted JSON, lets users review and select individual catalogs before importing, copies exports to the system clipboard, and provides presets for Matt Pocock and Anthropics.

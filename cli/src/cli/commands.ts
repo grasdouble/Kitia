@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const os = require("node:os");
 const { CatalogError, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
 const inventoryApi = require("../catalog/inventory/index.js");
@@ -14,6 +15,7 @@ const { diagnose } = require("../catalog/doctor.js");
 const { userCatalogDirectory } = require("../catalog/sources/config.js");
 const {
   manageCatalogCommand, addCatalog, updateCatalog, refreshCatalogs, checkCatalogFreshness, removeCatalog,
+  exportCatalogConfigurationData, importCatalogConfigurationText,
 } = require("../catalog/sources/manage.js");
 const { loadUserSourceConfiguration } = require("../catalog/sources/config.js");
 const { catalogEntries, listCatalogResources, formatDashboardRows } = require("./catalog.js");
@@ -35,6 +37,27 @@ const { executeDashboardAction } = (() => {
   return { executeDashboardAction: handler };
 })();
 
+
+function copyTextToClipboard(text) {
+  if (process.platform === "darwin") {
+    execFileSync("pbcopy", [], { input: text });
+    return;
+  }
+  if (process.platform === "win32") {
+    execFileSync("clip", [], { input: text });
+    return;
+  }
+  for (const [program, args] of [
+    ["wl-copy", []],
+    ["xclip", ["-selection", "clipboard"]],
+  ]) {
+    try {
+      execFileSync(program, args, { input: text });
+      return;
+    } catch {}
+  }
+  throw new Error("Clipboard access requires wl-copy or xclip on Linux.");
+}
 
 function selectedSourceResource(resources, options) {
   return resolveCatalogResource(
@@ -178,6 +201,18 @@ async function executeCommand(options, report) {
           const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
           return { ...result, catalogs: userCatalogState(), resources: catalogEntries(refreshed.sourceResources) };
         },
+        transferCatalogs: async (action, content) => {
+          const importSummary = action === "export"
+            ? undefined
+            : importCatalogConfigurationText(content);
+          if (action === "export") {
+            const configuration = JSON.stringify(exportCatalogConfigurationData(), null, 2);
+            copyTextToClipboard(configuration);
+          }
+          const catalogs = userCatalogState();
+          const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
+          return { catalogs, resources: catalogEntries(refreshed.sourceResources), importSummary };
+        },
         execute: (operation, resource, installOptions) => executeDashboardAction(
           operation,
           resource,
@@ -266,6 +301,6 @@ module.exports = {
   printHelp,
   catalogEntries,
   listCatalogResources,
-  executeDashboardAction,
   executeCommand,
+  copyTextToClipboard,
 };
