@@ -5,7 +5,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   root,
-  base: '/Kitia/',
+  base: '/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
