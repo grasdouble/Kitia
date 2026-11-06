@@ -7,12 +7,16 @@ const os = require("node:os");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const npmCli = process.env.npm_execpath;
-if (!npmCli) throw new Error("Run the package smoke test with npm run cli:test:package-smoke.");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-package-test-"));
-const npm = (args, cwd) => execFileSync(process.execPath, [npmCli, "--silent", ...args], {
-  cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-});
+const windows = process.platform === "win32";
+const npmCli = windows
+  ? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")
+  : "npm";
+const npm = (args, cwd) => execFileSync(
+  windows ? process.execPath : npmCli,
+  windows ? [npmCli, ...args] : args,
+  { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+);
 
 try {
   const [archive] = JSON.parse(npm([

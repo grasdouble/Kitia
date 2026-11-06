@@ -10,10 +10,10 @@
 
 <!-- Check the relevant commands and list any additional checks. -->
 
-- [ ] `npm test`
-- [ ] `npm run cli:validate` (catalog or resource changes)
-- [ ] `npm run cli:test:contract` (CLI or inventory contract changes)
-- [ ] `npm run cli:test:package-smoke` (package or CLI distribution changes)
+- [ ] `pnpm test`
+- [ ] `pnpm run cli:validate` (catalog or resource changes)
+- [ ] `pnpm run cli:test:contract` (CLI or inventory contract changes)
+- [ ] `pnpm run cli:test:package-smoke` (package or CLI distribution changes)
 - [ ] Other or not applicable (explain)
 
 ## Compatibility and data safety

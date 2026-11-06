@@ -738,11 +738,13 @@ export function CatalogManagementScreen({
   }
   const shortcuts = [
     [
-      ...(canAdd ? ["A add catalog"] : []),
-      ...(canRemove && selected ? ["Delete remove selected"] : []),
-      ...(canEdit && selected ? ["E edit selected"] : []),
+      ...(canAdd ? ["A add"] : []),
+      ...(canAdd ? ["P presets"] : []),
+      ...(canRemove && selected ? ["Delete remove"] : []),
+      ...(canEdit && selected ? ["E edit"] : []),
       ...(canRefresh && selected ? ["R refresh"] : []),
     ].join(" - "),
+    "I import / X export",
     "D details - ↑↓ navigate - ? guide - ESC inventory - Q quit",
   ].filter(Boolean).join(" | ");
 

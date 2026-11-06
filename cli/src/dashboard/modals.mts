@@ -373,6 +373,74 @@ export function refreshCatalogModal({
     80,
   );
 }
+export function catalogTransferModal({ action, step, content, message, summary, choices, selectedIndex = 0, working, columns }: {
+  action: "import" | "export";
+  step: "paste" | "select" | "result";
+  content: string;
+  message: string;
+  summary?: {
+    added: string[];
+    ignored: Array<{ name: string; reason: string }>;
+    refreshed: Array<{ name: string; count: number }>;
+    refreshFailures: Array<{ name: string; message: string }>;
+  };
+  choices?: Array<{ name: string; repository: string; existing: boolean; selected: boolean }>;
+  selectedIndex?: number;
+  working: boolean;
+  columns: number;
+}) {
+  const contentLines = content.split("\n");
+  const visibleLines = contentLines.slice(-6);
+  const choiceList = choices || [];
+  const choiceStart = Math.max(0, Math.min(selectedIndex - 3, choiceList.length - 8));
+  const visibleChoices = choiceList.slice(choiceStart, choiceStart + 8);
+  const importLines = step === "result" && summary
+    ? [
+      `Added (${summary.added.length}): ${summary.added.join(", ") || "none"}`,
+      `Ignored (${summary.ignored.length}):`,
+      ...summary.ignored.map(({ name, reason }) => `${name}: ${reason}`),
+      `Refreshed (${summary.refreshed.length}): ${summary.refreshed.map(({ name, count }) => `${name} · ${count}`).join(", ") || "none"}`,
+      `Refresh failed (${summary.refreshFailures.length}):`,
+      ...summary.refreshFailures.map(({ name, message }) => `${name}: ${message}`),
+    ]
+    : step === "select"
+      ? [
+        "Choose which catalogs to import:",
+        ...(choiceStart > 0 ? ["…"] : []),
+        ...visibleChoices.map((choice, offset) =>
+          selectableOption(`${choice.selected ? "[x]" : "[ ]"} ${choice.name} · ${choice.repository}${choice.existing ? " · already configured" : ""}`,
+            choiceStart + offset === selectedIndex)),
+        ...(choiceStart + visibleChoices.length < choiceList.length ? ["…"] : []),
+      ]
+      : [
+        "Paste the JSON catalog configuration below:",
+        ...visibleLines.map((line) => `│ ${line}`),
+        ...(contentLines.length > visibleLines.length ? ["…"] : []),
+      ];
+  return modalFrame(action === "import" ? "IMPORT CATALOGS" : "EXPORT CATALOGS", [
+    ...(action === "import" ? importLines : ["Copy the current catalog configuration to the clipboard?"]),
+    ...(message ? [{ text: message, color: "yellow" }] : []),
+    "",
+    working ? "PLEASE WAIT"
+      : action === "import" && step === "paste" ? "CTRL+S REVIEW · ENTER NEW LINE · ESC CANCEL"
+        : action === "import" && step === "select" ? "SPACE/ENTER TOGGLE · CTRL+S IMPORT · ESC BACK"
+          : action === "import" ? "ENTER CLOSE · ESC CLOSE"
+            : "ENTER COPY TO CLIPBOARD · ESC CANCEL",
+  ], columns, "cyan", 80);
+}
+export function catalogPresetModal({ presets, index, columns }: {
+  presets: Array<{ name: string; repository: string }>;
+  index: number;
+  columns: number;
+}) {
+  return modalFrame("ADD CATALOG PRESET", [
+    "Choose a catalog preset:",
+    ...presets.map(({ name, repository }, presetIndex) =>
+      selectableOption(`${name} · ${repository}`, presetIndex === index)),
+    "",
+    "↑↓ SELECT · ENTER ADD · ESC CANCEL",
+  ], columns, "cyan", 88);
+}
 
 export function onboardingModal(step: number) {
   const tour = [
@@ -441,7 +509,7 @@ function ChoiceGroup({ line }) {
       },
     )),
     fixedModalText(
-      " ".repeat(Math.max(0, line.text.length - 4 - line.bodyText.length)),
+      " ".repeat(Math.max(0, line.text.length - 3 - line.bodyText.length)),
       { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
     ),
     fixedModalText("│", props));
@@ -461,7 +529,7 @@ function SelectableOption({ line }) {
       bold: line.selected,
     }),
     fixedModalText(
-      " ".repeat(Math.max(0, line.text.length - 4 - line.bodyText.length)),
+      " ".repeat(Math.max(0, line.text.length - 3 - line.bodyText.length)),
       { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
     ),
     fixedModalText("│", { backgroundColor: MODAL_BACKGROUND }));

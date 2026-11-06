@@ -11,7 +11,7 @@ const {
 } = require("../resources/index.js");
 const {
   catalogNameKey, isValidCatalogName, repositoryId, validateSourceConfiguration,
-  loadUserSourceConfiguration, userCatalogSourcesFile, userCatalogIndexDirectory,
+  loadUserSourceConfiguration, userCatalogSourcesFile, userCatalogIndexDirectory, userCatalogDirectory,
 } = require("./config.js");
 function sourceMetadata(file) {
   try {
@@ -434,12 +434,94 @@ function removeCatalog(name) {
   }
 }
 
+function exportCatalogConfigurationData() {
+  const sources = loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
+    name, repository, ...(mode ? { mode, entries } : {}),
+  }));
+  return { catalog_version: 1, sources };
+}
+
+function exportCatalogConfiguration(file) {
+  writeJson(path.resolve(file), exportCatalogConfigurationData());
+}
+
+
+function importCatalogConfigurationText(contents, refresh = refreshCatalogs) {
+  const manifest = JSON.parse(contents);
+  validateSourceConfiguration({ catalog_version: manifest?.catalog_version, sources: [] });
+  if (!Array.isArray(manifest.sources)) {
+    throw new CatalogError("catalogSources.json must have catalog_version: 1 and a sources array");
+  }
+  const current = loadUserSourceConfiguration();
+  const names = new Set(current.map(({ name }) => catalogNameKey(name)));
+  const repositories = new Set(current.map(({ repositoryId: repository }) => repository));
+  const added = [];
+  const ignored = [];
+  for (const rawSource of manifest.sources) {
+    const [source] = validateSourceConfiguration({ catalog_version: 1, sources: [rawSource] });
+    if (names.has(catalogNameKey(source.name))) {
+      ignored.push({ name: source.name, reason: "Catalog name already exists." });
+    } else if (repositories.has(source.repositoryId)) {
+      ignored.push({ name: source.name, reason: `Repository already registered as another catalog (${source.repositoryId}).` });
+    } else {
+      names.add(catalogNameKey(source.name));
+      repositories.add(source.repositoryId);
+      added.push({
+        name: source.name, repository: source.repository,
+        ...(source.mode ? { mode: source.mode, entries: source.entries } : {}),
+      });
+    }
+  }
+  if (added.length) {
+    const combined = [...current.map(({ name, repository, mode, entries }) => ({
+      name, repository, ...(mode ? { mode, entries } : {}),
+    })), ...added];
+    const directory = userCatalogDirectory();
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeJson(userCatalogSourcesFile(), { catalog_version: 1, sources: combined });
+    const indexDirectory = userCatalogIndexDirectory();
+    fs.mkdirSync(indexDirectory, { recursive: true, mode: 0o700 });
+    writeJson(path.join(indexDirectory, "catalogSources.json"), { catalog_version: 1, sources: combined });
+  }
+  const refreshResult = added.length
+    ? refresh(added.map(({ name }) => name))
+    : { refreshed: [], failures: [] };
+  return {
+    added: added.map(({ name }) => name),
+    ignored,
+    refreshed: refreshResult.refreshed,
+    refreshFailures: refreshResult.failures,
+  };
+}
+
+
+
 function manageCatalogCommand(options) {
   const output = options.output || console;
   if (options.action === "add") {
     addCatalog(options.name, options.repository);
     output.log(`Added catalog ${options.name} (${repositoryId(options.repository)}).`);
     return 0;
+  }
+  if (options.action === "export") {
+    exportCatalogConfiguration(options.file);
+    output.log(`Exported catalog configuration to ${options.file}.`);
+    return 0;
+  }
+  if (options.action === "import") {
+    const summary = importCatalogConfigurationText(fs.readFileSync(path.resolve(options.file), "utf8"));
+    output.log(
+      `Catalog import: ${summary.added.length} added, ${summary.ignored.length} ignored, ${summary.refreshed.length} refreshed, ${summary.refreshFailures.length} refresh failed.`,
+    );
+    for (const name of summary.added) output.log(`Added: ${name}`);
+    for (const { name, reason } of summary.ignored) output.log(`Ignored: ${name} · ${reason}`);
+    for (const catalog of summary.refreshed) {
+      output.log(`Refreshed: ${catalog.name} · ${catalog.count} resources indexed.`);
+    }
+    for (const failure of summary.refreshFailures) {
+      output.error(`Refresh failed: ${failure.name} · ${failure.message}`);
+    }
+    return summary.refreshFailures.length ? 1 : 0;
   }
   if (options.action === "refresh") {
     const result = refreshCatalogs(options.allCatalogs ? undefined : [options.name]);
@@ -467,5 +549,5 @@ function manageCatalogCommand(options) {
 
 module.exports = {
   sourceMetadata, createSourceIndex, addCatalog, updateCatalog, refreshCatalogs, checkCatalogFreshness,
-  removeCatalog, manageCatalogCommand,
+  removeCatalog, manageCatalogCommand, exportCatalogConfigurationData, importCatalogConfigurationText,
 };

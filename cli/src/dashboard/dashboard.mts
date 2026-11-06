@@ -13,6 +13,7 @@ import {
   ModalOverlay, addCatalogModal, confirmationModal, inventoryMigrationModal,
   onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal,
   versionAvailableModal,
+  catalogTransferModal, catalogPresetModal,
   type PendingDashboardAction,
 } from "./modals.mjs";
 
@@ -36,6 +37,12 @@ type CatalogActionResult = {
   resources?: CatalogResource[];
   refreshed?: Array<{ name: string; count: number }>;
   failures?: Array<{ name: string; message: string }>;
+  importSummary?: {
+    added: string[];
+    ignored: Array<{ name: string; reason: string }>;
+    refreshed: Array<{ name: string; count: number }>;
+    refreshFailures: Array<{ name: string; message: string }>;
+  };
 };
 type CatalogMutationResult = {
   catalog: string;
@@ -59,6 +66,46 @@ type CatalogRefreshState = {
   details?: string[];
   failed: boolean;
 };
+type CatalogTransferState = {
+  action: "import" | "export";
+  step: "paste" | "select" | "result";
+  content: string;
+  message: string;
+  working: boolean;
+  summary?: {
+    added: string[];
+    ignored: Array<{ name: string; reason: string }>;
+    refreshed: Array<{ name: string; count: number }>;
+    refreshFailures: Array<{ name: string; message: string }>;
+  };
+  sources?: Array<Record<string, unknown>>;
+  choices?: Array<{ name: string; repository: string; existing: boolean; selected: boolean }>;
+  selectedIndex?: number;
+};
+type CatalogPreset = {
+  name: string;
+  catalogName: string;
+  repository: string;
+  mode: "basic" | "custom";
+  entries: CatalogEntry[];
+};
+const CATALOG_PRESETS: CatalogPreset[] = [
+  {
+    name: "Anthropics",
+    catalogName: "Anthropics",
+    repository: "https://github.com/anthropics/skills",
+    mode: "basic",
+    entries: [],
+  },
+  {
+    name: "Matt Pocock",
+    catalogName: "matt-pocock",
+    repository: "https://github.com/mattpocock/skills",
+    mode: "basic",
+    entries: [],
+  },
+];
+type CatalogPresetState = { index: number };
 
 const h = React.createElement;
 
@@ -83,6 +130,7 @@ export function Dashboard({
     userCatalogs?: UserCatalog[];
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
+    transferCatalogs?: (action: "import" | "export", content: string) => Promise<CatalogActionResult>;
     checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
     showOnboarding?: boolean;
   };
@@ -147,6 +195,8 @@ export function Dashboard({
   const freshnessRequest = useRef(0);
   const [catalogRemoval, setCatalogRemoval] = useState<CatalogRemovalState | null>(null);
   const [catalogRefresh, setCatalogRefresh] = useState<CatalogRefreshState | null>(null);
+  const [catalogTransfer, setCatalogTransfer] = useState<CatalogTransferState | null>(null);
+  const [catalogPreset, setCatalogPreset] = useState<CatalogPresetState | null>(null);
   const [inventoryCatalogFilter, setInventoryCatalogFilter] = useState("all");
   const [inventoryKindFilter, setInventoryKindFilter] = useState("all");
   const [catalogSourceFilter, setCatalogSourceFilter] = useState("all");
@@ -427,6 +477,12 @@ export function Dashboard({
       });
       return;
     }
+    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !catalogTransfer &&
+        !catalogPreset && !actionPending && character === "p" &&
+        screenMode === "catalog-management" && actions.addCatalog) {
+      setCatalogPreset({ index: 0 });
+      return;
+    }
     if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending && character === "e" &&
         screenMode === "catalog-management" && actions.updateCatalog && userCatalogs.length) {
       const selected = userCatalogs[Math.min(catalogManagementIndex, userCatalogs.length - 1)];
@@ -452,6 +508,16 @@ export function Dashboard({
       setCatalogRefresh({
         step: "scope", scope: "one", index, name: "", message: "", failed: false,
       });
+      return;
+    }
+    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !catalogTransfer &&
+        !actionPending && screenMode === "catalog-management" && character === "i" && actions.transferCatalogs) {
+      setCatalogTransfer({ action: "import", step: "paste", content: "", message: "", working: false });
+      return;
+    }
+    if (!catalogWizard && !catalogRemoval && !catalogRefresh && !catalogTransfer &&
+        !actionPending && screenMode === "catalog-management" && character === "x" && actions.transferCatalogs) {
+      setCatalogTransfer({ action: "export", step: "paste", content: "", message: "", working: false });
       return;
     }
     if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending &&
@@ -638,6 +704,133 @@ export function Dashboard({
       }
       return;
     }
+    if (catalogPreset) {
+      if (key.escape) {
+        setCatalogPreset(null);
+      } else if (key.upArrow || key.downArrow) {
+        setCatalogPreset({
+          index: cycleIndex(CATALOG_PRESETS.length, catalogPreset.index, key.downArrow ? 1 : -1),
+        });
+      } else if (key.return) {
+        const preset = CATALOG_PRESETS[catalogPreset.index];
+        setCatalogPreset(null);
+        void submitCatalog({
+          step: "name",
+          intent: "add",
+          originalName: null,
+          name: preset.catalogName,
+          repository: preset.repository,
+          mode: preset.mode,
+          kind: preset.entries[0]?.kind || "skill",
+          path: "",
+          entries: preset.entries,
+          entryIndex: 0,
+          message: "",
+        });
+      }
+      return;
+    }
+    if (catalogTransfer) {
+      if (catalogTransfer.working) return;
+      if (key.escape) {
+        if (catalogTransfer.step === "select") {
+          setCatalogTransfer({ ...catalogTransfer, step: "paste", message: "" });
+        } else {
+          setCatalogTransfer(null);
+        }
+      } else if (catalogTransfer.step === "result" && key.return) {
+        setCatalogTransfer(null);
+      } else if (catalogTransfer.action === "export" && key.return) {
+        const current = { ...catalogTransfer, working: true };
+        setCatalogTransfer(current);
+        setActionPending(true);
+        void actions.transferCatalogs?.("export", "").then((result) => {
+          if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+          setCatalogTransfer({ ...current, step: "result", working: false, message: "Configuration copied to clipboard." });
+        }).catch((error) => {
+          setCatalogTransfer({ ...current, step: "result", working: false, message: error instanceof Error ? error.message : String(error) });
+        }).finally(() => setActionPending(false));
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && key.ctrl && character === "s") {
+        try {
+          const parsed = JSON.parse(catalogTransfer.content) as { catalog_version?: unknown; sources?: unknown };
+          if (parsed.catalog_version !== 1 || !Array.isArray(parsed.sources)) {
+            throw new Error("Configuration must include catalog_version 1 and a sources array.");
+          }
+          const sources = parsed.sources as Array<Record<string, unknown>>;
+          const choices = sources.map((source, index) => {
+            const record = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+            const name = typeof record.name === "string" ? record.name : `Entry ${index + 1}`;
+            const repository = typeof record.repository === "string" ? record.repository : "";
+            const normalizedRepository = repository.toLowerCase().replace(/\/+$/u, "").replace(/\.git$/u, "");
+            const existing = userCatalogs.some((catalog) =>
+              catalog.name.toLowerCase() === name.toLowerCase() ||
+              catalog.repository.toLowerCase().replace(/\/+$/u, "").replace(/\.git$/u, "") === normalizedRepository);
+            return { name, repository, existing, selected: !existing };
+          });
+          setCatalogTransfer({
+            ...catalogTransfer,
+            step: "select",
+            message: "",
+            sources,
+            choices,
+            selectedIndex: 0,
+          });
+        } catch (error) {
+          setCatalogTransfer({
+            ...catalogTransfer,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "select" &&
+          catalogTransfer.choices?.length && (key.upArrow || key.downArrow)) {
+        setCatalogTransfer({
+          ...catalogTransfer,
+          selectedIndex: cycleIndex(catalogTransfer.choices.length, catalogTransfer.selectedIndex || 0, key.downArrow ? 1 : -1),
+        });
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "select" &&
+          (key.return || input === " ")) {
+        const selectedIndex = catalogTransfer.selectedIndex || 0;
+        const choices = [...(catalogTransfer.choices || [])];
+        const choice = choices[selectedIndex];
+        if (choice && !choice.existing) {
+          choices[selectedIndex] = { ...choice, selected: !choice.selected };
+          setCatalogTransfer({ ...catalogTransfer, choices });
+        }
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "select" && key.ctrl && character === "s") {
+        const selectedSources = (catalogTransfer.sources || []).filter((_, index) => catalogTransfer.choices?.[index]?.selected);
+        const parsed = JSON.parse(catalogTransfer.content) as Record<string, unknown>;
+        const content = JSON.stringify({ ...parsed, sources: selectedSources });
+        const current = { ...catalogTransfer, step: "select" as const, working: true };
+        setCatalogTransfer(current);
+        setActionPending(true);
+        void actions.transferCatalogs?.("import", content).then((result) => {
+          if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+          if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
+          setCatalogTransfer({
+            ...current,
+            step: "result",
+            working: false,
+            message: `Imported ${result.importSummary?.added.length || 0}, ignored ${result.importSummary?.ignored.length || 0}, refreshed ${result.importSummary?.refreshed.length || 0}, refresh failed ${result.importSummary?.refreshFailures.length || 0}.`,
+            summary: result.importSummary,
+          });
+          if (Array.isArray(result.catalogs)) void checkCatalogFreshness(result.catalogs);
+        }).catch((error) => {
+          setCatalogTransfer({ ...current, working: false, message: error instanceof Error ? error.message : String(error) });
+        }).finally(() => setActionPending(false));
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && key.return) {
+        setCatalogTransfer({ ...catalogTransfer, content: `${catalogTransfer.content}\n`, message: "" });
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && (key.backspace || key.delete)) {
+        setCatalogTransfer({ ...catalogTransfer, content: catalogTransfer.content.slice(0, -1), message: "" });
+      } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && input && !key.ctrl && !key.meta) {
+        setCatalogTransfer({
+          ...catalogTransfer,
+          content: catalogTransfer.content + input.replace(/\r\n?/gu, "\n"),
+          message: "",
+        });
+      }
+      return;
+    }
+
     if (confirmation) {
       if ((key.ctrl && character === "c") || key.escape || character === "n") {
         if (confirmation.action === "install") setScreenMode("install-options");
@@ -858,6 +1051,14 @@ export function Dashboard({
       state: catalogRefresh,
       columns,
     });
+  } else if (catalogPreset) {
+    modal = catalogPresetModal({
+      presets: CATALOG_PRESETS,
+      index: catalogPreset.index,
+      columns,
+    });
+  } else if (catalogTransfer) {
+    modal = catalogTransferModal({ ...catalogTransfer, columns });
   } else if (confirmation) {
     modal = confirmationModal({
       confirmation,

@@ -84,8 +84,19 @@ source association display `-`.
 
 From inventory, uppercase `A`/`U` install or update resources, and `Delete`
 uninstalls the selection. Press `M` for catalog management; there, `A` adds a
-catalog, `Delete` removes the selected catalog, `E` edits its name, repository,
-setup mode and custom paths, and `R` refreshes catalogs.
+catalog, `P` opens the preset picker for Matt Pocock or Anthropics, `Delete`
+removes the selected catalog, `E` edits its name, repository, setup mode and
+custom paths, `R` refreshes catalogs, `I` opens a multi-line JSON text area for
+import, and `X` copies the current configuration to the system clipboard.
+In the preset picker, use `↑`/`↓` to choose a catalog, `Enter` to add it, and
+`Esc` to cancel.
+Paste a complete JSON object and press `Ctrl+S` to review its catalog list.
+Use `↑`/`↓` to navigate, `Space` or `Enter` to toggle a catalog, then press
+`Ctrl+S` again to import the selected entries. Existing names or repositories
+are marked and excluded from the selection; use `Esc` to return to the pasted
+configuration or cancel.
+Clipboard export requires the platform clipboard utility (`pbcopy`, `clip`,
+`wl-copy`, or `xclip`).
 The management screen compares each local index's commit with its repository's
 default-branch HEAD; unreachable repositories show `UNKNOWN`. Refresh updates
 metadata indexes only; use `U` in inventory to update installed resources.
@@ -158,6 +169,19 @@ Each source is independent; `catalog list` displays user-managed sources, and
 `catalog remove <name>` removes only a user source definition/index. It does
 not remove already-installed artifacts; tracked installations can still be
 removed with `uninstall <kind> <id> --catalog <name>`.
+
+`kitia catalog export <file>` writes the version-1 catalog registry, including
+Basic/Custom modes and path mappings, without repository contents.
+`kitia catalog import <file>` validates the complete file and merges its
+definitions into the current registry. Entries that conflict with an existing
+catalog name or repository are skipped individually; non-conflicting entries
+are imported. CLI output and the dashboard import summary identify added and
+ignored catalogs, including the reason each entry was skipped. The import
+refreshes newly added sources automatically. Refresh failures do not roll back
+the saved definitions; they appear in the CLI/dashboard summary, and the CLI
+exits nonzero if any new index could not be fetched. Retry with
+`kitia catalog refresh --all`. Invalid catalog definitions reject the import
+before registry changes.
 
 Use `G` in the dashboard to choose a single catalog or all user catalogs to
 refresh. `kitia catalog refresh <name>` refreshes one source, and
@@ -298,7 +322,7 @@ distributed.
 
 ## Regression gate
 
-`npm run cli:test:contract` exercises the CLI executable in isolated synthetic
+`pnpm run cli:test:contract` exercises the CLI executable in isolated synthetic
 catalogs, validates complete JSON reports against the schemas and compares
 stable fields against committed version-1 expectations. Human-readable text
 and object/array ordering are deliberately not frozen.

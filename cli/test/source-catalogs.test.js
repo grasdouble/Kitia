@@ -8,7 +8,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { afterEach, test } = require("node:test");
 const {
-  checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog,
+  checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog, importCatalogConfigurationText,
 } = require("../dist/catalog/sources/manage.js");
 const { installSourceFileResource } = require("../dist/catalog/sources/skills.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
@@ -36,6 +36,15 @@ function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
+
+test("Matt Pocock catalog preset resolves to its repository", () => {
+  assert.deepEqual(parseArguments(["catalog", "add", "matt-pocock"]), {
+    command: "catalog",
+    action: "add",
+    name: "matt-pocock",
+    repository: "https://github.com/mattpocock/skills",
+  });
+});
 
 test("first Kitia use preserves existing Kiti catalog settings", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-config-migration-"));
@@ -225,6 +234,51 @@ test("user catalogs can be added, listed and removed without repository manifest
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  }
+});
+test("catalog import skips same-name and same-repository entries but adds non-conflicting catalogs", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-import-catalog-config-"));
+  const previousConfig = process.env.KITIA_CONFIG_DIR;
+  const directory = path.join(temporary, "config");
+  process.env.KITIA_CONFIG_DIR = directory;
+  try {
+    const existing = {
+      catalog_version: 1,
+      sources: [{ name: "Shared", repository: "https://github.com/example/existing" }],
+    };
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "catalogSources.json"), JSON.stringify(existing));
+    const summary = importCatalogConfigurationText(JSON.stringify({
+      catalog_version: 1,
+      sources: [
+        { name: "Shared", repository: "https://github.com/example/other" },
+        { name: "Renamed", repository: "https://github.com/example/existing" },
+        { name: "New", repository: "https://github.com/example/new" },
+        { name: "Offline", repository: "https://github.com/example/offline" },
+      ],
+    }), (names) => {
+      assert.deepEqual(names, ["New", "Offline"]);
+      return {
+        refreshed: [{ name: "New", count: 2 }],
+        failures: [{ name: "Offline", message: "network unavailable" }],
+      };
+    });
+    assert.deepEqual(summary, {
+      added: ["New", "Offline"],
+      ignored: [
+        { name: "Shared", reason: "Catalog name already exists." },
+        {
+          name: "Renamed",
+          reason: "Repository already registered as another catalog (example/existing).",
+        },
+      ],
+      refreshed: [{ name: "New", count: 2 }],
+      refreshFailures: [{ name: "Offline", message: "network unavailable" }],
+    });
+    assert.deepEqual(loadUserSourceConfiguration().map(({ name }) => name), ["Shared", "New", "Offline"]);
+  } finally {
+    if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfig;
   }
 });
 
@@ -971,10 +1025,105 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   });
   assert.equal(management.result, true);
   assert.match(management.renderedOutput, /USER CATALOGS/);
-  assert.match(management.renderedOutput, /A add catalog/);
-  assert.match(management.renderedOutput, /Delete remove selected/);
+  assert.match(management.renderedOutput, /A add/);
+  assert.match(management.renderedOutput, /Delete remove/);
   assert.match(management.renderedOutput, /R refresh/);
-  assert.match(management.renderedOutput, /A add catalog - Delete remove selected - E edit selected - R refresh \|/);
+  assert.match(management.renderedOutput, /A add - P presets - Delete remove - E edit - R refresh \| I import \/ X export/);
+  assert.match(management.renderedOutput, /I import \/ X export/);
+  const presetRequests = [];
+  const presetManager = await driveRefresh(["m", "p", "\x1b[B", "\r", "\r", "q"], refresh, {
+    addCatalog: async (request) => {
+      presetRequests.push(request);
+      return { catalog: request.name, count: 3, catalogs: [request], resources: [] };
+    },
+  });
+  assert.equal(presetManager.result, true);
+  assert.deepEqual(presetRequests, [{
+    name: "matt-pocock",
+    repository: "https://github.com/mattpocock/skills",
+    mode: "basic",
+    entries: [],
+  }]);
+  const anthropicRequests = [];
+  const anthropicManager = await driveRefresh(["m", "p", "\r", "\r", "q"], refresh, {
+    addCatalog: async (request) => {
+      anthropicRequests.push(request);
+      return { catalog: request.name, count: 6, catalogs: [request], resources: [] };
+    },
+  });
+  assert.equal(anthropicManager.result, true);
+  assert.match(anthropicManager.renderedOutput, /anthropics\/skills/);
+  assert.deepEqual(anthropicRequests, [{
+    name: "Anthropics",
+    repository: "https://github.com/anthropics/skills",
+    mode: "basic",
+    entries: [],
+  }]);
+  let cancelledPresetAdded = false;
+  const cancelledPreset = await driveRefresh(["m", "p", "\x1b", "q"], refresh, {
+    addCatalog: async () => {
+      cancelledPresetAdded = true;
+      return { catalog: "unexpected", count: 0 };
+    },
+  });
+  assert.equal(cancelledPreset.result, true);
+  assert.ok(cancelledPreset.renderedOutput.indexOf("Anthropics") < cancelledPreset.renderedOutput.indexOf("Matt Pocock"));
+  assert.equal(cancelledPresetAdded, false);
+  const transfers = [];
+  const pastedConfiguration = JSON.stringify({
+    catalog_version: 1,
+    sources: [
+      { name: "Catalog One", repository: "https://github.com/example/one", mode: "basic", entries: [] },
+      { name: "Catalog Two", repository: "https://github.com/example/two", mode: "basic", entries: [] },
+    ],
+  });
+  const transferManager = await driveRefresh(["m", "i", pastedConfiguration, "\x13", "\x1b[B", "\r", "\x13", "\r", "q"], refresh, {
+    transferCatalogs: async (action, content) => {
+      transfers.push({ action, content });
+      return {
+        catalogs: [{ name: "Imported", repository }],
+        resources: [],
+        importSummary: {
+          added: ["Imported"],
+          ignored: [{ name: "Existing", reason: "Catalog name already exists." }],
+          refreshed: [{ name: "Imported", count: 4 }],
+          refreshFailures: [{ name: "Other", message: "offline" }],
+        },
+      };
+    },
+  });
+  assert.match(transferManager.renderedOutput, /Added \(1\): Imported/);
+  assert.match(transferManager.renderedOutput, /Existing: Catalog name already exists/);
+  assert.match(transferManager.renderedOutput, /Refreshed \(1\): Imported · 4/);
+  assert.match(transferManager.renderedOutput, /Other: offline/);
+  assert.equal(transferManager.result, true);
+  assert.equal(transfers.length, 1);
+  assert.equal(transfers[0].action, "import");
+  assert.deepEqual(JSON.parse(transfers[0].content).sources, [
+    { name: "Catalog One", repository: "https://github.com/example/one", mode: "basic", entries: [] },
+  ]);
+  assert.match(transferManager.renderedOutput, /Catalog One/);
+  assert.match(transferManager.renderedOutput, /Catalog Two/);
+  let cancelledImport = false;
+  const cancelImportManager = await driveRefresh(["m", "i", pastedConfiguration, "\x13", "\x1b", "\x1b", "q"], refresh, {
+    transferCatalogs: async () => {
+      cancelledImport = true;
+      return {};
+    },
+  });
+  assert.equal(cancelImportManager.result, true);
+  assert.equal(cancelledImport, false);
+  assert.match(cancelImportManager.renderedOutput, /Catalog Two/);
+  const exportTransfers = [];
+  const exportManager = await driveRefresh(["m", "x", "\r", "\r", "q"], refresh, {
+    transferCatalogs: async (action, content) => {
+      exportTransfers.push({ action, content });
+      return { catalogs: [{ name: "Test", repository }], resources: [] };
+    },
+  });
+  assert.equal(exportManager.result, true);
+  assert.deepEqual(exportTransfers, [{ action: "export", content: "" }]);
+  assert.match(exportManager.renderedOutput, /EXPORT CATALOGS/);
   assert.match(management.renderedOutput, /FRESHNESS[^\n]*\n[^\n]*UNKNOWN/);
   const currentManager = await driveRefresh(["m", "q"], refresh, {
     checkCatalogFreshness: async () => [{ name: "Test", status: "current" }],

@@ -23,8 +23,8 @@ const captures = [
 const usage = `Capture Termless/xterm.js screenshots of Kitia's actual Ink dashboard.
 
 Usage:
-  npm run web:screenshots:update:termless
-  npm run web:screenshots:update:termless -- --help
+  pnpm run web:screenshots:update:termless
+  pnpm run web:screenshots:update:termless -- --help
 
 Requires Node.js >=23.6, a built checkout, and @resvg/resvg-js. The command
 uses the shared deterministic showcase fixture and writes a separate Termless
@@ -39,7 +39,7 @@ async function assertBuiltCheckout() {
     try {
       await fs.access(path.join(root, file));
     } catch {
-      throw new CaptureError(`Built CLI file is missing: ${file}. Run npm run cli:build first.`);
+      throw new CaptureError(`Built CLI file is missing: ${file}. Run pnpm run cli:build first.`);
     }
   }
 }

@@ -24,6 +24,7 @@ export interface CliOptions {
   status?: string;
   name?: string;
   repository?: string;
+  file?: string;
   sourceResources?: CatalogResource[];
   resource?: CatalogResource;
   output?: { log(message: string): void; error(message: string): void };
@@ -118,13 +119,17 @@ function parseCommandArguments(args: string[]): CliOptions {
   const [command, ...remaining] = args;
   if (command === "catalog") {
     const [action, name, repository, ...extra] = remaining;
-    const usage = "Usage: kitia catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>";
+    const usage = "Usage: kitia catalog <add <name> <github-repository> | add matt-pocock | import <file> | export <file> | refresh <name> | refresh --all | remove <name> | list>";
     if (extra.length) throw new CatalogError(usage);
+    if (["import", "export"].includes(action) && name && !repository) return { command, action, file: name };
     if (action === "list" && name === undefined) return { command, action };
     if (action === "remove" && name && !repository) return { command, action, name };
     if (action === "refresh" && name && !repository) {
       if (name === "--all") return { command, action, allCatalogs: true };
       return { command, action, name };
+    }
+    if (action === "add" && name === "matt-pocock" && repository === undefined) {
+      return { command, action, name, repository: "https://github.com/mattpocock/skills" };
     }
     if (action === "add" && name && repository) return { command, action, name, repository };
     throw new CatalogError(usage);
@@ -240,6 +245,9 @@ function printHelp() {
   Kitia update [<kind> <id>] [--target <dir>] [--dry-run] [--force]
   Kitia uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force]
   Kitia catalog add <name> <https-github-url>
+  Kitia catalog add matt-pocock
+  Kitia catalog import <file>
+  Kitia catalog export <file>
   Kitia catalog refresh <name>
   Kitia catalog refresh --all
   Kitia catalog list

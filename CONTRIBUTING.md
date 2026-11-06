@@ -4,25 +4,26 @@ Contributions improve Kitia's CLI, catalog integrations, documentation, and reso
 
 ## Development
 
-Kitia requires Node.js 22 or newer. Install dependencies and run the standard checks:
+Kitia requires Node.js 22 or newer and pnpm 12.17.0. Install dependencies and run the standard checks:
 
 ```sh
-npm ci
-npm run build
-npm run cli:validate
-npm test
-npm run cli:test:package-smoke
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run cli:validate
+pnpm test
+pnpm run cli:test:package-smoke
 ```
 
-`npm test` runs documentation and CLI tests. For CLI or machine-readable output changes, preserve the [CLI compatibility contract](docs/cli-contract.md) and run `npm run cli:test:contract`.
+`pnpm test` runs documentation and CLI tests. For CLI or machine-readable output changes, preserve the [CLI compatibility contract](docs/cli-contract.md) and run `pnpm run cli:test:contract`.
+
 
 Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; inventory migration behavior is covered by `cli/test/migrations.test.js`. When changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts.
 
 The optional Termless dashboard test and screenshot generator require Node.js 23.6 or newer:
 
 ```sh
-npm run web:test:termless
-npm run web:screenshots:update:termless
+pnpm run web:test:termless
+pnpm run web:screenshots:update:termless
 ```
 
 The CLI lives in `cli/`, the website in `web/`, and shared documentation in `docs/`. The root package builds both; CLI output goes to `cli/dist/` and website output to `web/dist/`.
@@ -32,10 +33,10 @@ The CLI lives in `cli/`, the website in `web/`, and shared documentation in `doc
 Use [Changesets](https://github.com/changesets/changesets) for user-facing changes. Run:
 
 ```sh
-npm run changeset
+pnpm run changeset
 ```
 
-Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the release workflow opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance.
+Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the release workflow opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance. Use pnpm for repository dependencies and scripts; publishing remains through npm.
 
 ### First npm publication
 
