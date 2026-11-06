@@ -16,8 +16,19 @@ Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
 On interactive dashboard launch, Kitia checks npm for a newer stable release.
-Every dashboard screen uses a consistent three-line header: Kitia/version,
-screen name, then screen-specific metadata. While the request is pending, the
+Every dashboard screen uses a five-line header with a stationary ASCII cat on
+the left. On wider terminals, a three-line pixel-block KITIA wordmark appears on
+the right, followed by the version/screen name and screen-specific metadata.
+The mascot and pixel wordmark share a smoothly cycling cyan/violet/pink gradient
+and a single 60 ms animation clock. The mascot remains animated in compact-title
+mode; the clock stops when the header unmounts.
+Narrow terminals use a compact text title instead, retaining the same header height.
+After a random 10–20 seconds of rest,
+it chooses with equal probability to lick a raised paw, scratch its ear, or wink.
+Licking and scratching alternate two poses every 300 ms for 2–4 seconds;
+a wink lasts 180 ms. Each animation finishes before the next rest period starts.
+The mascot stays in the same position throughout; there is no walking animation.
+While the request is pending, the
 version line is `Kitia - Checking version update`; afterward it shows
 `Kitia - <version>` or `Kitia - <version> - New version available`. Check
 failures are silent. Other commands and non-interactive launches skip the
