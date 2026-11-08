@@ -30,3 +30,20 @@ jobs:
       - run: pnpm run cli:validate
       - run: pnpm run cli:test:package-smoke
       - run: pnpm run web:build
+
+  changeset-status:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec changeset status --since="origin/${{ github.base_ref }}"

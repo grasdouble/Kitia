@@ -38,6 +38,8 @@ pnpm run changeset
 
 Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the pinned Changesets release action opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance, pushes the matching version tag, and creates a GitHub Release. Use pnpm for repository dependencies and scripts; publishing remains through npm.
 
+For repository-only changes such as CI, documentation, or tests that do not need a package release, run `pnpm exec changeset add --empty` (optionally with `--message "..."`). The PR check requires a changeset when package files change; an empty changeset records that no package version bump is intended.
+
 ### First npm publication
 
 The first publication is a one-time manual bootstrap from a trusted checkout. Use an npm account authorized to publish for the `grasdouble` organization. The repository `.npmrc` routes `@grasdouble` to the public npm registry:
