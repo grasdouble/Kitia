@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const path = require("node:path");
 const {
   CatalogError, SOURCE_SKILL_DIRECTORIES, parseFrontmatter, readUtf8,
 } = require("../resources/index.js");
@@ -209,12 +210,15 @@ function readInstalledSourceSkills(
       const relativePath = `${directory}/${resource.id}/SKILL.md`;
       const skillFile = targetPath(targetRoot, relativePath);
       const expected = record?.files[relativePath];
+      const directoryPrefix = `${directory}/${resource.id}/`;
+      const trackedFiles = Object.entries(record?.files || {}).filter(([filePath]) =>
+        filePath.startsWith(directoryPrefix));
       let stat;
       try {
-        stat = fs.statSync(skillFile);
+        stat = fs.lstatSync(skillFile);
       } catch (error) {
         if (error.code === "ENOENT") {
-          if (expected) {
+          if (trackedFiles.length) {
             installations.push({
               agent, path: relativePath, ref: null,
               missing: true, modified: false, provenanceMatches: false,
@@ -224,37 +228,41 @@ function readInstalledSourceSkills(
         }
         throw error;
       }
-      if (!stat.isFile()) {
+      if (!stat.isFile() || stat.isSymbolicLink()) {
         throw new CatalogError(`Installed source skill is not a regular file: ${relativePath}`);
       }
       let metadata;
       try {
         metadata = parseFrontmatter(readUtf8(skillFile, "Installed source skill"), skillFile).get("metadata");
       } catch (error) {
-        if (!expected || !(error instanceof CatalogError)) {
-          throw error;
-        }
+        if (!expected || !(error instanceof CatalogError)) throw error;
       }
       const provenanceMatches = metadata instanceof Map &&
         matchesSourceRepository(metadata.get("github-repo"), resource.source_repository) &&
         metadata.get("github-path") === resource.source_path;
-      if (!(metadata instanceof Map)) {
-        metadata = undefined;
-      }
-      if (!provenanceMatches && !expected) {
-        continue;
-      }
+      if (!(metadata instanceof Map)) metadata = undefined;
+      if (!provenanceMatches && !trackedFiles.length) continue;
       const pinnedRef = metadata?.get("github-pinned");
       const ref = typeof pinnedRef === "string" && pinnedRef
         ? pinnedRef
         : metadata?.get("github-ref");
+      let missing = false;
+      let modified = Boolean(expected && !provenanceMatches);
+      for (const [trackedPath, expectedFingerprint] of trackedFiles) {
+        let current;
+        try { current = installedFingerprint(targetRoot, trackedPath); }
+        catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+        if (!current) missing = true;
+        else if (!sameFingerprint(current, expectedFingerprint)) modified = true;
+      }
       installations.push({
         agent,
         path: relativePath,
         ref: typeof ref === "string" && ref ? ref : null,
-        missing: false,
-        modified: Boolean(expected && (!provenanceMatches ||
-          !sameFingerprint(installedFingerprint(targetRoot, relativePath), expected))),
+        missing,
+        modified,
         provenanceMatches,
       });
     }
@@ -265,6 +273,26 @@ function readInstalledSourceSkills(
   return installed;
 }
 
+function installedSkillFiles(targetRoot: string, relativeDirectory: string): string[] {
+  const files: string[] = [];
+  const visit = (directory: string) => {
+    const absolute = targetPath(targetRoot, directory);
+    const stat = fs.lstatSync(absolute);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new CatalogError(`Refusing to inventory non-directory source skill path: ${directory}`);
+    }
+    for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+      const relative = path.posix.join(directory, entry.name);
+      const child = targetPath(targetRoot, relative);
+      if (entry.isSymbolicLink()) throw new CatalogError(`Refusing to inventory symbolic link in source skill: ${relative}`);
+      if (entry.isDirectory()) visit(relative);
+      else if (entry.isFile() && fs.lstatSync(child).isFile()) files.push(relative);
+      else throw new CatalogError(`Refusing to inventory non-regular source skill file: ${relative}`);
+    }
+  };
+  visit(relativeDirectory);
+  return files.sort();
+}
 function recordSourceInstallation(resource: CatalogResource, target: string, agent: string): void {
   const targetRoot = fs.realpathSync(target);
   const installed = readInstalledSourceSkills(targetRoot, [resource])
@@ -282,7 +310,12 @@ function recordSourceInstallation(resource: CatalogResource, target: string, age
   const files = previous && sameSourceRecord(previous, resource)
     ? { ...previous.files }
     : {};
-  files[installation.path] = installedFingerprint(targetRoot, installation.path);
+  const skillDirectory = path.posix.dirname(installation.path);
+  const runtimePrefix = `${skillDirectory}/`;
+  for (const filePath of Object.keys(files)) if (filePath.startsWith(runtimePrefix)) delete files[filePath];
+  for (const filePath of installedSkillFiles(targetRoot, skillDirectory)) {
+    files[filePath] = installedFingerprint(targetRoot, filePath);
+  }
   state.sources ||= {};
   state.sources[sourceCatalogName(resource)] ||= {};
   state.sources[sourceCatalogName(resource)].skills ||= {};

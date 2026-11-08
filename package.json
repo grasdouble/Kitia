@@ -35,7 +35,9 @@
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "docs/cli-contract.md",
-    "docs/inventory-migrations.md"
+    "docs/inventory-migrations.md",
+    "docs/resource-audit.md",
+    "docs/resource-collections.md"
   ],
   "engines": {
     "node": ">=22"
@@ -45,7 +47,7 @@
     "prepare": "pnpm run cli:build && husky",
     "test": "pnpm run docs:test && pnpm run cli:test",
     "cli:build": "rimraf dist cli/dist && tsc -p tsconfig.json",
-    "cli:test": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js cli/test/migrations.test.js",
+    "cli:test": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js cli/test/collections.test.js cli/test/bundles.test.js cli/test/migrations.test.js cli/test/audit.test.js cli/test/catalog-render.test.js cli/test/license.test.js",
     "cli:test:contract": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js",
     "cli:test:package-smoke": "pnpm run cli:build && node cli/scripts/package-smoke.js",
     "cli:validate": "pnpm run cli:build && node cli/bin/kitia.js validate",
@@ -62,6 +64,7 @@
     "ink": "8.0.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "spdx-expression-parse": "^4.0.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {

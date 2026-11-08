@@ -30,7 +30,9 @@ export interface CatalogResource {
   source_path?: string;
   source_ref?: string | null;
   license_status?: string;
+  license_spdx?: string;
   scope?: string;
+  bundle_id?: string;
   managed?: boolean;
   issues?: ResourceIssue[];
   paths?: string[];

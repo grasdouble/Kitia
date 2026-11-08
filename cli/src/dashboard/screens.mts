@@ -512,6 +512,9 @@ export function CatalogScreen({
       { label: "DESCRIPTION", value: selected.description || "No description available.", maxLines: 2 },
       { label: "INSTALLED IN", value: installedScopes, maxLines: 1 },
       { label: "LICENSE", value: selected.license_status || "not declared", maxLines: 1 },
+      ...(selected.source_repository
+        ? [{ label: "PINNED SOURCE", value: `${selected.source_repository}/${selected.source_path || "unknown"}@${selected.source_ref || "unknown"}`, maxLines: 2 }]
+        : []),
     ]
     : [];
   const entryContent = selected

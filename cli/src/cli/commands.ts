@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const os = require("node:os");
 const { CatalogError, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
@@ -18,6 +19,11 @@ const {
   exportCatalogConfigurationData, importCatalogConfigurationText,
 } = require("../catalog/sources/manage.js");
 const { loadUserSourceConfiguration } = require("../catalog/sources/config.js");
+const { collectionData, importCollectionText, signCollectionManifest } = require("../catalog/collections.js");
+const {
+  MAX_BUNDLE_BYTES, bundleData, signResourceBundle, importResourceBundleText,
+  readCachedResourceFiles,
+} = require("../catalog/bundles.js");
 const { catalogEntries, listCatalogResources, formatDashboardRows } = require("./catalog.js");
 const { createDashboardActionHandler } = require("./dashboard.js");
 const { parseArguments, printHelp } = require("./arguments.js");
@@ -99,6 +105,58 @@ async function executeCommand(options, report) {
   if (options.scope === "user") output.log(`User scope: ${options.target}`);
   if (options.command === "help") {
     printHelp();
+    return 0;
+  }
+  if (options.command === "bundle") {
+    if (options.action === "export") {
+      const privateKey = fs.readFileSync(path.resolve(options.signingKey));
+      const { sourceResources } = loadCommandCatalogs({ command: "list" });
+      const bundle = bundleData(
+        sourceResources,
+        loadUserSourceConfiguration(),
+        options.resourceSelectors,
+        sourceSkillsApi.readPinnedSourceFiles,
+      );
+      const signed = signResourceBundle(bundle, privateKey);
+      fs.writeFileSync(path.resolve(options.file), `${JSON.stringify(signed, null, 2)}\n`, { flag: "w" });
+      output.log(`Exported signed resource bundle to ${options.file}.`);
+      output.log(`Signature key fingerprint: ${signed.signature.key_id}`);
+      return 0;
+    }
+    const bundlePath = path.resolve(options.file);
+    const bundleStat = fs.lstatSync(bundlePath);
+    if (!bundleStat.isFile() || bundleStat.isSymbolicLink() || bundleStat.size > MAX_BUNDLE_BYTES) {
+      throw new CatalogError(`Resource bundle must be a regular JSON file no larger than ${MAX_BUNDLE_BYTES} bytes`);
+    }
+    const contents = fs.readFileSync(bundlePath, "utf8");
+    const trustedKey = fs.readFileSync(path.resolve(options.trustedKey));
+    const result = importResourceBundleText(contents, undefined, {
+      trustedKey, replace: Boolean(options.replace),
+    });
+    output.log(`Imported signed resource bundle ${result.bundle_id}: ${result.catalogs.length} catalog${result.catalogs.length === 1 ? "" : "s"} cached locally.`);
+    for (const name of result.added) output.log(`Added pinned offline catalog: ${name}`);
+    for (const name of result.replaced) output.log(`Replaced pinned offline catalog: ${name}`);
+    return 0;
+  }
+  if (options.command === "collection") {
+    if (options.action === "export") {
+      const { sourceResources } = loadCommandCatalogs({ command: "list" });
+      let manifest = collectionData(sourceResources, loadUserSourceConfiguration(), options.resourceSelectors);
+      if (options.signingKey) {
+        const privateKey = fs.readFileSync(path.resolve(options.signingKey));
+        manifest = signCollectionManifest(manifest, privateKey);
+      }
+      fs.writeFileSync(path.resolve(options.file), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "w" });
+      output.log(`Exported resource collection to ${options.file}.`);
+      if (manifest.signature) output.log(`Signature key fingerprint: ${manifest.signature.key_id}`);
+      return 0;
+    }
+    const contents = fs.readFileSync(path.resolve(options.file), "utf8");
+    const trustedKey = options.trustedKey ? fs.readFileSync(path.resolve(options.trustedKey)) : undefined;
+    const names = importCollectionText(contents, undefined, { trustedKey });
+    output.log(`Imported resource collection: ${names.length} catalog${names.length === 1 ? "" : "s"} registered.`);
+    for (const name of names) output.log(`Added pinned catalog: ${name}`);
+    output.log("Resource contents are not included; installation requires retrieving the pinned upstream commit.");
     return 0;
   }
   if (options.command === "catalog") return manageCatalogCommand(options);
@@ -265,7 +323,14 @@ async function executeCommand(options, report) {
     const sourceToUpdateResources = sourceToUpdate.map(({ resource }) => resource);
     validateSourceUpdates(sourceToUpdate, options);
     if (options.offline && !options.dryRun) {
-      throw new CatalogError("Updating source resources requires network access. Use --dry-run while offline.", "INVALID_ARGUMENT");
+      const stale = sourceToUpdate.filter(({ resource, installations }) => installations.some((installation) =>
+        installation.missing || installation.modified ||
+        installation.ref?.toLowerCase() !== String(resource.source_ref || "").toLowerCase()));
+      const uncached = stale.filter(({ resource }) => !resource.bundle_id);
+      if (uncached.length) {
+        throw new CatalogError("Offline updates require an imported signed bundle for each stale source resource.", "INVALID_ARGUMENT");
+      }
+      for (const { resource } of stale) readCachedResourceFiles(resource);
     }
     for (const resource of sourceToUpdateResources) {
       options.onResource?.({ catalog: resource.catalog || "source", kind: resource.kind, id: resource.id, status: "planned", source: true });

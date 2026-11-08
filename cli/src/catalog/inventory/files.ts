@@ -171,8 +171,9 @@ function writeInstallPlan(
   for (const [relativePath, file] of [...plan.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const { content, executable } = file;
     const destination = targetPath(targetRoot, relativePath);
-    if (Object.hasOwn(file, "expected") &&
-        !equalOptionalFingerprint(installedFingerprint(targetRoot, relativePath), file.expected)) {
+    const current = installedFingerprint(targetRoot, relativePath);
+    const hasExpected = Object.hasOwn(file, "expected");
+    if (hasExpected && !equalOptionalFingerprint(current, file.expected)) {
       throw new CatalogError(`File changed while preparing the operation: ${relativePath}. Retry after reviewing it.`, "LOCAL_CONFLICT");
     }
     let stat;
@@ -189,9 +190,9 @@ function writeInstallPlan(
       throw new CatalogError(`Refusing to replace symbolic link: ${destination}`);
     } else if (!stat.isFile()) {
       throw new CatalogError(`Installation destination is not a file: ${destination}`);
-    } else if (sameFingerprint(installedFingerprint(targetRoot, relativePath), fileFingerprint(content, executable))) {
+    } else if (sameFingerprint(current, fileFingerprint(content, executable))) {
       actions.push(["unchanged", relativePath, file]);
-    } else if (force) {
+    } else if (force || (hasExpected && file.expected !== null)) {
       actions.push(["overwrite", relativePath, file]);
     } else {
       conflicts.push(relativePath);
@@ -231,35 +232,59 @@ function writeInstallPlan(
   actions.sort(([leftAction, left], [rightAction, right]) =>
     (left === LOCK_PATH ? 2 : leftAction === "remove" ? 1 : 0) -
     (right === LOCK_PATH ? 2 : rightAction === "remove" ? 1 : 0));
-  for (const [action, relativePath, file] of actions) {
-    if (action === "unchanged") {
-      continue;
-    }
-    const destination = targetPath(targetRoot, relativePath);
-    if (action === "remove") {
-      fs.unlinkSync(destination);
-      continue;
-    }
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    targetPath(targetRoot, relativePath);
-    const temporaryPath = path.join(
-      path.dirname(destination),
-      `.${path.basename(destination)}.catalog-${process.pid}-${crypto.randomUUID()}`,
-    );
-    try {
-      const mode = file.mode ?? (file.executable ? 0o755 : 0o644);
-      fs.writeFileSync(temporaryPath, file.content, { flag: "wx", mode });
-      if (process.platform !== "win32") {
-        fs.chmodSync(temporaryPath, mode);
+  const staged = [];
+  const changed = [];
+  try {
+    for (const [action, relativePath, file] of actions) {
+      if (action === "unchanged") continue;
+      const destination = targetPath(targetRoot, relativePath);
+      const previous = action === "install" ? null : {
+        content: fs.readFileSync(destination),
+        mode: fs.statSync(destination).mode & 0o777,
+      };
+      if (action === "remove") {
+        staged.push({ action, destination, previous });
+        continue;
       }
-      fs.renameSync(temporaryPath, destination);
-    } finally {
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      targetPath(targetRoot, relativePath);
+      const temporaryPath = path.join(
+        path.dirname(destination),
+        `.${path.basename(destination)}.catalog-${process.pid}-${crypto.randomUUID()}`,
+      );
+      const mode = file.mode ?? (file.executable ? 0o755 : 0o644);
+      staged.push({ action, destination, temporaryPath, previous });
+      fs.writeFileSync(temporaryPath, file.content, { flag: "wx", mode });
+      if (process.platform !== "win32") fs.chmodSync(temporaryPath, mode);
+    }
+    for (const item of staged) {
+      if (item.action === "remove") fs.unlinkSync(item.destination);
+      else fs.renameSync(item.temporaryPath, item.destination);
+      changed.push(item);
+    }
+  } catch (error) {
+    for (const item of changed.reverse()) {
+      if (!item.previous) {
+        fs.unlinkSync(item.destination);
+      } else if (item.action === "remove") {
+        fs.writeFileSync(item.destination, item.previous.content, { mode: item.previous.mode });
+      } else {
+        const restorePath = path.join(
+          path.dirname(item.destination),
+          `.${path.basename(item.destination)}.catalog-restore-${process.pid}-${crypto.randomUUID()}`,
+        );
+        fs.writeFileSync(restorePath, item.previous.content, { flag: "wx", mode: item.previous.mode });
+        fs.renameSync(restorePath, item.destination);
+      }
+    }
+    throw error;
+  } finally {
+    for (const item of staged) {
+      if (!item.temporaryPath) continue;
       try {
-        fs.unlinkSync(temporaryPath);
+        fs.unlinkSync(item.temporaryPath);
       } catch (error) {
-        if (error.code !== "ENOENT") {
-          throw error;
-        }
+        if (error.code !== "ENOENT") throw error;
       }
     }
   }

@@ -36,20 +36,36 @@ check.
 
 | Command family | Contract |
 |---|---|
-| no command | Opens the dashboard by default; equivalent to `dashboard` |
-| `list`, `search` | Discover resources; `--json` retains its existing array format |
+| `list`, `search` | Discover resources; support `--catalog`, `--kind`, `--tag`, `--status`, and `--license`; `--json` retains its existing array format |
 | `show`, `preview` | Human-readable inspection; an omitted kind uses the normal ambiguity rules |
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
 | `validate` | Strict validation of all catalog sources |
+| `collection export`, `collection import` | Share versioned pinned references to selected resources; does not bundle or install resource content |
+| `bundle export <file> <catalog:kind:id...>`, `bundle import <file> --trusted-key <public-pem> [--replace]` | Share signed selected resource content for managed local/offline installation; distinct from content-free `collection` references |
+
+`bundle export <file> <catalog:kind:id...> --signing-key <private-pem>` captures Git files from each selected resource's full pinned commit and writes a signed version-1 bundle. Signatures are mandatory. Every file has a SHA-256 digest and executable-bit record; skills include their auxiliary files. `bundle import <file> --trusted-key <public-pem> [--replace]` requires an explicitly approved public PEM supplied out of band, verifies the signature and all file digests, then atomically publishes the indexes, registries and local cache. A manifest's own key never establishes trust; compare the reported SHA-256 key fingerprint through a trusted channel before approving it.
+
+To replace a catalog pin, run `kitia bundle import <file> --trusted-key <public-pem> --replace`. Without `--replace`, imports reject configured catalog name or repository conflicts. Replacement requires the same catalog name, repository identity, and Basic/Custom mode and path mappings; mismatches fail closed. The new pin/index/cache and registries publish in one rollback-capable transaction, preserving unrelated catalog configuration. Then `kitia update --offline` installs bytes from the replacement bundle.
+
+Imported bundle resources use the regular managed install/update/uninstall lifecycle for skills, agents and instructions. `--offline` requires an intact imported bundle and fails closed without network fallback. Audited installs analyze the same verified cached bytes that are installed, including auxiliary skill files; audit findings or incomplete coverage block publication. Bundle skills use Kitia's local installer, while skills without an imported bundle continue to delegate to `gh skill`. Git is required for export, but not for install from an imported bundle. Bundles exclude dependencies, repository state and Git LFS objects; reject symlinks, submodules, LFS pointers, case/Unicode-normalization aliases, and Windows-reserved or trailing-dot/space path components without renaming paths; and enforce manifest/file count and size limits. A signature proves signer/integrity only, not that content is safe or independently attested as upstream-authentic. See the [resource collections and bundles guide](resource-collections.md).
 
 Installation defaults to Copilot and the target defaults to the current
 directory. Updates preserve registered runtimes; they do not silently remove
 resources absent from the current catalog. `--force` remains explicit and does
 not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
+`--audit` is opt-in and applies only to `preview` and `install` of pinned
+source-catalog resources; it is not an update check. It is rejected for other
+commands and for resources without pinned source metadata. Preview reports
+findings and coverage but continues. An audited install is blocked if any rule
+matches or coverage is incomplete, including skipped files. The deterministic
+checks are intentionally limited and are not an exhaustive security analysis:
+neither a complete scan nor an empty findings list guarantees that a resource
+is safe. See the [resource audit guide](resource-audit.md) for the rules and
+coverage limits.
 
 `--scope project|user` is an additive option for `install`, `update`,
 `uninstall`, `check`, and `doctor`. External source lifecycle commands use the
@@ -76,6 +92,9 @@ New installations can choose project/user scope and Copilot/Claude/both
 clients; instructions remain project-scoped. Press `F` to enter filter mode and
 `D` to toggle the selected resource's details panel in inventory and catalog
 browsing or catalog management.
+In the catalog browser, selected-resource details expose license status and,
+when source provenance is available, the pinned repository/path/commit. Missing
+license metadata is shown as undeclared; incomplete pin metadata may show as unknown.
 The inventory's Catalog column shows the configured source-catalog name for a
 tracked artifact with source-repository metadata. For a custom user catalog, it
 adds the folder selected by the saved path mapping, such as
@@ -184,6 +203,37 @@ exits nonzero if any new index could not be fetched. Retry with
 `kitia catalog refresh --all`. Invalid catalog definitions reject the import
 before registry changes.
 
+### Resource collections
+
+`kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>]`
+writes a version-1 resource-selection manifest for explicitly selected resources.
+Each catalog reference includes its configured HTTPS GitHub repository and
+mapping, full commit SHA, and each resource's kind, ID, repository-relative path,
+and metadata. The manifest contains no upstream resource content. The optional
+`--signing-key` reads an Ed25519 private PEM file and signs the canonical
+version-1 manifest before writing it.
+
+`kitia collection import <file> [--trusted-key <public-pem>]` validates the
+entire manifest and all catalog conflicts before publishing any files. The
+optional public PEM file is the importer's out-of-band approved key; the
+manifest's `key_id` is its `sha256:` fingerprint (SHA-256 of DER/SPKI public
+key bytes), not a key or trust assertion. Signed imports fail closed without
+that key, on fingerprint mismatch, or after any signed-content alteration.
+Supplying `--trusted-key` requires a signature; unsigned imports remain
+compatible when the option is absent.
+
+Signatures use Ed25519 over recursively key-sorted canonical JSON with a
+versioned Kitia domain separator. Verification authenticates the approved
+signer and manifest integrity; it does not establish resource safety or
+independently prove upstream provenance. Import registers the referenced
+catalogs and stages minimal pinned indexes for selected resources; publication
+uses same-directory staging and rolls back published files on an I/O failure.
+Collections are not offline bundles: installation still retrieves the pinned
+commit from GitHub, the commit may become unavailable, and later refresh may
+advance the index. Import does not fetch or install resources. See the
+[resource collections guide](resource-collections.md).
+
+
 Use `G` in the dashboard to choose a single catalog or all user catalogs to
 refresh. `kitia catalog refresh <name>` refreshes one source, and
 `kitia catalog refresh --all` refreshes every user source. A refresh fetches the
@@ -191,10 +241,17 @@ current upstream commit and replaces that source's metadata index; configuration
 and already-installed artifacts remain unchanged. Bulk refresh continues after
 individual failures and exits nonzero if any source failed.
 
-Discovery reads user indexes locally. Skills install through `gh skill` at the
-refreshed pin; agents and instructions are fetched from that pinned commit and
-installed through Kitia's normal managed-file inventory.
-Offline preview and source installation/update execution are refused; registry indexes remain local and require no network fetch.
+Discovery reads user indexes locally. Resources without an imported bundle use
+the pinned upstream commit: skills delegate to `gh skill`, while agents and
+instructions are fetched and installed through Kitia's normal managed-file
+inventory. Imported bundles provide exact pinned Git content for all three
+kinds and are installed from Kitia's verified local cache; bundled skills use
+Kitia's managed local skill installer rather than assuming `gh skill` accepts a
+local repository. Multi-file installs and updates stage all replacements
+before publication and roll back on a write failure. Offline preview remains
+unsupported. `install --offline` and `update --offline` require an intact
+imported bundle for each resource being installed or updated; they never fall
+back to network access.
 
 
 ## JSON formats
@@ -206,8 +263,9 @@ Machine-readable schemas ship with the package:
 - [Installation inventory formats and migrations](inventory-migrations.md)
 
 Discovery schema versions are identified by the schema filename; the public
-discovery payload remains an unwrapped JSON array. Report envelopes include
-their schema version in `schema_version`.
+discovery payload remains an unwrapped JSON array. New optional discovery
+properties are additive within version 1. Report envelopes include their schema
+version in `schema_version`.
 
 Reports and discovery keep their version-1 envelopes and arrays. Source-backed
 resource identities include their configured catalog. External-resource
@@ -217,6 +275,22 @@ fail before any delegation.
 `list --json` and `search --json` emit a single JSON array on stdout, including
 an empty array when there are no results. Aggregate discovery entries include
 the configured catalog name and source metadata where available.
+
+`search` orders matches by relevance, prioritizing exact resource-identifier
+matches. The relative ranking is part of the user-facing behavior, but score
+weights and other internal ranking details are not a CLI contract.
+
+`--license <value>` combines with other `list`/`search` filters. A single valid
+SPDX license identifier matches when that identifier occurs anywhere in the
+resource's recognized SPDX expression (for example, `MIT` matches
+`MIT OR Apache-2.0`). A valid compound SPDX expression matches only the same
+stored normalized expression; the filter is trimmed at its ends but is not
+internally whitespace-normalized. A value that is not a valid single SPDX
+identifier or expression matches the upstream `license_status` exactly against
+the trimmed filter. Indexing preserves non-empty upstream `license_status`,
+uses `not-declared` when the upstream value is missing or blank, and adds
+normalized `license_spdx` only for a valid SPDX expression. Kitia never infers
+a missing license.
 
 
 `check --json`, `doctor --json`, and `install/update/uninstall --dry-run --json`

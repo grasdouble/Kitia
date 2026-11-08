@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import type { CatalogResource } from "../catalog/entries.js";
 
 const require = createRequire(import.meta.url);
-const { matchesSearchText } = require("../catalog/search.js");
+const { matchesSearchText, searchRelevance } = require("../catalog/search.js");
 
 export interface InventoryCatalogConfiguration {
   name: string;
@@ -98,7 +98,7 @@ export function filterCatalogResources(
   catalogs: InventoryCatalogConfiguration[] = [],
 ): CatalogResource[] {
   const labels = inventoryCatalogLabels(resources, catalogs);
-  return resources.filter((resource) => {
+  const visible = resources.filter((resource) => {
     const catalog = catalogCandidateLabel(resource, labels);
     if (catalogFilter !== "all" && catalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
@@ -107,6 +107,11 @@ export function filterCatalogResources(
       resource.license_status || "",
     ]);
   });
+  if (query.trim()) {
+    visible.sort((left, right) =>
+      searchRelevance(right, query) - searchRelevance(left, query));
+  }
+  return visible;
 }
 
 export function mergeRefreshedCatalogResources(
@@ -140,7 +145,6 @@ export function mergeRefreshedCatalogResources(
   }
   return merged;
 }
-
 type CatalogFilterProperty = "catalog" | "kind";
 
 function catalogFilterValue(

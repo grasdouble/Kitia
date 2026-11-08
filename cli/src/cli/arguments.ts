@@ -16,16 +16,21 @@ export interface CliOptions {
   nonInteractive?: boolean;
   offline?: boolean;
   json?: boolean;
-  network?: boolean;
+  audit?: boolean;
   dryRun?: boolean;
   force?: boolean;
   allCatalogs?: boolean;
   query?: string;
   tag?: string;
   status?: string;
+  license?: string;
   name?: string;
   repository?: string;
   file?: string;
+  signingKey?: string;
+  trustedKey?: string;
+  replace?: boolean;
+  resourceSelectors?: string[];
   sourceResources?: CatalogResource[];
   resource?: CatalogResource;
   output?: { log(message: string): void; error(message: string): void };
@@ -61,8 +66,8 @@ function parseArguments(args: string[]): CliOptions {
     const argument = args[index];
     if (argument === "--non-interactive") extras.nonInteractive = true;
     else if (argument === "--offline") extras.offline = true;
+    else if (argument === "--audit") extras.audit = true;
     else if (argument === "--json" && !discovery) extras.json = true;
-    else if (argument === "--network" && command === "doctor") extras.network = true;
     else if (argument === "--scope") {
       if (extras.scope) throw new CatalogError("--scope may only be specified once", "INVALID_ARGUMENT");
       const scope = args[++index];
@@ -86,6 +91,9 @@ function parseArguments(args: string[]): CliOptions {
       ? { ...parseCommandArguments(["check", ...remaining.slice(1)]), command: "doctor" }
       : parseCommandArguments(remaining);
     const action = options.action || options.command;
+    if (extras.audit && !["preview", "install"].includes(action)) {
+      throw new CatalogError("--audit is only supported for source preview and install commands", "INVALID_ARGUMENT");
+    }
     if (extras.scope) {
       if (!["install", "update", "uninstall", "check", "doctor"].includes(action)) {
         throw new CatalogError("--scope is only supported for installation, maintenance and doctor");
@@ -119,6 +127,93 @@ function parseArguments(args: string[]): CliOptions {
 
 function parseCommandArguments(args: string[]): CliOptions {
   const [command, ...remaining] = args;
+  if (command === "bundle") {
+    const [action, file, ...arguments_] = remaining;
+    const usage = "Usage: kitia bundle export <file> <catalog:kind:id...> --signing-key <private-pem> | import <file> --trusted-key <public-pem> [--replace]";
+    if (action === "import" && file) {
+      let trustedKey;
+      let replace = false;
+      for (let index = 0; index < arguments_.length; index += 1) {
+        const argument = arguments_[index];
+        if (argument === "--trusted-key") {
+          if (trustedKey) throw new CatalogError("--trusted-key may only be specified once");
+          const value = arguments_[++index];
+          if (!value || value.startsWith("--")) throw new CatalogError("--trusted-key requires a PEM file path");
+          trustedKey = value;
+        } else if (argument === "--replace" && !replace) {
+          replace = true;
+        } else {
+          throw new CatalogError(usage);
+        }
+      }
+      if (!trustedKey) throw new CatalogError(usage);
+      return { command, action, file, trustedKey, ...(replace ? { replace } : {}) };
+    }
+    if (action === "export" && file) {
+      const selectors = [];
+      let signingKey;
+      for (let index = 0; index < arguments_.length; index += 1) {
+        const argument = arguments_[index];
+        if (argument === "--signing-key") {
+          if (signingKey) throw new CatalogError("--signing-key may only be specified once");
+          const value = arguments_[++index];
+          if (!value || value.startsWith("--")) throw new CatalogError("--signing-key requires a PEM file path");
+          signingKey = value;
+        } else if (argument.startsWith("--")) {
+          throw new CatalogError(`Unknown bundle option: ${argument}`);
+        } else selectors.push(argument);
+      }
+      if (!signingKey || !selectors.length) throw new CatalogError(usage);
+      for (const selector of selectors) {
+        const [catalog, kind, id, ...extra] = selector.split(":");
+        if (!catalog || !["skill", "agent", "instruction"].includes(kind) ||
+            !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id || "") || extra.length) {
+          throw new CatalogError(`Invalid resource selector '${selector}'. Use catalog:kind:id.`);
+        }
+      }
+      if (new Set(selectors).size !== selectors.length) throw new CatalogError("Bundle selectors must be unique");
+      return { command, action, file, signingKey, resourceSelectors: selectors };
+    }
+    throw new CatalogError(usage);
+  }
+  if (command === "collection") {
+    const [action, file, ...arguments_] = remaining;
+    const usage = "Usage: kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>] | import <file> [--trusted-key <public-pem>]";
+    if (action === "import" && file) {
+      if (!arguments_.length) return { command, action, file };
+      if (arguments_.length === 2 && arguments_[0] === "--trusted-key" &&
+          arguments_[1] && !arguments_[1].startsWith("--")) {
+        return { command, action, file, trustedKey: arguments_[1] };
+      }
+      throw new CatalogError(usage);
+    }
+    if (action === "export" && file) {
+      const selectors = [];
+      let signingKey;
+      for (let index = 0; index < arguments_.length; index += 1) {
+        const argument = arguments_[index];
+        if (argument === "--signing-key") {
+          if (signingKey) throw new CatalogError("--signing-key may only be specified once");
+          const value = arguments_[++index];
+          if (!value || value.startsWith("--")) throw new CatalogError("--signing-key requires a PEM file path");
+          signingKey = value;
+        } else if (argument.startsWith("--")) {
+          throw new CatalogError(`Unknown collection option: ${argument}`);
+        } else selectors.push(argument);
+      }
+      if (!selectors.length) throw new CatalogError(usage);
+      for (const selector of selectors) {
+        const [catalog, kind, id, ...extra] = selector.split(":");
+        if (!catalog || !["skill", "agent", "instruction"].includes(kind) ||
+            !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id || "") || extra.length) {
+          throw new CatalogError(`Invalid resource selector '${selector}'. Use catalog:kind:id.`);
+        }
+      }
+      if (new Set(selectors).size !== selectors.length) throw new CatalogError("Collection selectors must be unique");
+      return { command, action, file, resourceSelectors: selectors, ...(signingKey ? { signingKey } : {}) };
+    }
+    throw new CatalogError(usage);
+  }
   if (command === "catalog") {
     const [action, name, repository, ...extra] = remaining;
     const usage = `Usage: kitia catalog <add <name> <github-repository> | ${catalogPresetCommands.map((preset) => `add ${preset}`).join(" | ")} | import <file> | export <file> | refresh <name> | refresh --all | remove <name> | list>`;
@@ -153,7 +248,7 @@ function parseCommandArguments(args: string[]): CliOptions {
     const options: CliOptions = { command, query: "" };
     if (command === "search") {
       if (!remaining[0] || remaining[0].startsWith("--")) {
-        throw new CatalogError('Usage: Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--json]');
+        throw new CatalogError(`Usage: Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]`);
       }
       options.query = remaining.shift();
     }
@@ -163,7 +258,7 @@ function parseCommandArguments(args: string[]): CliOptions {
         options.json = true;
         continue;
       }
-      if (!["--kind", "--tag", "--status", "--catalog"].includes(option)) {
+      if (!["--kind", "--tag", "--status", "--catalog", "--license"].includes(option)) {
         throw new CatalogError(`Unknown option: ${option}`);
       }
       const value = remaining[++index];
@@ -181,6 +276,7 @@ function parseCommandArguments(args: string[]): CliOptions {
       if (option === "--kind") options.kind = value;
       else if (option === "--tag") options.tag = value;
       else if (option === "--status") options.status = value;
+      else if (option === "--license") options.license = value;
       else options.catalog = resolvedCatalog;
     }
     return options;
@@ -237,8 +333,8 @@ function printHelp() {
   console.log(`Usage:
   Kitia onboarding                 Show the getting-started guide again
   Kitia [dashboard] [--non-interactive] (dashboard is the default command)
-  Kitia list [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--json]
-  Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--json]
+  Kitia list [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]
+  Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]
   Kitia show [<kind>] <id>
   Kitia preview [<kind>] <id>
   Kitia validate [--catalog <catalog>]
@@ -251,6 +347,10 @@ function printHelp() {
   ${catalogPresetCommands.map((preset) => `Kitia catalog add ${preset}`).join("\n  ")}
   Kitia catalog import <file>
   Kitia catalog export <file>
+  Kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>]
+  Kitia collection import <file> [--trusted-key <public-pem>]
+  Kitia bundle export <file> <catalog:kind:id...> --signing-key <private-pem>
+  Kitia bundle import <file> --trusted-key <public-pem> [--replace]
   Kitia catalog refresh <name>
   Kitia catalog refresh --all
   Kitia catalog list
@@ -263,10 +363,14 @@ Options:
   --kind <kind>                 Filter by resource type
   --tag <tag>                   Filter by tag
   --status <status>             Filter by status
-  Source skill installs and previews are delegated to GitHub CLI
+  --license <value>             Filter by SPDX ID/expression or exact upstream value
+  --signing-key <private-pem>   Collection/bundle export signing-key file
+  --trusted-key <public-pem>   Collection/bundle import verification-key file
+  Unbundled source skill installs/previews are delegated to GitHub CLI
   --json                        Discovery arrays; check/doctor reports; lifecycle --dry-run plans
+  --audit                       Audit pinned source bytes; block installs with findings or incomplete coverage
   --non-interactive             Never open interactive selectors, previews, or dashboard
-  --offline                     Refuse network-dependent source preview or installation
+  --offline                     Source installs require an imported signed bundle; preview still requires GitHub
   --target <dir>                Installation target (default: current directory)
   --scope <project|user>        Skills/agents: project or user home; instructions are project-scoped
                                 User scope cannot be combined with --target

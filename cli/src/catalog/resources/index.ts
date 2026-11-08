@@ -5,6 +5,7 @@ const path = require("node:path");
 const YAML = require("yaml");
 import type { CatalogResource } from "../entries.js";
 import type { InstallPlanEntry } from "../plan.js";
+const { spdxExpression } = require("../license.js");
 
 const INSTALLABLE_KINDS = new Set(["skill", "agent", "instruction"]);
 const USER_INSTALLABLE_KINDS = new Set(["skill", "agent"]);
@@ -143,6 +144,9 @@ function validateSourceCatalog(
     if (typeof entry.license_status !== "string" || !entry.license_status.trim()) {
       throw new CatalogError(`${entryLabel}.license_status must be a non-empty string`);
     }
+    if (entry.bundle_id !== undefined && !/^[a-f0-9]{64}$/.test(entry.bundle_id)) {
+      throw new CatalogError(`${entryLabel}.bundle_id must be a 64-character SHA-256 identifier`);
+    }
     if (kind === "instruction" && (!Array.isArray(entry.apply_to) || !entry.apply_to.length ||
         entry.apply_to.some((pattern) => typeof pattern !== "string" || !pattern.trim()))) {
       throw new CatalogError(`${entryLabel}.apply_to must be a non-empty array of glob strings`);
@@ -155,6 +159,7 @@ function validateSourceCatalog(
       description: entry.description.trim(),
       source_repository: manifest.source_repository,
       source_ref: manifest.source_ref,
+      license_spdx: spdxExpression(entry.license_status),
       ...(kind === "instruction" ? { applyTo: entry.apply_to } : {}),
     } as CatalogResource;
   });

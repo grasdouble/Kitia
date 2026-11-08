@@ -10,6 +10,7 @@ const { afterEach, test } = require("node:test");
 const {
   checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog, importCatalogConfigurationText,
 } = require("../dist/catalog/sources/manage.js");
+const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
 const { installSourceFileResource } = require("../dist/catalog/sources/skills.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
@@ -17,16 +18,30 @@ const { recordSourceInstallation } = require("../dist/catalog/sources/installed.
 const { loadCommandCatalogs } = require("../dist/catalog/loading.js");
 const { findUnmanagedArtifacts, installedFingerprint, readInstallState } = require("../dist/catalog/inventory/index.js");
 const { collectInstalledScopes } = require("../dist/catalog/lifecycle.js");
-const { formatDashboardRows } = require("../dist/cli/catalog.js");
+const { formatDashboardRows, listCatalogResources } = require("../dist/cli/catalog.js");
+const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel } =
+  require("../dist/dashboard/helpers.mjs");
 const { renderInstalledResources } = require("../dist/dashboard/terminal.js");
 const {
   checkInstalledResources, readInstalledSourceSkills, runSourceCommand,
   uninstallSourceResource, updateSourceResources,
 } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
-const {
-  cycleFilter, filterInventory, inventoryCatalogLabel, mergeRefreshedCatalogResources,
-} = require("../dist/dashboard/helpers.mjs");
+const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
+test("catalog discovery ranks exact identifiers and preserves existing filters", () => {
+  const resources = [
+    { id: "release-helper", kind: "skill", catalog: "main", description: "Helps with release notes", tags: ["release"] },
+    { id: "release", kind: "agent", catalog: "main", description: "Prepares software releases", tags: ["automation"] },
+    { id: "release-guide", kind: "instruction", catalog: "other", description: "Release process", tags: ["release"] },
+  ];
+  const ranked = listCatalogResources(resources, { query: "release" });
+  assert.deepEqual(ranked.map(({ id }) => id), ["release", "release-helper", "release-guide"]);
+  assert.deepEqual(listCatalogResources(resources, {
+    query: "release", kind: "skill", tag: "release",
+  }).map(({ id }) => id), ["release-helper"]);
+  assert.deepEqual(filterCatalogResources(resources, "release", "main", "all")
+    .map(({ id }) => id), ["release", "release-helper"]);
+});
 
 let temporary;
 
@@ -565,6 +580,37 @@ test("custom catalog mappings index explicit paths and default unscoped instruct
     ".claude/agents/release.md", ".github/agents/release.agent.md",
     ".claude/rules/checklist.md", ".github/instructions/checklist.instructions.md",
   ]);
+
+  const firstPath = path.join(target, ".claude/agents/release.md");
+  const secondPath = path.join(target, ".github/agents/release.agent.md");
+  fs.mkdirSync(path.dirname(firstPath), { recursive: true });
+  fs.mkdirSync(path.dirname(secondPath), { recursive: true });
+  fs.writeFileSync(firstPath, "existing claude agent\n");
+  fs.writeFileSync(secondPath, "existing copilot agent\n");
+  const originalRename = fs.renameSync;
+  let renameCount = 0;
+  fs.renameSync = (...args) => {
+    renameCount += 1;
+    if (renameCount === 3) throw new Error("injected third-file write failure");
+    return originalRename(...args);
+  };
+  const thirdPath = path.join(target, ".claude/rules/checklist.md");
+  fs.mkdirSync(path.dirname(thirdPath), { recursive: true });
+  fs.writeFileSync(thirdPath, "existing instruction\n");
+  try {
+    const plan = new Map([
+      [".claude/agents/release.md", { content: Buffer.from("new claude agent\n"), executable: false }],
+      [".claude/rules/checklist.md", { content: Buffer.from("new instruction\n"), executable: false }],
+      [".github/agents/release.agent.md", { content: Buffer.from("new copilot agent\n"), executable: false }],
+    ]);
+    assert.throws(() => writeInstallPlan(plan, target, { force: true }),
+      /injected third-file write failure/);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  assert.equal(fs.readFileSync(firstPath, "utf8"), "existing claude agent\n");
+  assert.equal(fs.readFileSync(secondPath, "utf8"), "existing copilot agent\n");
+  assert.equal(fs.readFileSync(thirdPath, "utf8"), "existing instruction\n");
   assert.equal(fs.existsSync(path.join(target, ".agents/kitia-lock.json")), false);
   assert.throws(() => validateSourceConfiguration({
     catalog_version: 1,

@@ -2,7 +2,8 @@
 
 import type { CatalogResource } from "../catalog/entries.js";
 import type { CliOptions } from "./arguments.js";
-const { matchesSearch } = require("../catalog/search.js");
+const { matchesSearch, searchRelevance } = require("../catalog/search.js");
+const { matchesLicense } = require("../catalog/license.js");
 function catalogEntries(sourceResources) {
   return sourceResources.map((resource) => ({
     ...resource,
@@ -11,14 +12,20 @@ function catalogEntries(sourceResources) {
 }
 
 function listCatalogResources(sourceResources, options: CliOptions): CatalogResource[] {
-  return catalogEntries(sourceResources).filter((resource) => {
+  const resources = catalogEntries(sourceResources).filter((resource) => {
     const tags = resource.tags || [];
     return (!options.catalog || resource.catalog === options.catalog) &&
       (!options.kind || resource.kind === options.kind) &&
       (!options.tag || tags.includes(options.tag)) &&
       (!options.status || resource.status === options.status) &&
+      (!options.license || matchesLicense(resource, options.license)) &&
       matchesSearch(resource, options.query);
   });
+  if (options.query?.trim()) {
+    resources.sort((left, right) =>
+      searchRelevance(right, options.query) - searchRelevance(left, options.query));
+  }
+  return resources;
 }
 
 function formatDashboardRows(installed: CatalogResource[], allResources: CatalogResource[]): CatalogResource[] {
