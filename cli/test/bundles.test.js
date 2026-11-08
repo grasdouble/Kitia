@@ -351,7 +351,9 @@ test("real CLI exports a signed pinned bundle and installs skill, agent, and ins
   cli("install", "agent", "release", "--target", target, "--tool", "both", "--offline", "--audit");
   cli("install", "instruction", "checklist", "--target", target, "--tool", "both", "--offline", "--audit");
   assert.equal(fs.readFileSync(path.join(target, ".agents/skills/demo-skill/helper.sh"), "utf8"), "#!/bin/sh\nprintf 'offline helper\\n'\n");
-  assert.equal(fs.statSync(path.join(target, ".agents/skills/demo-skill/helper.sh")).mode & 0o111, 0o111);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(path.join(target, ".agents/skills/demo-skill/helper.sh")).mode & 0o111, 0o111);
+  }
   assert.equal(fs.existsSync(path.join(target, ".claude/skills/demo-skill/SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(target, ".github/agents/release.agent.md")), true);
   assert.equal(fs.existsSync(path.join(target, ".claude/agents/release.md")), true);
