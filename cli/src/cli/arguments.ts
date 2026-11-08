@@ -1,5 +1,6 @@
 "use strict";
 
+import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { PlanAction, InstallationTool, InventoryScope } from "../catalog/inventory/files.js";
 export interface CliOptions {
@@ -36,6 +37,7 @@ const path = require("node:path");
 const { CatalogError, RESOURCE_ID, TOOLS, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
 const { loadUserSourceConfiguration, catalogNameKey } = require("../catalog/sources/config.js");
 const KINDS = new Set(["skill", "agent", "instruction"]);
+const catalogPresetCommands = CATALOG_PRESETS.map(({ command }) => command);
 
 function isInstallationTool(value: string): value is InstallationTool {
   return value === "claude" || value === "copilot" || value === "both";
@@ -119,7 +121,7 @@ function parseCommandArguments(args: string[]): CliOptions {
   const [command, ...remaining] = args;
   if (command === "catalog") {
     const [action, name, repository, ...extra] = remaining;
-    const usage = "Usage: kitia catalog <add <name> <github-repository> | add matt-pocock | import <file> | export <file> | refresh <name> | refresh --all | remove <name> | list>";
+    const usage = `Usage: kitia catalog <add <name> <github-repository> | ${catalogPresetCommands.map((preset) => `add ${preset}`).join(" | ")} | import <file> | export <file> | refresh <name> | refresh --all | remove <name> | list>`;
     if (extra.length) throw new CatalogError(usage);
     if (["import", "export"].includes(action) && name && !repository) return { command, action, file: name };
     if (action === "list" && name === undefined) return { command, action };
@@ -128,8 +130,9 @@ function parseCommandArguments(args: string[]): CliOptions {
       if (name === "--all") return { command, action, allCatalogs: true };
       return { command, action, name };
     }
-    if (action === "add" && name === "matt-pocock" && repository === undefined) {
-      return { command, action, name, repository: "https://github.com/mattpocock/skills" };
+    if (action === "add" && name && repository === undefined) {
+      const preset = CATALOG_PRESETS.find(({ command: presetCommand }) => presetCommand === name);
+      if (preset) return { command, action, name: preset.catalogName, repository: preset.repository };
     }
     if (action === "add" && name && repository) return { command, action, name, repository };
     throw new CatalogError(usage);
@@ -245,7 +248,7 @@ function printHelp() {
   Kitia update [<kind> <id>] [--target <dir>] [--dry-run] [--force]
   Kitia uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force]
   Kitia catalog add <name> <https-github-url>
-  Kitia catalog add matt-pocock
+  ${catalogPresetCommands.map((preset) => `Kitia catalog add ${preset}`).join("\n  ")}
   Kitia catalog import <file>
   Kitia catalog export <file>
   Kitia catalog refresh <name>
