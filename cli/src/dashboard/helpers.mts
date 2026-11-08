@@ -270,7 +270,16 @@ export function fitColumn(value: unknown, width: number): string {
 export function wrapText(value: unknown, width: number, maxLines = Infinity): string[] {
   const lines = [];
   let line = "";
-  for (const word of String(value || "").split(/\s+/).filter(Boolean)) {
+  for (const originalWord of String(value || "").split(/\s+/).filter(Boolean)) {
+    let word = originalWord;
+    while (word.length > width) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      lines.push(word.slice(0, width));
+      word = word.slice(width);
+    }
     if (line && line.length + word.length + 1 > width) {
       lines.push(line);
       line = "";

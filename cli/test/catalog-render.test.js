@@ -73,3 +73,67 @@ test("CatalogScreen exposes source license and pin only when provenance exists",
   assert.ok(!localText.includes("PINNED SOURCE"));
   assert.ok(!localText.some((text) => text.includes("@0123456789abcdef0123456789abcdef01234567")));
 });
+
+test("CatalogScreen wraps complete descriptions and pinned sources at narrow widths", async () => {
+  const { CatalogScreen } = await import("../dist/dashboard/screens.mjs");
+  const description = "A long description with enough detail to wrap across several narrow terminal lines without losing any words.";
+  const sourcePath = "skills/long-resource-folder/with-an-extraordinarily-long-unbroken-source-path-segment";
+  const sourceRef = "0123456789abcdef0123456789abcdef01234567";
+  const source = `org/very-long-example-repository/${sourcePath}@${sourceRef}`;
+  for (const columns of [56, 120]) {
+    const tree = CatalogScreen({
+      ...catalogProps({
+        catalog: "sample",
+        kind: "skill",
+        id: "long-resource",
+        description,
+        license_status: "MIT",
+        source_repository: "org/very-long-example-repository",
+        source_path: sourcePath,
+        source_ref: sourceRef,
+      }),
+      columns,
+    });
+    const text = visibleInkText(tree).join("");
+    assert.ok(text.replace(/\s/g, "").includes(description.replace(/\s/g, "")));
+    assert.ok(text.includes(source));
+  }
+});
+
+test("InventoryScreen wraps complete locations and descriptions at narrow widths", async () => {
+  const { InventoryScreen } = await import("../dist/dashboard/screens.mjs");
+  const description = "A long inventory description that must remain complete when shown in a narrow terminal.";
+  const location = "/workspace/projects/a-resource-folder/with-an-extraordinarily-long-unbroken-path-segment";
+  for (const columns of [56, 120]) {
+    const tree = InventoryScreen({
+      resources: [{
+        catalog: "local",
+        kind: "skill",
+        id: "long-resource",
+        scope: "project",
+        status: "current",
+        managed: false,
+        paths: [location],
+        source_repository: "example/long-repository-name",
+        description,
+      }],
+      errors: [],
+      query: "",
+      filterMode: false,
+      catalogFilter: "all",
+      kindFilter: "all",
+      selectedIndex: 0,
+      versionLabel: "test",
+      actionMessage: "",
+      catalogAvailable: false,
+      canExecute: false,
+      showDetails: true,
+      columns,
+      rows: 40,
+    });
+    const text = visibleInkText(tree).join("");
+    assert.ok(text.replace(/\s/g, "").includes(description.replace(/\s/g, "")));
+    assert.ok(text.includes(location));
+    assert.ok(text.includes("https://github.com/example/long-repository-name"));
+  }
+});

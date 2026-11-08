@@ -344,8 +344,8 @@ export function InventoryScreen({
       { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
       { label: "", value: issues, maxLines: 2 },
       { label: "VERSION", value: displayVersion, maxLines: 1 },
-      { label: "LOCATIONS", value: locations, maxLines: 2 },
-      { label: "DESCRIPTION", value: description, maxLines: 3 },
+      { label: "LOCATIONS", value: locations, maxLines: Infinity },
+      { label: "DESCRIPTION", value: description, maxLines: Infinity },
       ...(actionMessage
         ? [{ label: "", value: fitText(actionMessage, detailsContentWidth), maxLines: 1 }]
         : []),
@@ -509,11 +509,11 @@ export function CatalogScreen({
   const detailRows = selected
     ? [
       { label: "CATALOG", value: candidateLabel(selected), maxLines: 1 },
-      { label: "DESCRIPTION", value: selected.description || "No description available.", maxLines: 2 },
+      { label: "DESCRIPTION", value: selected.description || "No description available.", maxLines: Infinity },
       { label: "INSTALLED IN", value: installedScopes, maxLines: 1 },
       { label: "LICENSE", value: selected.license_status || "not declared", maxLines: 1 },
       ...(selected.source_repository
-        ? [{ label: "PINNED SOURCE", value: `${selected.source_repository}/${selected.source_path || "unknown"}@${selected.source_ref || "unknown"}`, maxLines: 2 }]
+        ? [{ label: "PINNED SOURCE", value: `${selected.source_repository}/${selected.source_path || "unknown"}@${selected.source_ref || "unknown"}`, maxLines: Infinity }]
         : []),
     ]
     : [];
