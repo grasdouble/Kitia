@@ -995,7 +995,8 @@ test("configured source skills use the same pinned install, check, update and un
 test("dashboard manages user catalogs and refreshes one or all catalogs", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
-  const { addCatalogModal, refreshCatalogModal, removeCatalogModal } = await import("../dist/dashboard/modals.mjs");
+  const { addCatalogModal, catalogTransferModal, refreshCatalogModal, removeCatalogModal } =
+    await import("../dist/dashboard/modals.mjs");
   const repository = "https://github.com/example/test";
   const catalogModal = removeCatalogModal({
     catalogs: [{ name: "Test", repository }],
@@ -1173,26 +1174,36 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       { name: "Catalog Two", repository: "https://github.com/example/two", mode: "basic", entries: [] },
     ],
   });
+  const importSummary = {
+    added: ["Imported"],
+    ignored: [{ name: "Existing", reason: "Catalog name already exists." }],
+    refreshed: [{ name: "Imported", count: 4 }],
+    refreshFailures: [{ name: "Other", message: "offline" }],
+  };
   const transferManager = await driveRefresh(["m", "i", pastedConfiguration, "\x13", "\x1b[B", "\r", "\x13", "\r", "q"], refresh, {
     transferCatalogs: async (action, content) => {
       transfers.push({ action, content });
       return {
         catalogs: [{ name: "Imported", repository }],
         resources: [],
-        importSummary: {
-          added: ["Imported"],
-          ignored: [{ name: "Existing", reason: "Catalog name already exists." }],
-          refreshed: [{ name: "Imported", count: 4 }],
-          refreshFailures: [{ name: "Other", message: "offline" }],
-        },
+        importSummary,
       };
     },
   });
-  assert.match(transferManager.renderedOutput, /Added \(1\): Imported/);
-  assert.match(transferManager.renderedOutput, /Existing: Catalog name already exists/);
-  assert.match(transferManager.renderedOutput, /Refreshed \(1\): Imported · 4/);
-  assert.match(transferManager.renderedOutput, /Other: offline/);
   assert.equal(transferManager.result, true);
+  const transferResult = catalogTransferModal({
+    action: "import",
+    step: "result",
+    content: "",
+    message: "Imported 1, ignored 1, refreshed 1, refresh failed 1.",
+    summary: importSummary,
+    working: false,
+    columns: 100,
+  }).lines.map(({ bodyText, text }) => bodyText || text).join("\n");
+  assert.match(transferResult, /Added \(1\): Imported/);
+  assert.match(transferResult, /Existing: Catalog name already exists/);
+  assert.match(transferResult, /Refreshed \(1\): Imported · 4/);
+  assert.match(transferResult, /Other: offline/);
   assert.equal(transfers.length, 1);
   assert.equal(transfers[0].action, "import");
   assert.deepEqual(JSON.parse(transfers[0].content).sources, [
