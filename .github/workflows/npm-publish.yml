@@ -30,11 +30,11 @@ jobs:
       - run: pnpm run cli:validate
       - run: pnpm run cli:test:package-smoke
       - name: Create version PR or publish
-        uses: changesets/action@v1
+        uses: grasdouble/Lufa-CICD/actions/changesets-release@4d341814e051c0f528b4ffc5537dd7ec13e85963 # changesets-release-v2.0.0
         with:
-          version: pnpm run changeset:version
-          publish: pnpm run release
-          title: "chore: version packages"
-          commit: "chore: version packages"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version-command: pnpm run changeset:version
+          publish-command: pnpm run release
+          pr-title: "chore: version packages"
+          commit-message: "chore: version packages"
+          create-github-releases: "true"
+          release-token: ${{ secrets.GITHUB_TOKEN }}

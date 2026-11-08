@@ -143,7 +143,10 @@ test("dashboard shows the installed and available versions with the changelog li
   const previousVersion = process.env.KITIA_INSTALLED_VERSION;
   const previousFetch = global.fetch;
   process.env.KITIA_INSTALLED_VERSION = "1.0.0";
-  global.fetch = async () => ({ ok: true, json: async () => ({ version: "1.0.2" }) });
+  global.fetch = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return { ok: true, json: async () => ({ version: "1.0.2" }) };
+  };
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -155,19 +158,25 @@ test("dashboard shows the installed and available versions with the changelog li
   output.rows = 40;
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
+  let done;
+  const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
   try {
-    const done = runDashboard([], input, output);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+    done = runDashboard([], input, output);
+    const deadline = Date.now() + 2_000;
+    while (!plain().includes("NEW VERSION AVAILABLE") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     assert.match(plain(), /NEW VERSION AVAILABLE/);
     assert.match(plain(), /Installed: 1\.0\.0/);
     assert.match(plain(), /Available: 1\.0\.2/);
     assert.match(plain(), /github\.com\/grasdouble\/Kitia\/blob\/main\/CHANGELOG\.md#102/);
-    input.write("\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    input.write("q");
-    assert.equal(await done, true);
   } finally {
+    if (done) {
+      input.write("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      input.write("q");
+      await done;
+    }
     input.destroy();
     output.destroy();
     if (previousVersion === undefined) delete process.env.KITIA_INSTALLED_VERSION;
@@ -1068,9 +1077,20 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       removeCatalog: async () => ({ catalogs: [{ name: "Test", repository }], resources: [] }),
       ...extraActions,
     });
-    for (const key of keys) {
+    const waitForOutput = async (pattern) => {
+      const deadline = Date.now() + 5_000;
+      while (!pattern.test(renderedOutput)) {
+        if (Date.now() >= deadline) {
+          throw new Error(`Dashboard did not render ${pattern}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+    for (const entry of keys) {
+      const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
       input.write(key);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (expectedOutput) await waitForOutput(expectedOutput);
+      else await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const result = await done;
     input.destroy();
@@ -1180,7 +1200,17 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     refreshed: [{ name: "Imported", count: 4 }],
     refreshFailures: [{ name: "Other", message: "offline" }],
   };
-  const transferManager = await driveRefresh(["m", "i", pastedConfiguration, "\x13", "\x1b[B", "\r", "\x13", "\r", "q"], refresh, {
+  const transferManager = await driveRefresh([
+    ["m", /USER CATALOGS/],
+    ["i", /IMPORT CATALOGS/],
+    pastedConfiguration,
+    ["\x13", /SPACE\/ENTER TOGGLE/],
+    "\x1b[B",
+    "\r",
+    ["\x13", /Added \(1\): Imported/],
+    "\r",
+    "q",
+  ], refresh, {
     transferCatalogs: async (action, content) => {
       transfers.push({ action, content });
       return {
