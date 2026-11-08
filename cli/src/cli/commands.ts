@@ -190,7 +190,7 @@ async function executeCommand(options, report) {
           };
         },
         userCatalogs: userCatalogState(),
-        checkCatalogFreshness,
+        checkCatalogFreshness: (names) => checkCatalogFreshness(undefined, names),
         removeCatalog: async (name) => {
           removeCatalog(name);
           const refreshed = loadCommandCatalogs({ command: "list" }, () => {});

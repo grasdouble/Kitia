@@ -132,7 +132,9 @@ function validateSourceCatalog(
       throw new CatalogError(`${entryLabel} skill path must end with its id`);
     }
     if ((kind === "agent" || kind === "instruction") &&
-        path.posix.basename(sourcePath).replace(kind === "agent" ? /(?:\.agent)?\.md$/i : /(?:\.instructions)?\.md$/i, "") !== entry.id) {
+        path.posix.basename(sourcePath)
+          .replace(kind === "agent" ? /(?:\.agent)?\.md$/i : /(?:\.instructions)?\.md$/i, "")
+          .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") !== entry.id) {
       throw new CatalogError(`${entryLabel} file path must identify ${kind} ${entry.id}`);
     }
     if (typeof entry.description !== "string" || !entry.description.trim()) {

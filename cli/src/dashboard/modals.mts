@@ -429,7 +429,7 @@ export function catalogTransferModal({ action, step, content, message, summary, 
   ], columns, "cyan", 80);
 }
 export function catalogPresetModal({ presets, index, columns }: {
-  presets: Array<{ name: string; repository: string }>;
+  presets: readonly { name: string; repository: string }[];
   index: number;
   columns: number;
 }) {

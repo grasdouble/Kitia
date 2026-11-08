@@ -84,7 +84,8 @@ source association display `-`.
 
 From inventory, uppercase `A`/`U` install or update resources, and `Delete`
 uninstalls the selection. Press `M` for catalog management; there, `A` adds a
-catalog, `P` opens the preset picker for Matt Pocock or Anthropics, `Delete`
+catalog, `P` opens the preset picker for Matt Pocock, Anthropics, or GitHub
+Awesome Copilot, `Delete`
 removes the selected catalog, `E` edits its name, repository, setup mode and
 custom paths, `R` refreshes catalogs, `I` opens a multi-line JSON text area for
 import, and `X` copies the current configuration to the system clipboard.

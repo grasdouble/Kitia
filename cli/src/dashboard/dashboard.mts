@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { render, useInput, useWindowSize } from "ink";
+import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
 import {
   cycleFilter, cycleIndex, filterCatalogResources, filterInventory, inventoryCatalogLabels,
+  mergeRefreshedCatalogResources,
 } from "./helpers.mjs";
 import {
   CatalogManagementScreen, CatalogScreen, InventoryScreen, ScreenFrame,
@@ -82,29 +84,6 @@ type CatalogTransferState = {
   choices?: Array<{ name: string; repository: string; existing: boolean; selected: boolean }>;
   selectedIndex?: number;
 };
-type CatalogPreset = {
-  name: string;
-  catalogName: string;
-  repository: string;
-  mode: "basic" | "custom";
-  entries: CatalogEntry[];
-};
-const CATALOG_PRESETS: CatalogPreset[] = [
-  {
-    name: "Anthropics",
-    catalogName: "Anthropics",
-    repository: "https://github.com/anthropics/skills",
-    mode: "basic",
-    entries: [],
-  },
-  {
-    name: "Matt Pocock",
-    catalogName: "matt-pocock",
-    repository: "https://github.com/mattpocock/skills",
-    mode: "basic",
-    entries: [],
-  },
-];
 type CatalogPresetState = { index: number };
 
 const h = React.createElement;
@@ -131,7 +110,7 @@ export function Dashboard({
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
     transferCatalogs?: (action: "import" | "export", content: string) => Promise<CatalogActionResult>;
-    checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
+    checkCatalogFreshness?: (names?: string[]) => Promise<CatalogFreshnessResult[]>;
     showOnboarding?: boolean;
   };
   onFinish: (success: boolean) => void;
@@ -192,7 +171,7 @@ export function Dashboard({
   const [catalogCandidates, setCatalogCandidates] = useState(() => actions.catalogResources || []);
   const [userCatalogs, setUserCatalogs] = useState(() => actions.userCatalogs || []);
   const [catalogFreshness, setCatalogFreshness] = useState<Record<string, CatalogFreshnessStatus>>({});
-  const freshnessRequest = useRef(0);
+  const freshnessRequest = useRef(new Map<string, number>());
   const [catalogRemoval, setCatalogRemoval] = useState<CatalogRemovalState | null>(null);
   const [catalogRefresh, setCatalogRefresh] = useState<CatalogRefreshState | null>(null);
   const [catalogTransfer, setCatalogTransfer] = useState<CatalogTransferState | null>(null);
@@ -229,25 +208,42 @@ export function Dashboard({
     .map((error) => error.scope)
     .filter((scope) => ["project", "user"].includes(scope)))];
 
-  const checkCatalogFreshness = async (catalogs = userCatalogs) => {
-    const request = ++freshnessRequest.current;
-    const checking = Object.fromEntries(catalogs.map(({ name }) => [name, "checking" as const]));
-    setCatalogFreshness(checking);
+  const checkCatalogFreshness = async (
+    catalogs = userCatalogs,
+    names = catalogs.map(({ name }) => name),
+  ) => {
+    const requests = new Map<string, number>();
+    for (const name of names) {
+      const key = name.toLowerCase();
+      const request = (freshnessRequest.current.get(key) || 0) + 1;
+      freshnessRequest.current.set(key, request);
+      requests.set(key, request);
+    }
+    const updateStatuses = (statusFor: (name: string) => CatalogFreshnessStatus) => {
+      const catalogNames = new Set(catalogs.map(({ name }) => name.toLowerCase()));
+      setCatalogFreshness((current) => {
+        const next = Object.fromEntries(Object.entries(current)
+          .filter(([name]) => catalogNames.has(name.toLowerCase())));
+        for (const name of names) {
+          const key = name.toLowerCase();
+          if (freshnessRequest.current.get(key) === requests.get(key)) {
+            next[name] = statusFor(name);
+          }
+        }
+        return next;
+      });
+    };
+    updateStatuses(() => "checking");
     if (!actions.checkCatalogFreshness) {
-      setCatalogFreshness(Object.fromEntries(catalogs.map(({ name }) => [name, "unknown" as const])));
+      updateStatuses(() => "unknown");
       return;
     }
     try {
-      const results = await actions.checkCatalogFreshness();
-      if (request !== freshnessRequest.current) return;
-      const statusByName = new Map(results.map(({ name, status }) => [name, status]));
-      setCatalogFreshness(Object.fromEntries(catalogs.map(({ name }) =>
-        [name, statusByName.get(name) || "unknown"])));
+      const results = await actions.checkCatalogFreshness(names);
+      const statusByName = new Map(results.map(({ name, status }) => [name.toLowerCase(), status]));
+      updateStatuses((name) => statusByName.get(name.toLowerCase()) || "unknown");
     } catch {
-      if (request === freshnessRequest.current) {
-        setCatalogFreshness(Object.fromEntries(catalogs.map(({ name }) =>
-          [name, "unknown" as const])));
-      }
+      updateStatuses(() => "unknown");
     }
   };
 
@@ -342,8 +338,13 @@ export function Dashboard({
       const result = await actions.refreshCatalog(name);
       const updatedCatalogs = Array.isArray(result.catalogs) ? [...result.catalogs] : userCatalogs;
       if (Array.isArray(result.catalogs)) setUserCatalogs(updatedCatalogs);
-      if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
-      void checkCatalogFreshness(updatedCatalogs);
+      const incomingResources = result.resources;
+      if (Array.isArray(incomingResources)) {
+        const refreshedCatalogs = result.refreshed?.map(({ name: catalogName }) => catalogName) || [];
+        setCatalogCandidates((current) =>
+          mergeRefreshedCatalogResources(current, incomingResources, refreshedCatalogs));
+      }
+      void checkCatalogFreshness(updatedCatalogs, name ? [name] : undefined);
       const count = result.refreshed?.reduce((total, catalog) => total + catalog.count, 0) || 0;
       const refreshed = result.refreshed?.length || 0;
       const failed = Boolean(result.failures?.length);
@@ -1163,7 +1164,7 @@ export async function runDashboard(
     userCatalogs?: UserCatalog[];
     removeCatalog?: (name: string) => Promise<CatalogActionResult>;
     refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
-    checkCatalogFreshness?: () => Promise<CatalogFreshnessResult[]>;
+    checkCatalogFreshness?: (names?: string[]) => Promise<CatalogFreshnessResult[]>;
     showOnboarding?: boolean;
   } = {},
 ): Promise<boolean> {

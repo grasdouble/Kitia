@@ -24,7 +24,9 @@ const {
   uninstallSourceResource, updateSourceResources,
 } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
-const { cycleFilter, filterInventory, inventoryCatalogLabel } = require("../dist/dashboard/helpers.mjs");
+const {
+  cycleFilter, filterInventory, inventoryCatalogLabel, mergeRefreshedCatalogResources,
+} = require("../dist/dashboard/helpers.mjs");
 
 let temporary;
 
@@ -36,6 +38,18 @@ function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
+test("refreshing one catalog replaces only its resources in the catalog list", () => {
+  const existingAlpha = { catalog: "Alpha", kind: "agent", id: "old-agent" };
+  const existingBeta = { catalog: "Beta", kind: "skill", id: "unchanged-skill" };
+  const updatedAlpha = { catalog: "Alpha", kind: "agent", id: "new-agent" };
+  const unrelatedBetaUpdate = { catalog: "Beta", kind: "skill", id: "new-beta-skill" };
+
+  assert.deepEqual(mergeRefreshedCatalogResources(
+    [existingAlpha, existingBeta],
+    [updatedAlpha, unrelatedBetaUpdate],
+    ["alpha"],
+  ), [updatedAlpha, existingBeta]);
+});
 
 test("Matt Pocock catalog preset resolves to its repository", () => {
   assert.deepEqual(parseArguments(["catalog", "add", "matt-pocock"]), {
@@ -43,6 +57,22 @@ test("Matt Pocock catalog preset resolves to its repository", () => {
     action: "add",
     name: "matt-pocock",
     repository: "https://github.com/mattpocock/skills",
+  });
+});
+test("Anthropics catalog preset resolves to its repository", () => {
+  assert.deepEqual(parseArguments(["catalog", "add", "anthropics"]), {
+    command: "catalog",
+    action: "add",
+    name: "Anthropics",
+    repository: "https://github.com/anthropics/skills",
+  });
+});
+test("GitHub Awesome Copilot catalog preset resolves to its repository", () => {
+  assert.deepEqual(parseArguments(["catalog", "add", "github-awesome-copilot"]), {
+    command: "catalog",
+    action: "add",
+    name: "github-awesome-copilot",
+    repository: "https://github.com/github/awesome-copilot",
   });
 });
 
@@ -420,11 +450,15 @@ test("Basic source indexing discovers categorized skills, agents, and instructio
     "Synthetic categorized skill.",
   ].join("\n"));
   const agent = path.join(source, "agents", "engineering", "release.agent.md");
+  const friendlyNamedAgent = path.join(source, "agents", "accessibility-runtime-tester.agent.md");
   const instruction = path.join(source, ".github", "instructions", "checklist.instructions.md");
   fs.mkdirSync(path.dirname(agent), { recursive: true });
   fs.mkdirSync(path.dirname(instruction), { recursive: true });
   fs.writeFileSync(agent, [
     "---", "name: release", "description: Release agent.", "---", "", "Agent body.",
+  ].join("\n"));
+  fs.writeFileSync(friendlyNamedAgent, [
+    "---", "name: Accessibility Runtime Tester", "---", "", "Accessibility agent.",
   ].join("\n"));
   fs.writeFileSync(instruction, [
     "---", "name: checklist", "description: Review checklist.",
@@ -447,11 +481,13 @@ test("Basic source indexing discovers categorized skills, agents, and instructio
   assert.equal(catalog.resources.find((entry) => entry.id === "research").description,
     "Research sources: follow first-party references.");
   assert.deepEqual(catalog.resources.map(({ kind, id }) => `${kind}:${id}`).sort(), [
-    "agent:release", "instruction:checklist", "instruction:global-guidance",
-    "skill:demo-skill", "skill:research",
+    "agent:accessibility-runtime-tester", "agent:release", "instruction:checklist",
+    "instruction:global-guidance", "skill:demo-skill", "skill:research",
   ]);
-  assert.equal(catalog.resources.find((entry) => entry.kind === "agent").source_path,
+  assert.equal(catalog.resources.find((entry) => entry.id === "release").source_path,
     "agents/engineering/release.agent.md");
+  assert.equal(catalog.resources.find((entry) => entry.id === "accessibility-runtime-tester").description,
+    "Accessibility agent.");
   const scopedInstruction = catalog.resources.find((entry) => entry.id === "checklist");
   assert.equal(scopedInstruction.source_path, ".github/instructions/checklist.instructions.md");
   assert.deepEqual(scopedInstruction.apply_to, ["src/**"]);
@@ -1059,6 +1095,20 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     mode: "basic",
     entries: [],
   }]);
+  const githubPresetRequests = [];
+  const githubPresetManager = await driveRefresh(["m", "p", "\x1b[B", "\x1b[B", "\r", "\r", "q"], refresh, {
+    addCatalog: async (request) => {
+      githubPresetRequests.push(request);
+      return { catalog: request.name, count: 3, catalogs: [request], resources: [] };
+    },
+  });
+  assert.equal(githubPresetManager.result, true);
+  assert.deepEqual(githubPresetRequests, [{
+    name: "github-awesome-copilot",
+    repository: "https://github.com/github/awesome-copilot",
+    mode: "basic",
+    entries: [],
+  }]);
   let cancelledPresetAdded = false;
   const cancelledPreset = await driveRefresh(["m", "p", "\x1b", "q"], refresh, {
     addCatalog: async () => {
@@ -1208,6 +1258,31 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   });
   assert.equal(refreshedInManager.result, true);
   assert.deepEqual(managerRefreshed, ["Test"]);
+  const freshnessChecks = [];
+  const targetedFreshness = await driveRefresh(
+    ["m", "r", "\r", "\x1b[B", "\r", "\r", "q"],
+    async (name) => ({
+      catalogs: [
+        { name: "Alpha", repository: "https://github.com/example/alpha" },
+        { name: "Beta", repository: "https://github.com/example/beta" },
+      ],
+      resources: [],
+      refreshed: [{ name, count: 1 }],
+      failures: [],
+    }),
+    {
+      userCatalogs: [
+        { name: "Alpha", repository: "https://github.com/example/alpha" },
+        { name: "Beta", repository: "https://github.com/example/beta" },
+      ],
+      checkCatalogFreshness: async (names) => {
+        freshnessChecks.push(names);
+        return (names || []).map((name) => ({ name, status: "current" }));
+      },
+    },
+  );
+  assert.equal(targetedFreshness.result, true);
+  assert.deepEqual(freshnessChecks, [["Alpha", "Beta"], ["Beta"]]);
   const initialDashboard = await driveRefresh(["q"], refresh);
   assert.equal(initialDashboard.result, true);
   assert.doesNotMatch(initialDashboard.renderedOutput, /A add catalog|Delete remove selected|R refresh/);

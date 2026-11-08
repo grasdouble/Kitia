@@ -30,6 +30,10 @@ function sourceMetadata(file) {
   }
 }
 
+function normalizeResourceId(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 function safeRepositoryPath(checkout, sourcePath) {
   if (typeof sourcePath !== "string" || !sourcePath || sourcePath.startsWith("/") ||
       sourcePath.includes("\\") || sourcePath.split("/").some((part) => !part || part === "." || part === "..")) {
@@ -196,7 +200,8 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: "
   }
   const resources = [];
   for (const resource of resourceDirectories) {
-    const { id, kind, sourcePath, file } = resource;
+    const { kind, sourcePath, file } = resource;
+    const id = kind === "skill" ? resource.id : normalizeResourceId(resource.id);
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || id.length > 64 || id.includes("--")) {
       throw new CatalogError(`Invalid resource id in ${name}: ${id}`);
     }
@@ -207,9 +212,14 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: "
       if (kind !== "instruction") throw error;
       metadata = new Map();
     }
-    if (kind !== "instruction" && (metadata.get("name") !== id ||
-        typeof metadata.get("description") !== "string" || !metadata.get("description").trim())) {
-      throw new CatalogError(`${file} must define matching name and a non-empty description`);
+    if (kind !== "instruction" && (
+      typeof metadata.get("name") !== "string" || !metadata.get("name").trim() ||
+      (kind === "skill" && (
+        normalizeResourceId(metadata.get("name")) !== id ||
+        typeof metadata.get("description") !== "string" || !metadata.get("description").trim()
+      ))
+    )) {
+      throw new CatalogError(`${file} must define a non-empty name${kind === "skill" ? " matching its id and a non-empty description" : ""}`);
     }
     const instructionKey = ["apply_to", "applyTo", "paths"].find((key) => metadata.has(key));
     const instructionMetadata = instructionKey === undefined ? undefined : metadata.get(instructionKey);
@@ -390,10 +400,14 @@ async function remoteHead(repository, run = execFileAsync) {
   return match[1].toLowerCase();
 }
 
-async function checkCatalogFreshness(run = execFileAsync) {
+async function checkCatalogFreshness(run = execFileAsync, names) {
   const sources = require("./config.js").loadUserSourceConfiguration();
+  const selected = names === undefined
+    ? sources
+    : sources.filter((source) => names.some((name) =>
+      catalogNameKey(name) === catalogNameKey(source.name)));
   const directory = userCatalogIndexDirectory();
-  return Promise.all(sources.map(async (source) => {
+  return Promise.all(selected.map(async (source) => {
     try {
       const indexFile = path.join(directory, `${source.name}.json`);
       const stat = fs.lstatSync(indexFile);

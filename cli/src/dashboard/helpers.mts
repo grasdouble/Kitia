@@ -109,6 +109,38 @@ export function filterCatalogResources(
   });
 }
 
+export function mergeRefreshedCatalogResources(
+  current: CatalogResource[],
+  incoming: CatalogResource[],
+  refreshedCatalogs: string[],
+): CatalogResource[] {
+  const refreshedNames = new Set(refreshedCatalogs.map((name) => name.toLowerCase()));
+  if (!refreshedNames.size) return current;
+  const replacements = new Map<string, CatalogResource[]>();
+  for (const resource of incoming) {
+    const name = resource.catalog?.toLowerCase();
+    if (!name || !refreshedNames.has(name)) continue;
+    const resources = replacements.get(name) || [];
+    resources.push(resource);
+    replacements.set(name, resources);
+  }
+  const inserted = new Set<string>();
+  const merged: CatalogResource[] = [];
+  for (const resource of current) {
+    const name = resource.catalog?.toLowerCase();
+    if (!name || !refreshedNames.has(name)) {
+      merged.push(resource);
+    } else if (!inserted.has(name)) {
+      merged.push(...(replacements.get(name) || []));
+      inserted.add(name);
+    }
+  }
+  for (const name of refreshedNames) {
+    if (!inserted.has(name)) merged.push(...(replacements.get(name) || []));
+  }
+  return merged;
+}
+
 type CatalogFilterProperty = "catalog" | "kind";
 
 function catalogFilterValue(
