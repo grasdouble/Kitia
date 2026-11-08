@@ -9,6 +9,14 @@ permissions:
   contents: read
 
 jobs:
+  workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grasdouble/Lufa-CICD/actions/lint-workflows@ec9d4b984b5bc24c062c57b50d754f6edc383c11 # lint-workflows-v1
   checks:
     strategy:
       fail-fast: false
@@ -31,6 +39,8 @@ jobs:
       - run: pnpm run cli:test:package-smoke
       - run: pnpm run web:build
 
+  # Kitia's versioned package is the repository root; check-changesets skips root packages.
+  # Keep the CLI's status check so root package changes and empty changesets remain covered.
   changeset-status:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
