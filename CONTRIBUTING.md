@@ -38,7 +38,7 @@ pnpm run changeset
 
 Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the pinned Changesets release action opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance, pushes the matching version tag, and creates a GitHub Release. Use pnpm for repository dependencies and scripts; publishing remains through npm.
 
-For repository-only changes such as CI, documentation, or tests that do not need a package release, run `pnpm exec changeset add --empty` (optionally with `--message "..."`). The PR check requires a changeset when package files change; an empty changeset records that no package version bump is intended.
+For repository-only changes such as CI, documentation, or tests that do not need a package release, run `pnpm exec changeset add --empty` (optionally with `--message "..."`). The PR check uses Lufa's `check-changesets` action in `simple` mode for Kitia's root package: a non-empty Changeset must name the package, while an empty Changeset explicitly marks the PR as no-bump and covers its changed package files. The job fails when package changes have no covering Changeset.
 
 ### First npm publication
 

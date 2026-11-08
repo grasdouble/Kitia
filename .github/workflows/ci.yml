@@ -39,8 +39,7 @@ jobs:
       - run: pnpm run cli:test:package-smoke
       - run: pnpm run web:build
 
-  # Kitia's versioned package is the repository root; check-changesets skips root packages.
-  # Keep the CLI's status check so root package changes and empty changesets remain covered.
+  # Simple mode checks Kitia's root package and honors empty no-bump Changesets.
   changeset-status:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -55,5 +54,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec changeset status --since="origin/${{ github.base_ref }}"
+      - name: Check Changesets coverage
+        id: changesets
+        uses: grasdouble/Lufa-CICD/actions/check-changesets@c9cf5bde998d803cf7a42e931710257b6cbac03b # check-changesets-v1.1.1
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          mode: simple
+      - name: Fail when Changesets are missing
+        if: steps.changesets.outputs.missing-count > 0
+        run: exit 1
