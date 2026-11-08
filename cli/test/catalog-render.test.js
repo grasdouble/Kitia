@@ -104,6 +104,7 @@ test("InventoryScreen wraps complete locations and descriptions at narrow widths
   const { InventoryScreen } = await import("../dist/dashboard/screens.mjs");
   const description = "A long inventory description that must remain complete when shown in a narrow terminal.";
   const location = "/workspace/projects/a-resource-folder/with-an-extraordinarily-long-unbroken-path-segment";
+  const sourceRef = "0123456789abcdef0123456789abcdef01234567";
   for (const columns of [56, 120]) {
     const tree = InventoryScreen({
       resources: [{
@@ -116,6 +117,7 @@ test("InventoryScreen wraps complete locations and descriptions at narrow widths
         paths: [location],
         source_repository: "example/long-repository-name",
         description,
+        source_ref: sourceRef,
       }],
       errors: [],
       query: "",
@@ -135,5 +137,6 @@ test("InventoryScreen wraps complete locations and descriptions at narrow widths
     assert.ok(text.replace(/\s/g, "").includes(description.replace(/\s/g, "")));
     assert.ok(text.includes(location));
     assert.ok(text.includes("https://github.com/example/long-repository-name"));
+    assert.ok(text.includes(sourceRef));
   }
 });

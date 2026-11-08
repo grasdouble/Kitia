@@ -333,17 +333,14 @@ export function InventoryScreen({
       ? selected.issues.map(issueLine).join(" · ")
       : "Healthy · no recorded issues";
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
-  const detailVersion = selected?.version || selected?.source_ref;
-  const displayVersion = typeof detailVersion === "string" && detailVersion
-    ? detailVersion.slice(0, 7)
-    : "-";
+  const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
   const detailRows = selected
     ? [
       { label: "CATALOG", value: inventoryLabels.get(selected) || "-", maxLines: 1 },
       { label: "SCOPE", value: selected.scope?.toUpperCase() || "-", maxLines: 1 },
       { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
       { label: "", value: issues, maxLines: 2 },
-      { label: "VERSION", value: displayVersion, maxLines: 1 },
+      { label: "VERSION", value: displayVersion, maxLines: Infinity },
       { label: "LOCATIONS", value: locations, maxLines: Infinity },
       { label: "DESCRIPTION", value: description, maxLines: Infinity },
       ...(actionMessage
