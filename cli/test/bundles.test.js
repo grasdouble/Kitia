@@ -45,6 +45,7 @@ function createSource(root, repository) {
   execFileSync("git", ["init", "--quiet", root]);
   execFileSync("git", ["-C", root, "remote", "add", "origin", repository]);
   execFileSync("git", ["-C", root, "add", "."]);
+  execFileSync("git", ["-C", root, "update-index", "--chmod=+x", "skills/demo-skill/helper.sh"]);
   execFileSync("git", [
     "-C", root, "-c", "user.name=Bundle fixtures", "-c", "user.email=fixtures@example.invalid",
     "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Add bundle fixture resources",

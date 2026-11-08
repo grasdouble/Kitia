@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Patch Changes
+
+- Make source-audit and signed-bundle fixtures deterministic on Windows by using a local Git repository and explicitly recording executable mode in the fixture index.
+
 ## 1.1.0
 
 ### Minor Changes
