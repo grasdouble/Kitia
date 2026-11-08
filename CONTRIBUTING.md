@@ -36,7 +36,7 @@ Use [Changesets](https://github.com/changesets/changesets) for user-facing chang
 pnpm run changeset
 ```
 
-Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the release workflow opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance. The release wrapper uses Changesets' structured publish plan and JSONL tag report to let the action push the actual version tag and create its GitHub Release. Use pnpm for repository dependencies and scripts; publishing remains through npm.
+Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the pinned Changesets release action opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance, pushes the matching version tag, and creates a GitHub Release. Use pnpm for repository dependencies and scripts; publishing remains through npm.
 
 ### First npm publication
 
