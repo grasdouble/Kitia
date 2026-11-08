@@ -1030,9 +1030,20 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       removeCatalog: async () => ({ catalogs: [{ name: "Test", repository }], resources: [] }),
       ...extraActions,
     });
-    for (const key of keys) {
+    const waitForOutput = async (pattern) => {
+      const deadline = Date.now() + 5_000;
+      while (!pattern.test(renderedOutput)) {
+        if (Date.now() >= deadline) {
+          throw new Error(`Dashboard did not render ${pattern}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+    for (const entry of keys) {
+      const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
       input.write(key);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (expectedOutput) await waitForOutput(expectedOutput);
+      else await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const result = await done;
     input.destroy();
@@ -1136,7 +1147,17 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       { name: "Catalog Two", repository: "https://github.com/example/two", mode: "basic", entries: [] },
     ],
   });
-  const transferManager = await driveRefresh(["m", "i", pastedConfiguration, "\x13", "\x1b[B", "\r", "\x13", "\r", "q"], refresh, {
+  const transferManager = await driveRefresh([
+    ["m", /USER CATALOGS/],
+    ["i", /IMPORT CATALOGS/],
+    pastedConfiguration,
+    ["\x13", /SPACE\/ENTER TOGGLE/],
+    "\x1b[B",
+    "\r",
+    ["\x13", /Added \(1\): Imported/],
+    "\r",
+    "q",
+  ], refresh, {
     transferCatalogs: async (action, content) => {
       transfers.push({ action, content });
       return {
