@@ -2,4 +2,7 @@
 "@grasdouble/kitia": patch
 ---
 
-Add built-in GitHub Awesome Copilot and Anthropics presets, with one shared preset registry for dashboard and CLI commands. Support Awesome Copilot's human-readable agent names and filenames, and scope resource updates and freshness checks to the catalog being refreshed.
+Add ready-to-use catalogs for Anthropic and GitHub Awesome Copilot.
+- Discover skills, agents, and instructions from the dashboard or CLI.
+- Support Copilot agent display names and filenames.
+- Keep refreshes scoped to the selected catalog.

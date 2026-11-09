@@ -2,4 +2,5 @@
 "@grasdouble/kitia": patch
 ---
 
-Add Google Analytics to the website.
+Track key interactions on the Kitia website.
+- Measure site visits and navigation actions with Google Analytics.
