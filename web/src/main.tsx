@@ -83,6 +83,7 @@ function App() {
       <Brand footer />
       <p>Interactive dashboard with CLI automation.</p>
       <div className="footer-links">
+        <a href="https://grasdouble.fr" aria-label="Visit grasdouble.fr" data-ga-event="footer_website">grasdouble.fr</a>
         <a href={repo} aria-label="Visit the Kitia GitHub repository" data-ga-event="footer_repository">Repository</a>
         <a href={`${repo}#readme`} aria-label="Read the Kitia README on GitHub" data-ga-event="footer_readme">README</a>
         <a href={contract} aria-label="Read the Kitia CLI contract" data-ga-event="footer_cli_contract">CLI contract</a>
