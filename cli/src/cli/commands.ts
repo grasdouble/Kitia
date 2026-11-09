@@ -321,7 +321,7 @@ async function executeCommand(options, report) {
         : "No tracked source resources to update.", "RESOURCE_NOT_FOUND");
     }
     const sourceToUpdateResources = sourceToUpdate.map(({ resource }) => resource);
-    validateSourceUpdates(sourceToUpdate, options);
+    validateSourceUpdates(sourceToUpdate, { ...options, target });
     if (options.offline && !options.dryRun) {
       const stale = sourceToUpdate.filter(({ resource, installations }) => installations.some((installation) =>
         installation.missing || installation.modified ||

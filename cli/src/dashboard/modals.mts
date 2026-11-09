@@ -11,6 +11,8 @@ export interface PendingDashboardAction {
   resource: CatalogResource;
   scope?: string;
   tool?: string;
+  forceRetry?: boolean;
+  conflict?: { category: string; paths: string[] };
 }
 
 const h = React.createElement;
@@ -48,9 +50,15 @@ function selectableOption(label, selected) {
 function modalFrame(title, content, columns, accent, maxWidth = 64) {
   const width = Math.max(20, Math.min(maxWidth, columns - 4));
   const innerWidth = width - 4;
+  const lastContent = content.at(-1);
+  const shortcutHint = typeof lastContent === "string" &&
+    /ENTER|ESC|CHOOSE|SELECT|FIELD|BACK|NEXT|CANCEL|CLOSE|QUIT|CONFIRM|TOGGLE|CTRL|SPACE|Y\/N/i.test(lastContent)
+    ? lastContent
+    : undefined;
+  const modalContent = shortcutHint ? content.slice(0, -1) : content;
   const label = ` ${fitText(title, width - 5)} `;
   const top = `┌─${label}${"─".repeat(Math.max(0, width - label.length - 3))}┐`;
-  const body = content.flatMap((entry) => {
+  const body = modalContent.flatMap((entry) => {
     const row = typeof entry === "string" ? { text: entry } : entry;
     const wrapped = wrapText(row.text, innerWidth);
     return wrapped.map((line, index) => ({
@@ -67,6 +75,12 @@ function modalFrame(title, content, columns, accent, maxWidth = 64) {
       dimColor: row.dimColor,
     }));
   });
+  const shortcutLabel = " SHORTCUTS ";
+  const shortcutTop = `┌─${shortcutLabel}${"─".repeat(Math.max(0, width - shortcutLabel.length - 3))}┐`;
+  const shortcutRows = shortcutHint
+    ? shortcutHint.split(/ · | \| /).flatMap((hint) =>
+      wrapText(hint, innerWidth).map((line) => `│ ${fitColumn(line, innerWidth)} │`))
+    : [];
   return {
     width,
     lines: [
@@ -74,6 +88,13 @@ function modalFrame(title, content, columns, accent, maxWidth = 64) {
       ...body,
       { text: `└${"─".repeat(width - 2)}┘`, color: accent, bold: true },
     ],
+    shortcuts: shortcutHint
+      ? [
+        { text: shortcutTop, color: accent, bold: true },
+        ...shortcutRows.map((text) => ({ text, color: MODAL_FOREGROUND })),
+        { text: `└${"─".repeat(width - 2)}┘`, color: accent, bold: true },
+      ]
+      : [],
   };
 }
 
@@ -121,8 +142,8 @@ export function optionsModal({
     choiceGroup("SCOPE", scopeChoices, scopeChoices.indexOf(scope), focus === 0),
     choiceGroup("CLIENT", toolChoices, toolChoices.indexOf(tool), focus === 1),
     scopeError || alreadyInstalled
-      ? "↑↓ FIELD · ←→ CHOOSE · ESC BACK"
-      : "↑↓ FIELD · ←→ CHOOSE · ENTER REVIEW · ESC BACK",
+      ? "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ESC BACK"
+      : "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REVIEW · ESC BACK",
   ], columns, "cyan");
 }
 
@@ -143,13 +164,31 @@ export function confirmationModal({
       : confirmation.action === "remove-unmanaged"
         ? permanentRemoval ? "Remove permanently" : "Remove"
         : "Uninstall";
-  const question = confirmation.action === "install"
-    ? `Install ${confirmation.resource.kind}:${confirmation.resource.id}?`
-    : confirmation.action === "remove-unmanaged"
-      ? permanentRemoval
-        ? `Permanently remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
-        : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
-      : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
+  const conflict = confirmation.conflict;
+  const conflictCategory = conflict?.category === "tracked-modification"
+    ? "Tracked files were locally modified."
+    : conflict?.category === "untracked-skill-content"
+      ? "Untracked content is present in the skill directory."
+      : "A local conflict was detected.";
+  const conflictPaths = conflict?.paths || [];
+  const forceImpact = conflict?.category === "tracked-modification"
+    ? "Forcing will overwrite the locally modified tracked files listed above."
+    : conflict?.category === "untracked-skill-content"
+      ? "Forcing may replace or remove untracked content in this skill directory."
+      : "Forcing will overwrite the conflicting local destination files listed above.";
+  const targetContext = [
+    confirmation.resource.catalog && `catalog ${confirmation.resource.catalog}`,
+    confirmation.resource.scope && `scope ${confirmation.resource.scope}`,
+  ].filter(Boolean).join(" · ");
+  const question = confirmation.forceRetry
+    ? `Conflict detected while updating ${confirmation.resource.kind}:${confirmation.resource.id}${targetContext ? ` (${targetContext})` : ""}. Force update and retry?`
+    : confirmation.action === "install"
+      ? `Install ${confirmation.resource.kind}:${confirmation.resource.id}?`
+      : confirmation.action === "remove-unmanaged"
+        ? permanentRemoval
+          ? `Permanently remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
+          : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
+        : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
   const removalWarning = permanentRemoval
     ? `This artifact is not managed by a Kitia catalog. This action is irreversible; ${
       confirmation.resource.kind === "skill" ? "all data in its skill directory" : "the artifact file"
@@ -157,22 +196,37 @@ export function confirmationModal({
     : confirmation.resource.kind === "skill"
       ? "Kitia will remove the entire detected skill folder and all of its contents."
       : "Kitia will remove the detected artifact file.";
+  const updateSafeguard = confirmation.resource.kind === "skill" &&
+      confirmation.resource.source_repository && !confirmation.resource.bundle_id
+    ? "Kitia passes gh skill install --force to replace the installed copy, but checks local conflicts first and asks before proceeding if any are found."
+    : confirmation.resource.kind === "skill" && confirmation.resource.bundle_id
+      ? "This skill is updated from an imported signed offline bundle; no gh command or gh --force is used. Kitia checks local conflicts and asks separately before Kitia force can overwrite them."
+      : "This resource update does not use gh --force. Kitia checks local conflicts and asks separately before Kitia force can overwrite them.";
   return modalFrame(
-    permanentRemoval ? "CONFIRM PERMANENT REMOVAL" : `CONFIRM ${actionLabel.toUpperCase()}`,
+    confirmation.forceRetry ? "LOCAL CONFLICT" : permanentRemoval ? "CONFIRM PERMANENT REMOVAL" : `CONFIRM ${actionLabel.toUpperCase()}`,
     [
       question,
-      ...(confirmation.action === "install"
-        ? [`Destination: ${confirmation.scope} · Client: ${confirmation.tool}`,
-          "Normal CLI safeguards apply; --force is not used."]
-        : confirmation.action === "remove-unmanaged"
-          ? [removalWarning]
-          : confirmation.action === "uninstall" && confirmation.resource.kind === "skill"
-            ? ["Kitia removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
-            : ["The CLI safety checks apply; locally modified tracked files are protected."]),
+      ...(confirmation.forceRetry
+        ? [
+          conflictCategory,
+          ...conflictPaths.slice(0, 12).map((item) => `• ${item}`),
+          ...(conflictPaths.length > 12 ? [`…and ${conflictPaths.length - 12} more path(s)`] : []),
+          forceImpact,
+        ]
+        : confirmation.action === "install"
+          ? [`Destination: ${confirmation.scope} · Client: ${confirmation.tool}`,
+            "Normal CLI safeguards apply; --force is not used."]
+          : confirmation.action === "update"
+            ? [updateSafeguard]
+            : confirmation.action === "remove-unmanaged"
+              ? [removalWarning]
+            : confirmation.action === "uninstall" && confirmation.resource.kind === "skill"
+              ? ["Kitia removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
+              : ["The CLI safety checks apply; locally modified tracked files are protected."]),
       "",
       choiceGroup("", [
         { label: "CANCEL" },
-        { label: actionLabel, color: confirmation.action !== "install" ? "redBright" : "cyan" },
+        { label: confirmation.forceRetry ? "FORCE AND RETRY" : actionLabel, color: confirmation.action !== "install" ? "redBright" : "cyan" },
       ], selectedButton),
       "←/→ CHOOSE · ENTER CONFIRM · Y/N SHORTCUTS",
     ],
@@ -180,6 +234,29 @@ export function confirmationModal({
     "yellow",
   );
 }
+export function actionFailureModal({
+  action,
+  message,
+  columns,
+}: {
+  action: string;
+  message: string;
+  columns: number;
+}) {
+  const outputLines = message.split(/\r?\n/).filter(Boolean);
+  return modalFrame(
+    `${action.toUpperCase()} FAILED`,
+    [
+      { text: "Kitia could not complete this action.", color: "redBright", bold: true },
+      ...(outputLines.length ? outputLines : ["No error details were provided."]),
+      "ENTER / ESC CLOSE",
+    ],
+    columns,
+    "redBright",
+    88,
+  );
+}
+
 
 
 export function inventoryMigrationModal({ scopes, columns }: { scopes: string[]; columns: number }) {
@@ -556,7 +633,8 @@ export function ModalOverlay({ modal, columns, rows }: {
   columns: number;
   rows: number;
 }) {
-  const top = Math.max(0, Math.floor((rows - modal.lines.length) / 2));
+  const modalHeight = modal.lines.length + (modal.shortcuts.length ? modal.shortcuts.length + 1 : 0);
+  const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
   return h(Box, {
     position: "absolute",
@@ -564,8 +642,18 @@ export function ModalOverlay({ modal, columns, rows }: {
     left,
     width: modal.width,
     flexDirection: "column",
-  }, ...modal.lines.map((line, index) => h(ModalLine, {
+  },
+  ...modal.lines.map((line, index) => h(ModalLine, {
     key: `modal-line-${index}`,
     line,
-  })));
+  })),
+  ...(modal.shortcuts.length
+    ? [
+      h(Text, { key: "modal-shortcuts-gap", backgroundColor: MODAL_BACKGROUND }, " ".repeat(modal.width)),
+      ...modal.shortcuts.map((line, index) => h(ModalLine, {
+        key: `modal-shortcut-${index}`,
+        line,
+      })),
+    ]
+    : []));
 }

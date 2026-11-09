@@ -277,8 +277,10 @@ export function wrapText(value: unknown, width: number, maxLines = Infinity): st
         lines.push(line);
         line = "";
       }
-      lines.push(word.slice(0, width));
-      word = word.slice(width);
+      const slash = word.lastIndexOf("/", width - 1);
+      const splitAt = slash > 0 ? slash + 1 : width;
+      lines.push(word.slice(0, splitAt));
+      word = word.slice(splitAt);
     }
     if (line && line.length + word.length + 1 > width) {
       lines.push(line);

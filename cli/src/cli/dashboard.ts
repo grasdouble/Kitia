@@ -4,11 +4,19 @@ import type { CatalogResource } from "../catalog/entries.js";
 import type { CliReport } from "./report.js";
 import type { CliOptions } from "./arguments.js";
 import type { ScanError } from "../catalog/lifecycle.js";
+export interface DashboardActionFailure {
+  code: string;
+  category?: string;
+  paths?: string[];
+  recoverable?: boolean;
+  userMessage: string;
+}
 export interface DashboardActionResult {
   code: number;
   messages: string[];
   resources: CatalogResource[];
   errors: ScanError[];
+  failure?: DashboardActionFailure;
 }
 
 const fs = require("node:fs");
@@ -32,7 +40,7 @@ function createDashboardActionHandler(
       sourceResources: CatalogResource[];
       warnings?: ScanError[];
     },
-    installOptions: CliOptions = {},
+    installOptions: CliOptions & { force?: boolean } = {},
   ): Promise<DashboardActionResult> {
     const removingUnmanaged = action === "remove-unmanaged";
     if (removingUnmanaged && resource.managed !== false) {
@@ -51,6 +59,7 @@ function createDashboardActionHandler(
         if (scope === "user") args.push("--scope", "user");
         else args.push("--target", dashboardOptions.target);
         if (action === "install") args.push("--tool", installOptions.tool || "copilot");
+        if (action === "update" && installOptions.force) args.push("--force");
         const parsed = parseArguments(args);
         parsed.nonInteractive = true;
         parsed.offline = dashboardOptions.offline;

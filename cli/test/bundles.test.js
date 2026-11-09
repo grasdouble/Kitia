@@ -361,6 +361,10 @@ test("real CLI exports a signed pinned bundle and installs skill, agent, and ins
   assert.equal(fs.existsSync(path.join(target, ".claude/rules/checklist.md")), true);
   const installedState = require("../dist/catalog/inventory/index.js").readInstallState(target);
   assert.ok(installedState.sources.Team.skills["demo-skill"].files[".agents/skills/demo-skill/helper.sh"]);
+  const extraSkillFile = path.join(target, ".agents/skills/demo-skill/local-note.txt");
+  fs.writeFileSync(extraSkillFile, "preserve bundle-adjacent local content\n");
+  cli("update", "--target", target, "--offline");
+  assert.equal(fs.readFileSync(extraSkillFile, "utf8"), "preserve bundle-adjacent local content\n");
 
   const blockedTarget = path.join(temporary, "blocked-target");
   fs.mkdirSync(blockedTarget);

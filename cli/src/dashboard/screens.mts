@@ -12,6 +12,8 @@ import {
 import type { InventoryCatalogConfiguration } from "./helpers.mjs";
 
 const h = React.createElement;
+const OSC8_OPEN = "\u001b]8;;";
+const OSC8_CLOSE = "\u001b]8;;\u001b\\";
 
 const kitiaWordmark = [
   "█  ▄▀  ▀█▀  ▀▀█▀▀  ▀█▀  ▄▀▀▀▄",
@@ -93,6 +95,8 @@ function Panel({
   width,
   marginTop = 0,
   marginLeft = 0,
+  flexGrow = 0,
+  flexShrink = 0,
 }: {
   title: string;
   children?: ReactNode;
@@ -100,10 +104,13 @@ function Panel({
   width?: number;
   marginTop?: number;
   marginLeft?: number;
+  flexGrow?: number;
+  flexShrink?: number;
 }) {
   return h(Box, {
     flexDirection: "column",
-    flexShrink: 0,
+    flexShrink,
+    flexGrow,
     borderStyle: "single",
     borderColor: color,
     paddingX: 1,
@@ -119,19 +126,68 @@ function DetailsPanel({
   width,
   marginTop = 1,
   marginLeft = 0,
+  flexGrow = 0,
+  flexShrink = 0,
 }: {
   title: string;
   children?: ReactNode;
   width?: number;
   marginTop?: number;
   marginLeft?: number;
+  flexGrow?: number;
+  flexShrink?: number;
 }) {
-  return h(Panel, { title, children, color: "blue", width, marginTop, marginLeft });
+  return h(Panel, {
+    title, children, color: "blue", width, marginTop, marginLeft, flexGrow, flexShrink,
+  });
+
+}
+function wrappedShortcutLines(lines: string[], width?: number) {
+  const contentWidth = Math.max(1, (width || 80) - 4);
+  return lines.flatMap((line) => {
+    const wrapped = [];
+    let current = "";
+    for (const shortcut of line.split(" · ")) {
+      const next = current ? `${current} · ${shortcut}` : shortcut;
+      if (current && next.length > contentWidth) {
+        wrapped.push(current);
+        current = shortcut;
+      } else {
+        current = next;
+      }
+    }
+    if (current) wrapped.push(current);
+    return wrapped.flatMap((row) => wrapText(row, contentWidth));
+  });
+}
+
+function ShortcutsPanel({ lines, width, marginTop = 0 }: {
+  lines: string[];
+  width?: number;
+  marginTop?: number;
+}) {
+  return h(Panel, { title: "SHORTCUTS", width, marginTop },
+    ...wrappedShortcutLines(lines, width).map((line) => shortcutHint(line, Math.max(1, (width || 80) - 4))));
 }
 
 function detailValue(key: string, value: unknown, width: number, maxLines = 1, color = "gray") {
   return wrapText(value, width, maxLines).map((line, index) =>
     h(Text, { key: `${key}-value-${index}`, color }, fitText(line, width)));
+}
+function detailLocations(key: string, locations: { text: string; href?: string }[], width: number) {
+  if (!locations.length) return detailValue(key, "-", width, Infinity);
+  const lines = [];
+  for (const [locationIndex, location] of locations.entries()) {
+    if (location.href) {
+      for (const [lineIndex, line] of wrapText(location.text, width).entries()) {
+        lines.push(h(Text, { key: `${key}-${locationIndex}-${lineIndex}`, color: "gray" },
+          `${OSC8_OPEN}${location.href}\u001b\\${line}${OSC8_CLOSE}`));
+      }
+    } else {
+      lines.push(...detailValue(`${key}-${locationIndex}`, location.text, width, Infinity));
+    }
+  }
+  return lines;
 }
 
 function detailField(
@@ -235,6 +291,7 @@ export function InventoryScreen({
   showDetails,
   columns,
   rows,
+  modalActive = false,
   userCatalogs = [],
   inventoryLabels: suppliedInventoryLabels,
   tourStep,
@@ -253,6 +310,7 @@ export function InventoryScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
+  modalActive?: boolean;
   userCatalogs?: InventoryCatalogConfiguration[];
   inventoryLabels?: Map<CatalogResource, string>;
   tourStep?: number | null;
@@ -287,7 +345,7 @@ export function InventoryScreen({
     { title: "MANAGED", value: managedResources.length, note: `${current} current · ${unmanaged} unmanaged`, color: "green" },
     { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} warning(s)`, color: needsReview ? "yellow" : "green" },
   ];
-  const panels = h(Box, {
+  const summaryPanels = h(Box, {
     flexDirection: sideBySide ? "row" : "column",
     alignItems: "stretch",
   }, ...summaryCards.map((card, index) => h(Panel, {
@@ -323,10 +381,13 @@ export function InventoryScreen({
   const sourceLocation = selected?.source_repository
     ? `https://github.com/${selected.source_repository}`
     : "";
-  const locations = [
-    ...(selected?.managed === false && Array.isArray(selected.paths) ? selected.paths : []),
-    ...(sourceLocation ? [sourceLocation] : []),
-  ].join(" · ") || "-";
+  const locationValues = [
+    ...(selected?.managed === false && Array.isArray(selected.paths)
+      ? selected.paths.map((text) => ({ text }))
+      : []),
+    ...(sourceLocation ? [{ text: sourceLocation, href: sourceLocation }] : []),
+  ];
+  const locations = locationValues.map(({ text }) => text).join(" · ") || "-";
   const issues = selected?.managed === false
     ? "Not managed by Kitia; removal requires two confirmations."
     : selected?.issues?.length
@@ -334,17 +395,22 @@ export function InventoryScreen({
       : "Healthy · no recorded issues";
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
   const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
+  const compactDetails = rows < 40;
   const detailRows = selected
     ? [
-      { label: "CATALOG", value: inventoryLabels.get(selected) || "-", maxLines: 1 },
-      { label: "SCOPE", value: selected.scope?.toUpperCase() || "-", maxLines: 1 },
+      ...(!compactDetails ? [
+        { label: "CATALOG", value: inventoryLabels.get(selected) || "-", maxLines: 1 },
+        { label: "SCOPE", value: selected.scope?.toUpperCase() || "-", maxLines: 1 },
+      ] : []),
       { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
-      { label: "", value: issues, maxLines: 2 },
-      { label: "VERSION", value: displayVersion, maxLines: Infinity },
-      { label: "LOCATIONS", value: locations, maxLines: Infinity },
-      { label: "DESCRIPTION", value: description, maxLines: Infinity },
+      { label: "", value: issues, maxLines: Infinity },
+      ...(!compactDetails ? [
+        { label: "VERSION", value: displayVersion, maxLines: Infinity },
+        { label: "LOCATIONS", value: locations, maxLines: Infinity },
+        { label: "DESCRIPTION", value: description, maxLines: Infinity },
+      ] : []),
       ...(actionMessage
-        ? [{ label: "", value: fitText(actionMessage, detailsContentWidth), maxLines: 1 }]
+        ? [{ label: "", value: actionMessage, maxLines: Infinity }]
         : []),
     ]
     : [{
@@ -355,22 +421,55 @@ export function InventoryScreen({
       maxLines: 1,
     }];
   const selectionContent = detailRows.flatMap((row, index) =>
-    row.label
-      ? detailField(
-        `inventory-${index}`,
-        row.label,
-        row.value,
-        detailsContentWidth,
-        row.maxLines,
-        row.label === "STATUS" ? colorForStatus(selectedStatus) : "gray",
-      )
-      : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
-  const summaryPanelRows = sideBySide ? 5 : 17;
+    row.label === "LOCATIONS"
+      ? [
+        h(Text, { key: "inventory-locations-label", color: "white", bold: true },
+          fitText(row.label, detailsContentWidth)),
+        ...detailLocations("inventory-locations", locationValues, detailsContentWidth),
+      ]
+      : row.label
+        ? detailField(
+          `inventory-${index}`,
+          row.label,
+          row.value,
+          detailsContentWidth,
+          row.maxLines,
+          row.label === "STATUS" ? colorForStatus(selectedStatus) : "gray",
+        )
+        : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
+  const shortcutLines = modalActive ? [] : filterMode
+    ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
+    : [
+      ...(catalogAvailable ? ["A install"] : []),
+      ...(canExecute && selected
+        ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
+        : []),
+      "M catalogs",
+      ["F filter", ...(resources.length ? ["C catalog", "K kind"] : [])].join(" · "),
+      "D details",
+      "↑↓ navigate · ? guide · Q quit",
+    ];
+  const inventoryShortcutWidth = inventorySideBySide ? inventoryDetailsWidth : columns - 2;
+  const fullSummaryPanelRows = sideBySide ? 5 : 17;
   const warningPanelRows = errors.length ? errors.length + 4 : 0;
-  const detailsVerticalOverhead = showDetails && !inventorySideBySide ? selectionContent.length + 4 : 0;
+  const detailsPanelRows = showDetails ? selectionContent.length + 4 : 0;
+  const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, inventoryShortcutWidth).length + 4;
+  const detailsVerticalOverhead = inventorySideBySide
+    ? 0
+    : detailsPanelRows + shortcutsPanelRows;
+  const requiredRowsForSummary = 6 + fullSummaryPanelRows + warningPanelRows +
+    6 + detailsVerticalOverhead + 2;
+  const summaryCompactPanel = h(Panel, { title: "SUMMARY" },
+    h(Text, { dimColor: true }, fitText(
+      `RES ${resources.length} · MAN ${managedResources.length} · REVIEW ${needsReview}`,
+      contentWidth,
+    )));
+  const showFullSummaryPanels = rows >= requiredRowsForSummary;
+  const summaryPanelRows = showFullSummaryPanels ? fullSummaryPanelRows : 4;
+  const panels = showFullSummaryPanels ? summaryPanels : summaryCompactPanel;
   const viewport = Math.max(
     1,
-    rows - (6 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead + 1),
+    rows - (6 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
@@ -412,28 +511,34 @@ export function InventoryScreen({
   )),
   h(Text, { bold: true }, tableHeader),
   ...tableRows);
-  const selectionPanel = h(DetailsPanel, {
+  const selectionPanel = showDetails ? h(DetailsPanel, {
     title: selected ? `${selected.kind.toUpperCase()} - ${fitText(selected.id, Math.max(1, detailsContentWidth - selected.kind.length - 3))}` : "SELECTION",
     width: inventorySideBySide ? inventoryDetailsWidth : undefined,
+    marginTop: inventorySideBySide ? 0 : 1,
+    flexGrow: inventorySideBySide ? 1 : 0,
+    flexShrink: inventorySideBySide ? 1 : 0,
+  }, selectionContent) : null;
+  const shortcutsPanel = modalActive ? null : ShortcutsPanel({
+    lines: shortcutLines,
+    width: inventoryShortcutWidth,
     marginTop: 1,
+  });
+  const detailsColumn = h(Box, {
+    flexDirection: "column",
+    alignItems: "stretch",
+    width: inventorySideBySide ? inventoryDetailsWidth : undefined,
+    height: inventorySideBySide ? viewport + 6 : undefined,
+    marginTop: inventorySideBySide ? 1 : 0,
     marginLeft: inventorySideBySide ? 1 : 0,
-  }, selectionContent);
+  }, ...(showDetails
+    ? [selectionPanel, shortcutsPanel]
+    : inventorySideBySide ? [h(Box, { key: "shortcuts-spacer", flexGrow: 1 }), shortcutsPanel] : [shortcutsPanel]));
   const inventoryPanels = h(Box, {
     flexDirection: inventorySideBySide ? "row" : "column",
     alignItems: "stretch",
     width: columns - 2,
-  }, resourcePanel, showDetails ? selectionPanel : null);
-  const shortcuts = [
-    [
-      ...(catalogAvailable ? ["A install"] : []),
-      ...(canExecute
-        ? [selected?.managed === false ? "Delete remove" : "U update - Delete uninstall"]
-        : []),
-    ].filter(Boolean).join(" - "),
-    "M catalogs",
-    ["F filter", ...(resources.length ? ["C catalog", "K kind"] : []), "D details"].join(" - "),
-    "↑↓ navigate - ? guide - Q quit",
-  ].filter(Boolean).join("|");
+  }, resourcePanel, detailsColumn);
+
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
     h(DashboardHeader, {
@@ -445,11 +550,8 @@ export function InventoryScreen({
     panels,
     warnings,
     inventoryPanels,
-    shortcutHint(
-      filterMode ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR" : shortcuts,
-      columns - 2,
-    ),
   );
+
 }
 
 export function CatalogScreen({
@@ -466,6 +568,7 @@ export function CatalogScreen({
   showDetails,
   columns,
   rows,
+  modalActive = false,
   tourStep,
 }: {
   candidates: CatalogResource[];
@@ -481,6 +584,7 @@ export function CatalogScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
+  modalActive?: boolean;
   tourStep?: number | null;
 }) {
   const candidateLabels = inventoryCatalogLabels(candidates, catalogs);
@@ -518,10 +622,22 @@ export function CatalogScreen({
     ? detailRows.flatMap((row, index) =>
       detailField(`catalog-entry-${index}`, row.label, row.value, detailsContentWidth, row.maxLines))
     : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
-  const viewport = Math.max(
-    1,
-    rows - (12 + (showDetails && !detailsSideBySide ? entryContent.length + 4 : 0)),
-  );
+  const shortcutLines = modalActive ? [] : screenName === "INSTALL OPTIONS"
+    ? []
+    : filterMode
+      ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
+      : [
+        "C catalog · K kind · F filter",
+        "D details · ↑↓ navigate",
+        "ENTER select · ESC back",
+        "? guide · Q quit",
+      ];
+  const catalogShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
+  const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, catalogShortcutWidth).length + 4;
+  const stackedDetailsRows = !detailsSideBySide
+    ? (showDetails ? entryContent.length + 4 : 0) + shortcutsPanelRows
+    : 0;
+  const viewport = Math.max(1, rows - (12 + stackedDetailsRows));
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
   const pageRange = visible.length ? `${first + 1}-${first + page.length}` : "0-0";
@@ -575,14 +691,34 @@ export function CatalogScreen({
       )}`
       : "CATALOG ENTRY",
     width: detailsSideBySide ? detailsWidth : undefined,
-    marginTop: 1,
-    marginLeft: detailsSideBySide ? 1 : 0,
+    marginTop: detailsSideBySide ? 0 : 1,
+    flexGrow: detailsSideBySide ? 1 : 0,
+    flexShrink: detailsSideBySide ? 1 : 0,
   }, entryContent) : null;
+  const screenShortcuts = !modalActive && shortcutLines.length
+    ? ShortcutsPanel({
+      lines: shortcutLines,
+      width: catalogShortcutWidth,
+      marginTop: 1,
+    })
+    : null;
+  const detailColumn = h(Box, {
+    flexDirection: "column",
+    alignItems: "stretch",
+    width: detailsSideBySide ? detailsWidth : undefined,
+    height: detailsSideBySide ? viewport + 6 : undefined,
+    marginTop: detailsSideBySide ? 1 : 0,
+    marginLeft: detailsSideBySide ? 1 : 0,
+  }, ...(showDetails
+    ? [entryPanel, screenShortcuts]
+    : detailsSideBySide
+      ? [h(Box, { key: "catalog-shortcuts-spacer", flexGrow: 1 }), screenShortcuts]
+      : [screenShortcuts]));
   const catalogPanels = h(Box, {
     flexDirection: detailsSideBySide ? "row" : "column",
     alignItems: "stretch",
     width: columns - 2,
-  }, resourcePanel, entryPanel);
+  }, resourcePanel, detailColumn);
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
     h(DashboardHeader, {
@@ -592,12 +728,6 @@ export function CatalogScreen({
       columns,
     }),
     catalogPanels,
-    shortcutHint(
-      filterMode
-        ? "TYPE FILTER · ENTER APPLY · BACKSPACE EDIT · ESC CLEAR"
-        : "C catalog - K kind - F filter - D details | ↑↓ navigate - ENTER select - ? guide - ESC back",
-      columns - 2,
-    ),
   );
 }
 export type CatalogFreshnessStatus = "checking" | "current" | "outdated" | "unknown";
@@ -612,10 +742,12 @@ export function CatalogManagementScreen({
   canRemove,
   canEdit,
   canRefresh,
+  canTransfer,
   versionLabel,
   showDetails,
   columns,
   rows,
+  modalActive = false,
   tourStep,
 }: {
   catalogs: Array<{ name: string; repository: string }>;
@@ -627,10 +759,12 @@ export function CatalogManagementScreen({
   canRemove: boolean;
   canEdit: boolean;
   canRefresh: boolean;
+  canTransfer: boolean;
   versionLabel: string;
   showDetails: boolean;
   columns: number;
   rows: number;
+  modalActive?: boolean;
   tourStep?: number | null;
 }) {
   const activeIndex = Math.min(selectedIndex, Math.max(0, catalogs.length - 1));
@@ -675,39 +809,72 @@ export function CatalogManagementScreen({
     ["FRESHNESS", freshnessWidth],
   ]);
   const selectedCounts = selected ? catalogCounts(selected.name) : null;
+  const compactDetails = rows < 30;
   const detailsContent = selected
-    ? [
-      ...detailField("catalog-repository", "REPOSITORY", selected.repository, detailsContentWidth, 2),
-      ...detailField("catalog-resources", "RESOURCES", selectedCounts?.resources, detailsContentWidth),
-      ...detailField("catalog-installed", "INSTALLED", selectedCounts?.installed, detailsContentWidth),
-      ...detailField(
-        "catalog-freshness",
-        "FRESHNESS",
-        freshnessLabels[freshnessOf(selected.name)],
-        detailsContentWidth,
-        1,
-        freshnessColors[freshnessOf(selected.name)],
-      ),
-      ...detailField(
-        "catalog-refresh",
-        "REFRESH",
-        "Updates catalog metadata only; installed resources stay unchanged.",
-        detailsContentWidth,
-        2,
-      ),
-      ...detailField(
-        "catalog-update",
-        "UPDATE",
-        "Use U in the inventory to update an installed resource.",
-        detailsContentWidth,
-        2,
-      ),
-    ]
+    ? compactDetails
+      ? [
+        h(Text, { key: "catalog-repository", color: "gray" },
+          fitText(`REPOSITORY ${selected.repository}`, detailsContentWidth)),
+        h(Text, { key: "catalog-freshness", color: freshnessColors[freshnessOf(selected.name)] },
+          fitText(`FRESHNESS ${freshnessLabels[freshnessOf(selected.name)]}`, detailsContentWidth)),
+        ...wrapText(
+          "REFRESH Updates catalog metadata only; installed resources stay unchanged.",
+          detailsContentWidth,
+          2,
+        ).map((line, index) => h(Text, {
+          key: `catalog-refresh-${index}`,
+          color: "gray",
+        }, line)),
+      ]
+      : [
+        ...detailField("catalog-repository", "REPOSITORY", selected.repository, detailsContentWidth, 2),
+        ...detailField("catalog-resources", "RESOURCES", selectedCounts?.resources, detailsContentWidth),
+        ...detailField("catalog-installed", "INSTALLED", selectedCounts?.installed, detailsContentWidth),
+        ...detailField(
+          "catalog-freshness",
+          "FRESHNESS",
+          freshnessLabels[freshnessOf(selected.name)],
+          detailsContentWidth,
+          1,
+          freshnessColors[freshnessOf(selected.name)],
+        ),
+        ...detailField(
+          "catalog-refresh",
+          "REFRESH",
+          "Updates catalog metadata only; installed resources stay unchanged.",
+          detailsContentWidth,
+          2,
+        ),
+        ...detailField(
+          "catalog-update",
+          "UPDATE",
+          "Use U in the inventory to update an installed resource.",
+          detailsContentWidth,
+          2,
+        ),
+      ]
     : detailValue("catalog-empty", "Add a user catalog to browse and install external resources.", detailsContentWidth, 2);
-  const viewport = Math.max(
-    1,
-    rows - (detailsSideBySide || !showDetails ? 13 : detailsContent.length + 15),
-  );
+  const shortcuts = modalActive ? [] : [
+    [
+      ...(canAdd ? ["A add", "P presets"] : []),
+      ...(canRemove && selected ? ["Delete remove"] : []),
+    ].join(" · "),
+    [
+      ...(canEdit && selected ? ["E edit"] : []),
+      ...(canRefresh && selected ? ["R refresh"] : []),
+      ...(canTransfer ? ["I import / X export"] : []),
+    ].join(" · "),
+    "D details · ↑↓ nav · ? guide",
+    "ESC inventory · Q quit",
+  ].filter(Boolean);
+  const managementShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
+  const shortcutsPanelRows = modalActive
+    ? 0
+    : wrappedShortcutLines(shortcuts, managementShortcutWidth).length + 4;
+  const detailsPanelRows = showDetails ? detailsContent.length + 4 : 0;
+  const stackedOverhead = detailsSideBySide ? 0 : detailsPanelRows + shortcutsPanelRows;
+  const viewport = Math.max(1, rows - (11 + stackedOverhead));
+  const catalogPanelsWidth = detailsSideBySide ? listWidth + 1 + detailsWidth : columns - 2;
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
   const page = catalogs.slice(first, first + viewport);
   const rowsContent = page.map((catalog, index) => {
@@ -736,18 +903,6 @@ export function CatalogManagementScreen({
   while (rowsContent.length < viewport) {
     rowsContent.push(h(Text, { key: `empty-${rowsContent.length}` }, " "));
   }
-  const shortcuts = [
-    [
-      ...(canAdd ? ["A add"] : []),
-      ...(canAdd ? ["P presets"] : []),
-      ...(canRemove && selected ? ["Delete remove"] : []),
-      ...(canEdit && selected ? ["E edit"] : []),
-      ...(canRefresh && selected ? ["R refresh"] : []),
-    ].join(" - "),
-    "I import / X export",
-    "D details - ↑↓ navigate - ? guide - ESC inventory - Q quit",
-  ].filter(Boolean).join(" | ");
-
   const catalogPanel = h(Panel, {
     title: `CONNECTED CATALOGS ${catalogs.length}`,
     width: detailsSideBySide ? listWidth : undefined,
@@ -761,14 +916,34 @@ export function CatalogManagementScreen({
   const detailsPanel = showDetails ? h(DetailsPanel, {
     title: selected ? `CATALOG - ${selected.name}` : "CATALOG DETAILS",
     width: detailsSideBySide ? detailsWidth : undefined,
-    marginTop: 1,
-    marginLeft: detailsSideBySide ? 1 : 0,
+    marginTop: detailsSideBySide ? 0 : 1,
+    flexGrow: detailsSideBySide ? 1 : 0,
+    flexShrink: detailsSideBySide ? 1 : 0,
   }, detailsContent) : null;
+  const managementShortcutsPanel = !modalActive
+    ? ShortcutsPanel({
+      lines: shortcuts,
+      width: managementShortcutWidth,
+      marginTop: 1,
+    })
+    : null;
+  const detailColumn = h(Box, {
+    flexDirection: "column",
+    alignItems: "stretch",
+    width: detailsSideBySide ? detailsWidth : undefined,
+    height: detailsSideBySide ? viewport + 5 : undefined,
+    marginTop: detailsSideBySide ? 1 : 0,
+    marginLeft: detailsSideBySide ? 1 : 0,
+  }, ...(showDetails
+    ? [detailsPanel, managementShortcutsPanel]
+    : detailsSideBySide
+      ? [h(Box, { key: "management-shortcuts-spacer", flexGrow: 1 }), managementShortcutsPanel]
+      : [managementShortcutsPanel]));
   const catalogPanels = h(Box, {
     flexDirection: detailsSideBySide ? "row" : "column",
     alignItems: "stretch",
-    width: columns - 2,
-  }, catalogPanel, detailsPanel);
+    width: catalogPanelsWidth,
+  }, catalogPanel, detailColumn);
 
   return h(Box, { flexDirection: "column", paddingX: 1 },
     h(DashboardHeader, {
@@ -778,6 +953,5 @@ export function CatalogManagementScreen({
       columns,
     }),
     catalogPanels,
-    shortcutHint(shortcuts, columns - 2),
   );
 }

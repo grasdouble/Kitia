@@ -215,7 +215,9 @@ function installSourceFileResource(
       if (expected) {
         const actual = installedFingerprint(targetRoot, relativePath);
         if (actual && !sameFingerprint(actual, expected) && !force) {
-          throw new CatalogError(`Refusing to overwrite locally modified source file ${relativePath}; pass --force.`, "LOCAL_CONFLICT");
+          throw new CatalogError(`Refusing to overwrite locally modified source file ${relativePath}; pass --force.`, "LOCAL_CONFLICT", {
+            category: "tracked-modification", paths: [relativePath], recoverable: true,
+          });
         }
         plan.set(relativePath, { content: output, executable: false, expected: actual });
       } else {
@@ -291,7 +293,9 @@ function installBundledSourceSkill(
   const previous = sourceSkillRecord(state, sourceCatalogName(resource), resource.id);
   if (previous && (previous.source_repository !== resource.source_repository ||
       previous.source_path !== resource.source_path)) {
-    throw new CatalogError(`Refusing to replace tracked skill provenance for ${resource.id}`, "LOCAL_CONFLICT");
+    throw new CatalogError(`Refusing to replace tracked skill provenance for ${resource.id}`, "LOCAL_CONFLICT", {
+      category: "provenance-conflict", paths: [], recoverable: false,
+    });
   }
   const selectedPrefixes = agents.map((agent) => {
     const directory = SOURCE_SKILL_DIRECTORIES[agent];
@@ -319,7 +323,9 @@ function installBundledSourceSkill(
     const actual = installedFingerprint(targetRoot, relativePath);
     const expected = previous.files[relativePath];
     if (actual && !sameFingerprint(actual, expected) && !force) {
-      throw new CatalogError(`Refusing to replace locally modified source skill file ${relativePath}; pass --force.`, "LOCAL_CONFLICT");
+      throw new CatalogError(`Refusing to replace locally modified source skill file ${relativePath}; pass --force.`, "LOCAL_CONFLICT", {
+        category: "tracked-modification", paths: [relativePath], recoverable: true,
+      });
     }
     if (!outputContents.has(relativePath)) {
       delete files[relativePath];
@@ -334,7 +340,9 @@ function installBundledSourceSkill(
     const actual = installedFingerprint(targetRoot, relativePath);
     const expected = previous?.files[relativePath];
     if (expected && actual && !sameFingerprint(actual, expected) && !force) {
-      throw new CatalogError(`Refusing to overwrite locally modified source skill file ${relativePath}; pass --force.`, "LOCAL_CONFLICT");
+      throw new CatalogError(`Refusing to overwrite locally modified source skill file ${relativePath}; pass --force.`, "LOCAL_CONFLICT", {
+        category: "tracked-modification", paths: [relativePath], recoverable: true,
+      });
     }
     const planEntry: InstallPlanEntry = {
       content: entry.content,
@@ -376,7 +384,9 @@ function assertSourceFileCanBeInstalled(resource, target) {
   const state = readInstallState(target);
   for (const [catalog, collections] of Object.entries(state.sources || {})) {
     if (catalog !== sourceCatalogName(resource) && collections[`${resource.kind}s`]?.[resource.id]) {
-      throw new CatalogError(`${resource.kind}:${resource.id} is already tracked from another source catalog.`, "LOCAL_CONFLICT");
+      throw new CatalogError(`${resource.kind}:${resource.id} is already tracked from another source catalog.`, "LOCAL_CONFLICT", {
+        category: "provenance-conflict", paths: [], recoverable: false,
+      });
     }
   }
 }
@@ -390,9 +400,10 @@ function assertSourceSkillCanBeInstalled(resource: CatalogResource, target: stri
     throw new CatalogError(
       `Skill ID '${resource.id}' is already tracked from another catalog in this target; remove it before installing from ${catalogLabel(resource)}.`,
       "LOCAL_CONFLICT",
+      { category: "provenance-conflict", paths: [], recoverable: false },
     );
-  }
 }
+  }
 
 function buildSourceSkillArgs(
   action: string,
@@ -420,14 +431,77 @@ function buildSourceSkillArgs(
   throw new CatalogError(`Unsupported source skill action: ${action}`);
 }
 
-function validateSourceUpdates(installed: InstalledSourceResource[], { force = false }: { force?: boolean } = {}): void {
+function validateSourceUpdates(
+  installed: InstalledSourceResource[],
+  { force = false, target, scope = "project" }: { force?: boolean; target?: string; scope?: string } = {},
+): void {
+  const targetRoot = target ? fs.realpathSync(target) : undefined;
+  const state = targetRoot ? readInstallState(targetRoot) : undefined;
   for (const { resource, installations, removed } of installed) {
     if (removed) {
       throw new CatalogError(`${catalogLabel(resource)} ${resource.kind} ${resource.id} was removed from the catalog. Use uninstall to remove it explicitly.`);
     }
     const modified = installations.filter((installation) => installation.modified);
     if (modified.length && !force) {
-      throw new CatalogError(`Refusing to overwrite locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((entry) => entry.path).join(", ")}. Review them and pass --force.`, "LOCAL_CONFLICT");
+      throw new CatalogError(
+        `Refusing to overwrite locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((entry) => entry.path).join(", ")}. Review them and pass --force.`,
+        "LOCAL_CONFLICT",
+        { category: "tracked-modification", paths: modified.map((entry) => entry.path), recoverable: true },
+      );
+    }
+    if (force || !targetRoot || !state) continue;
+    if (resource.kind !== "skill") {
+      const destinations = sourceFileDestinations(resource, "both", scope);
+      const managedPaths = new Set(Object.keys(
+        state.sources?.[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id]?.files || {},
+      ));
+      const conflicts = destinations.filter((relativePath) =>
+        !managedPaths.has(relativePath) && installedFingerprint(targetRoot, relativePath));
+      if (conflicts.length) {
+        throw new CatalogError(
+          `Refusing to overwrite existing local ${resource.kind} files: ${conflicts.join(", ")}. Review them and pass --force.`,
+          "LOCAL_CONFLICT",
+          { category: "untracked-destination", paths: conflicts, recoverable: true },
+        );
+      }
+      continue;
+    }
+    const record = sourceSkillRecord(state, sourceCatalogName(resource), resource.id);
+    const managedPaths = new Set(Object.keys(record?.files || {}));
+    if (resource.bundle_id) {
+      const bundleFiles = readCachedResourceFiles(resource);
+      const conflicts: string[] = [];
+      for (const installation of installations) {
+        const prefix = `${SOURCE_SKILL_DIRECTORIES[installation.agent]}/${resource.id}/`;
+        for (const file of bundleFiles) {
+          const relativePath = `${prefix}${file.path}`;
+          if (!managedPaths.has(relativePath) && installedFingerprint(targetRoot, relativePath)) {
+            conflicts.push(relativePath);
+          }
+        }
+      }
+      if (conflicts.length && !force) {
+        throw new CatalogError(
+          `Refusing to overwrite existing local skill files: ${conflicts.join(", ")}. Review them and pass --force.`,
+          "LOCAL_CONFLICT",
+          { category: "untracked-destination", paths: conflicts, recoverable: true },
+        );
+      }
+      continue;
+    }
+    for (const installation of installations) {
+      const directory = path.posix.dirname(installation.path);
+      const absolute = targetPath(targetRoot, directory);
+      const untrackedPaths = fs.existsSync(absolute)
+        ? untrackedSkillPaths(targetRoot, directory, managedPaths)
+        : [];
+      if (untrackedPaths.length) {
+        throw new CatalogError(
+          `Refusing to overwrite ${catalogLabel(resource)} skill ${resource.id} with untracked local files in ${directory}; review them and pass --force.`,
+          "LOCAL_CONFLICT",
+          { category: "untracked-skill-content", paths: untrackedPaths, recoverable: true },
+        );
+      }
     }
   }
 }
@@ -456,7 +530,9 @@ function updateSourceFileResources(
     if (!stale.length) continue;
     const modified = stale.filter((item) => item.modified);
     if (modified.length && !force) {
-      throw new CatalogError(`Refusing to overwrite locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((item) => item.path).join(", ")}. Pass --force.`, "LOCAL_CONFLICT");
+      throw new CatalogError(`Refusing to overwrite locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((item) => item.path).join(", ")}. Pass --force.`, "LOCAL_CONFLICT", {
+        category: "tracked-modification", paths: modified.map((item) => item.path), recoverable: true,
+      });
     }
     if (dryRun) {
       for (const item of stale) onAction({
@@ -474,6 +550,8 @@ function updateSourceFileResources(
   return messages;
 }
 
+type GhSkillResult = { status: number; stdout?: string | Buffer | null; stderr?: string | Buffer | null };
+
 function updateSourceResources(
   installed: InstalledSourceResource[],
   target: string,
@@ -490,17 +568,19 @@ function updateSourceResources(
     nonInteractive?: boolean;
     scope?: string;
   } = {},
-  invokeGhSkill?: (args: string[], cwd: string) => number,
+  invokeGhSkill?: (args: string[], cwd: string) => number | GhSkillResult,
 ): string[] {
-  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, { nonInteractive });
+  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, {
+    nonInteractive, captureOutput: nonInteractive,
+  });
   const targetRoot = fs.realpathSync(target);
-  const installOptions = { force, scope, target: targetRoot };
+  const installOptions = { force: true, scope, target: targetRoot };
+  validateSourceUpdates(installed, { force, target: targetRoot, scope });
   const fileResources = installed.filter(({ resource }) => resource.kind !== "skill");
   const fileMessages = updateSourceFileResources(fileResources, target, { dryRun, force, onAction, scope });
   installed = installed.filter(({ resource }) => resource.kind === "skill");
   const messages = [...fileMessages];
   let hasUpdates = false;
-  validateSourceUpdates(installed, { force });
   if (scope === "user") {
     for (const { installations } of installed) {
       for (const installation of installations) targetPath(targetRoot, installation.path);
@@ -540,16 +620,36 @@ function updateSourceResources(
     }
     const completed = [];
     for (const installation of stale) {
-      const status = invokeGhSkill(
-        buildSourceSkillArgs("install", resource, installation.agent, installOptions),
-        targetRoot,
-      );
+      let result: number | GhSkillResult;
+      try {
+        result = invokeGhSkill(
+          buildSourceSkillArgs("install", resource, installation.agent, installOptions),
+          targetRoot,
+        );
+      } catch (error) {
+        if ((error as Error & { code?: string }).code !== "GH_SPAWN_FAILED") throw error;
+        const partial = [...messages, ...(completed.length ? [`Updated agents: ${completed.join(", ")}`] : [])];
+        const userMessage = `Could not start GitHub CLI while updating ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}. Check that gh is installed and available on PATH.${partial.length ? ` Already updated: ${partial.join("; ")}.` : ""}`;
+        throw new CatalogError(userMessage, "GH_SPAWN_FAILED", {
+          category: "github-cli", userMessage,
+        });
+      }
+      const status = typeof result === "number" ? result : result.status;
       if (status !== 0) {
-        const partial = completed.length
-          ? `; already updated for ${completed.join(", ")}`
-          : "";
+        const diagnostic = typeof result === "number" ? "" : formatGhDiagnostics(result);
+        const cause = describeGhFailure(diagnostic);
+        const priorUpdates = [
+          ...messages,
+          ...(completed.length ? [`Updated agents: ${completed.join(", ")}`] : []),
+        ];
+        const partial = priorUpdates.length
+          ? ` Already updated: ${priorUpdates.join("; ")}. Those updates remain in place.`
+          : " No agents were confirmed updated before this failure.";
+        const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}: gh exited with status ${status}. ${cause}${partial}`;
         throw new CatalogError(
-          `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent} (gh exited with status ${status}${partial}).`,
+          `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
+          "GH_UPDATE_FAILED",
+          { category: "github-cli", userMessage, technicalDetail: diagnostic || undefined },
         );
       }
       recordSourceInstallation(resource, targetRoot, installation.agent);
@@ -583,7 +683,9 @@ function uninstallSourceFileResource(
   const paths = installed.installations.filter((item) => !item.missing).map((item) => item.path);
   const modified = installed.installations.filter((item) => item.modified);
   if (modified.length && !force) {
-    throw new CatalogError(`Refusing to remove locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((item) => item.path).join(", ")}. Pass --force.`, "LOCAL_CONFLICT");
+    throw new CatalogError(`Refusing to remove locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((item) => item.path).join(", ")}. Pass --force.`, "LOCAL_CONFLICT", {
+      category: "tracked-modification", paths: modified.map((item) => item.path), recoverable: true,
+    });
   }
   const state = readInstallState(targetRoot);
   if (dryRun) {
@@ -626,6 +728,18 @@ function pruneEmptySkillDirectory(targetRoot: string, relativeDirectory: string)
     }
   }
   if (fs.readdirSync(absolute).length === 0) fs.rmdirSync(absolute);
+}
+
+function untrackedSkillPaths(targetRoot: string, relativeDirectory: string, managedPaths: Set<string>): string[] {
+  const paths: string[] = [];
+  const absolute = targetPath(targetRoot, relativeDirectory);
+  for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+    const relative = path.posix.join(relativeDirectory, entry.name);
+    if (entry.isSymbolicLink()) paths.push(relative);
+    else if (entry.isDirectory()) paths.push(...untrackedSkillPaths(targetRoot, relative, managedPaths));
+    else if (!managedPaths.has(relative)) paths.push(relative);
+  }
+  return paths;
 }
 
 function hasUntrackedSkillContent(targetRoot: string, relativeDirectory: string, managedPaths: Set<string>): boolean {
@@ -757,16 +871,69 @@ function runGhSkill(
   args: string[],
   cwd = process.cwd(),
   spawn: typeof spawnSync = spawnSync,
-  { nonInteractive = false }: { nonInteractive?: boolean } = {},
-): number {
-  const result = spawn("gh", args, {
-    cwd, stdio: nonInteractive ? ["ignore", "inherit", "inherit"] : "inherit",
-    ...(nonInteractive ? { env: { ...process.env, GH_PROMPT_DISABLED: "1" } } : {}),
-  });
-  if (result.error) {
-    throw new CatalogError(`Cannot run 'gh ${args.join(" ")}': ${result.error.message}`);
+  { nonInteractive = false, captureOutput = false }: { nonInteractive?: boolean; captureOutput?: boolean } = {},
+): number | GhSkillResult {
+  let result;
+  try {
+    result = spawn("gh", args, {
+      cwd,
+      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : nonInteractive ? ["ignore", "inherit", "inherit"] : "inherit",
+      ...(captureOutput ? { encoding: "utf8" } : {}),
+      ...(nonInteractive ? { env: { ...process.env, GH_PROMPT_DISABLED: "1" } } : {}),
+    });
+  } catch (error) {
+    const code = (error as Error & { code?: string }).code || "process launch failed";
+    throw new CatalogError(
+      `Could not start GitHub CLI for source skill update: ${code}. Check that gh is installed and available on PATH.`,
+      "GH_SPAWN_FAILED",
+      {
+        category: "github-cli",
+        userMessage: "Could not start GitHub CLI for the source skill update. Check that gh is installed and available on PATH.",
+      },
+    );
   }
-  return result.status ?? 1;
+  if (result.error) {
+    throw new CatalogError(
+      `Could not start GitHub CLI for source skill update: ${result.error.code || "process launch failed"}. Check that gh is installed and available on PATH.`,
+      "GH_SPAWN_FAILED",
+      {
+        category: "github-cli",
+        userMessage: "Could not start GitHub CLI for the source skill update. Check that gh is installed and available on PATH.",
+      },
+    );
+  }
+  const status = result.status ?? 1;
+  return captureOutput ? { status, stdout: result.stdout, stderr: result.stderr } : status;
+}
+
+function formatGhDiagnostics(result: GhSkillResult): string {
+  const raw = result.stderr || result.stdout;
+  if (raw == null) return "";
+  const text = raw.toString()
+    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}\b/gi, "[REDACTED]")
+    .replace(/\b(Bearer|token)\s+[A-Za-z0-9._~+/-]{12,}={0,2}\b/gi, "$1 [REDACTED]")
+    .replace(/\b(gh[_-]?)?(token|authorization|password)\b["']?\s*[:=]\s*["']?([^\s"',;}&]+)/gi, "$1$2=[REDACTED]")
+    .trim();
+  if (!text) return "";
+  const limit = 400;
+  return text.length > limit ? `${text.slice(0, limit)}… [diagnostic truncated]` : text;
+}
+
+function describeGhFailure(diagnostic: string): string {
+  const text = diagnostic.toLowerCase();
+  if (/rate.?limit|api rate limit/.test(text)) return "GitHub reports an API rate limit; wait for the limit to reset, then retry.";
+  if (/not logged in|authentication|bad credentials|unauthorized|http 401|status 401/.test(text)) {
+    return "GitHub CLI authentication failed; run `gh auth login` and verify repository access.";
+  }
+  if (/repository not found|could not read from remote|not found|http 404/.test(text)) {
+    return "The repository or pinned resource was not found; verify the catalog repository, pin, and your access.";
+  }
+  if (/could not resolve host|connection refused|network is unreachable|timed? out|temporary failure|tls handshake|no such host/.test(text)) {
+    return "GitHub could not be reached; check the network connection and retry.";
+  }
+  return "gh did not provide a recognized cause. Check GitHub CLI authentication, repository access, network connectivity, and the pinned resource, then retry.";
 }
 
 function formatSourceResource(resource: CatalogResource): string {
@@ -831,7 +998,7 @@ function auditPinnedResource(
 
 function runSourceCommand(
   options: CliOptions,
-  invokeGhSkill?: (args: string[], cwd: string) => number,
+  invokeGhSkill?: (args: string[], cwd: string) => number | GhSkillResult,
 ): number {
   invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, options);
   const output = options.output || console;
@@ -939,7 +1106,8 @@ function runSourceCommand(
   }
   if (options.action === "preview" || options.dryRun) {
     if (options.dryRun) output.error(`Dry run: previewing the ${catalogLabel(resource)} skill; no files will be installed.`);
-    return invokeGhSkill(buildSourceSkillArgs("preview", resource), target);
+    const result = invokeGhSkill(buildSourceSkillArgs("preview", resource), target);
+    return typeof result === "number" ? result : result.status;
   }
   if (bundleFiles) {
     const paths = installBundledSourceSkill(resource, target, agents, bundleFiles, {
@@ -950,7 +1118,8 @@ function runSourceCommand(
   }
   const completed = [];
   for (const agent of agents) {
-    const status = invokeGhSkill(buildSourceSkillArgs("install", resource, agent, options), target);
+    const result = invokeGhSkill(buildSourceSkillArgs("install", resource, agent, options), target);
+    const status = typeof result === "number" ? result : result.status;
     if (status !== 0) {
       if (completed.length) output.error(`The skill was already installed for ${completed.join(", ")}, but installation for ${agent} failed.`);
       return status;

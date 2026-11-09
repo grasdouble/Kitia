@@ -12,7 +12,7 @@ import {
   type CatalogFreshnessStatus,
 } from "./screens.mjs";
 import {
-  ModalOverlay, addCatalogModal, confirmationModal, inventoryMigrationModal,
+  ModalOverlay, actionFailureModal, addCatalogModal, confirmationModal, inventoryMigrationModal,
   onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal,
   versionAvailableModal,
   catalogTransferModal, catalogPresetModal,
@@ -20,6 +20,8 @@ import {
 } from "./modals.mjs";
 
 import type { DashboardActionResult } from "../cli/dashboard.js";
+
+
 type CatalogEntry = { kind: "skill" | "agent" | "instruction"; id?: string; path: string };
 type AddCatalogRequest = {
   name: string;
@@ -102,7 +104,7 @@ export function Dashboard({
     execute?: (
       operation: string,
       resource: CatalogResource,
-      options: { scope?: string; tool?: string },
+      options: { scope?: string; tool?: string; force?: boolean },
     ) => Promise<DashboardActionResult>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
@@ -188,6 +190,7 @@ export function Dashboard({
   const [confirmationChoice, setConfirmationChoice] = useState(0);
   const [confirmationStage, setConfirmationStage] = useState(1);
   const [actionMessage, setActionMessage] = useState("");
+  const [actionFailure, setActionFailure] = useState<{ action: string; message: string } | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const [lastActionFailed, setLastActionFailed] = useState(false);
   const [catalogWizard, setCatalogWizard] = useState<null | {
@@ -383,6 +386,7 @@ export function Dashboard({
   const runConfirmedAction = async (requested: PendingDashboardAction) => {
     setActionPending(true);
     setLastActionFailed(false);
+    setActionFailure(null);
     const progressLabel = requested.action === "install" ? "Installing"
       : requested.action === "update" ? "Updating"
         : requested.action === "remove-unmanaged" ? "Removing" : "Uninstalling";
@@ -395,19 +399,64 @@ export function Dashboard({
       const result = await actions.execute(requested.action, requested.resource, {
         scope: requested.scope,
         tool: requested.tool,
+        ...(requested.forceRetry ? { force: true } : {}),
       });
       if (Array.isArray(result.resources)) setInstalledResources([...result.resources]);
       if (Array.isArray(result.errors)) setScanErrors([...result.errors]);
-      const outcome = result.messages?.filter(Boolean).join(" · ");
+      const outcome = result.messages?.filter(Boolean).join("\n");
       const failed = result.code !== 0;
       setLastActionFailed(failed);
-      setActionMessage(failed
-        ? `Action failed${result.code ? ` (exit ${result.code})` : ""}${outcome ? `: ${outcome}` : "."}`
-        : outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
+      if (failed) {
+        const failure = result.failure;
+        if (requested.action === "update" && failure?.code === "LOCAL_CONFLICT" && failure.recoverable) {
+          setConfirmation({
+            action: "update",
+            resource: requested.resource,
+            forceRetry: true,
+            conflict: {
+              category: failure.category || "local-conflict",
+              paths: failure.paths || [],
+            },
+          });
+          setConfirmationChoice(0);
+          setActionMessage("Update blocked by a local conflict; choose whether to force and retry.");
+        } else {
+          const errorText = failure?.userMessage ||
+            (requested.action === "update"
+              ? `Update failed (exit ${result.code}); no safe cause details were provided by the action handler.`
+              : `Action failed (exit ${result.code}).`);
+          setActionFailure({ action: requested.action, message: errorText });
+          setActionMessage(`Action failed${result.code ? ` (exit ${result.code})` : ""}: ${errorText}`);
+        }
+      } else {
+        setActionMessage(outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
+      }
     } catch (error) {
-      if (!(error instanceof Error)) throw error;
+      const typed = error as Error & {
+        code?: string;
+        category?: string;
+        paths?: string[];
+        recoverable?: boolean;
+        userMessage?: string;
+      };
       setLastActionFailed(true);
-      setActionMessage(`Action failed: ${error.message}`);
+      if (requested.action === "update" && typed.code === "LOCAL_CONFLICT" && typed.recoverable === true) {
+        setConfirmation({
+          action: "update",
+          resource: requested.resource,
+          forceRetry: true,
+          conflict: {
+            category: typed.category || "local-conflict",
+            paths: typed.paths || [],
+          },
+        });
+        setConfirmationChoice(0);
+        setActionMessage("Update blocked by a local conflict; choose whether to force and retry.");
+      } else {
+        const message = typed.userMessage || (error instanceof Error ? error.message : String(error));
+        setActionFailure({ action: requested.action, message });
+        setActionMessage(`Action failed: ${message}`);
+      }
     } finally {
       setActionPending(false);
     }
@@ -415,6 +464,10 @@ export function Dashboard({
 
   useInput((input, key) => {
     const character = input.toLocaleLowerCase();
+    if (actionFailure) {
+      if (key.return || key.escape || input === " ") setActionFailure(null);
+      return;
+    }
     if (migrationScopes.length) {
       if (key.return || key.escape || (key.ctrl && character === "c")) onFinish(false);
       return;
@@ -1004,7 +1057,7 @@ export function Dashboard({
     } else if (character === "u" && selectedResource && selectedResource.managed !== false &&
         typeof actions.execute === "function") {
       setConfirmation({ action: "update", resource: selectedResource });
-      setConfirmationChoice(0);
+      setConfirmationChoice(1);
       setActionMessage("");
     } else if ((key.delete || (key.backspace && !query)) &&
         selectedResource && typeof actions.execute === "function") {
@@ -1060,6 +1113,8 @@ export function Dashboard({
     });
   } else if (catalogTransfer) {
     modal = catalogTransferModal({ ...catalogTransfer, columns });
+  } else if (actionFailure) {
+    modal = actionFailureModal({ ...actionFailure, columns });
   } else if (confirmation) {
     modal = confirmationModal({
       confirmation,
@@ -1089,10 +1144,12 @@ export function Dashboard({
       canRemove: typeof actions.removeCatalog === "function" && userCatalogs.length > 0,
       canEdit: typeof actions.updateCatalog === "function" && userCatalogs.length > 0,
       canRefresh: typeof actions.refreshCatalog === "function" && userCatalogs.length > 0,
+      canTransfer: typeof actions.transferCatalogs === "function",
       versionLabel,
       showDetails,
       columns,
       rows,
+      modalActive: Boolean(modal || versionNotice || tourStep !== null),
       tourStep,
     });
   } else if (screenMode === "catalog" || screenMode === "install-options") {
@@ -1110,6 +1167,7 @@ export function Dashboard({
       showDetails,
       columns,
       rows,
+      modalActive: Boolean(modal || versionNotice || tourStep !== null),
       tourStep,
     });
   } else {
@@ -1128,19 +1186,20 @@ export function Dashboard({
       canExecute: typeof actions.execute === "function" && Boolean(selectedResource),
       columns,
       rows,
+      modalActive: Boolean(modal || versionNotice || tourStep !== null),
       userCatalogs,
       tourStep,
       inventoryLabels,
     });
   }
-  if (versionNotice && !migrationScopes.length) {
+  if (versionNotice && !migrationScopes.length && !actionFailure) {
     modal = versionAvailableModal(
       versionNotice.installed,
       versionNotice.available,
       versionNotice.changelogUrl,
       columns,
     );
-  } else if (tourStep !== null) {
+  } else if (tourStep !== null && !actionFailure) {
     modal = onboardingModal(tourStep);
   }
   const overlay = modal && h(ModalOverlay, { modal, columns, rows });

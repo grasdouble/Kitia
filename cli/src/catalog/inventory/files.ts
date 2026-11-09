@@ -162,7 +162,9 @@ function writeInstallPlan(
     }
     const actual = installedFingerprint(targetRoot, relativePath);
     if (expectedRemovals?.has(relativePath) && !equalOptionalFingerprint(actual, expectedRemovals.get(relativePath))) {
-      throw new CatalogError(`File changed while preparing removal: ${relativePath}. Retry after reviewing it.`, "LOCAL_CONFLICT");
+      throw new CatalogError(`File changed while preparing removal: ${relativePath}. Retry after reviewing it.`, "LOCAL_CONFLICT", {
+        category: "filesystem-race", paths: [relativePath], recoverable: false,
+      });
     }
     if (actual) {
       actions.push(["remove", relativePath, null]);
@@ -174,7 +176,9 @@ function writeInstallPlan(
     const current = installedFingerprint(targetRoot, relativePath);
     const hasExpected = Object.hasOwn(file, "expected");
     if (hasExpected && !equalOptionalFingerprint(current, file.expected)) {
-      throw new CatalogError(`File changed while preparing the operation: ${relativePath}. Retry after reviewing it.`, "LOCAL_CONFLICT");
+      throw new CatalogError(`File changed while preparing the operation: ${relativePath}. Retry after reviewing it.`, "LOCAL_CONFLICT", {
+        category: "filesystem-race", paths: [relativePath], recoverable: false,
+      });
     }
     let stat;
     try {
@@ -204,6 +208,7 @@ function writeInstallPlan(
     throw new CatalogError(
       `Refusing to overwrite existing files:\n${conflicts.map((item) => `  ${item}`).join("\n")}\nPass --force to replace them.`,
       "LOCAL_CONFLICT",
+      { category: "untracked-destination", paths: conflicts, recoverable: true },
     );
   }
 

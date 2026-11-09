@@ -11,7 +11,7 @@ const {
   checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog, importCatalogConfigurationText,
 } = require("../dist/catalog/sources/manage.js");
 const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
-const { installSourceFileResource } = require("../dist/catalog/sources/skills.js");
+const { installSourceFileResource, runGhSkill } = require("../dist/catalog/sources/skills.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
 const { recordSourceInstallation } = require("../dist/catalog/sources/installed.js");
@@ -23,10 +23,11 @@ const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLa
   require("../dist/dashboard/helpers.mjs");
 const { renderInstalledResources } = require("../dist/dashboard/terminal.js");
 const {
-  checkInstalledResources, readInstalledSourceSkills, runSourceCommand,
+  checkInstalledResources, readInstalledSourceSkills, runSourceCommand, main: runCliMain,
   uninstallSourceResource, updateSourceResources,
 } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
+const { executeCommand } = require("../dist/cli/commands.js");
 const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
 test("catalog discovery ranks exact identifiers and preserves existing filters", () => {
   const resources = [
@@ -948,7 +949,9 @@ test("configured source skills use the same pinned install, check, update and un
     license_status: "MIT",
   };
   let installedRef = sourceResource.source_ref;
+  let updateArgs;
   const invoke = (args) => {
+    if (args[args.indexOf("--pin") + 1] !== sourceResource.source_ref) updateArgs = args;
     assert.deepEqual(args.slice(0, 4), [
       "skill", "install", sourceResource.source_repository, sourceResource.source_path,
     ]);
@@ -991,10 +994,157 @@ test("configured source skills use the same pinned install, check, update and un
   const updatedResource = { ...sourceResource, source_ref: "c".repeat(40) };
   const installed = readInstalledSourceSkills(target, [updatedResource]);
   assert.match(updateSourceResources(installed, target, {}, invoke).join("\n"), /Updated team-alpha catalog skill/);
+  assert.ok(updateArgs.includes("--force"), "managed skill updates must ask gh to overwrite the installed skill");
   assert.equal(installedRef, updatedResource.source_ref);
+  const failedResource = { ...updatedResource, source_ref: "d".repeat(40) };
+  let plannedUpdate;
+  updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { dryRun: true, onAction: (action) => { plannedUpdate = action; } },
+    () => assert.fail("a dry-run update must not invoke gh"),
+  );
+  assert.ok(plannedUpdate.command.args.includes("--force"), "dry-run plans must include gh's required overwrite flag");
+  const skillFile = path.join(target, ".agents/skills/demo-skill/SKILL.md");
+  const installedSkill = fs.readFileSync(skillFile, "utf8");
+  fs.writeFileSync(skillFile, "Locally modified managed skill.\n");
+  let guardedGhCalls = 0;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    {},
+    () => {
+      guardedGhCalls++;
+      return 0;
+    },
+  ), (error) => {
+    assert.equal(error.code, "LOCAL_CONFLICT");
+    assert.equal(error.category, "tracked-modification");
+    assert.deepEqual(error.paths, [".agents/skills/demo-skill/SKILL.md"]);
+    assert.equal(error.recoverable, true);
+    return true;
+  });
+  assert.equal(guardedGhCalls, 0, "local modifications must be rejected before invoking gh");
+  let forcedArgs;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { force: true },
+    (args) => {
+      forcedArgs = args;
+      return 1;
+    },
+  ), /gh exited with status 1/);
+  assert.ok(forcedArgs.includes("--force"), "explicit --force must still reach gh");
+  fs.writeFileSync(skillFile, installedSkill);
+  fs.writeFileSync(path.join(path.dirname(skillFile), "local-notes.txt"), "Keep this file.");
+  guardedGhCalls = 0;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    {},
+    () => {
+      guardedGhCalls++;
+      return 0;
+    },
+  ), (error) => {
+    assert.equal(error.code, "LOCAL_CONFLICT");
+    assert.equal(error.category, "untracked-skill-content");
+    assert.deepEqual(error.paths, [".agents/skills/demo-skill/local-notes.txt"]);
+    assert.equal(error.recoverable, true);
+    return true;
+  });
+  assert.equal(guardedGhCalls, 0, "untracked files must be protected before invoking gh");
+  let untrackedForcedArgs;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { force: true },
+    (args) => {
+      untrackedForcedArgs = args;
+      return 1;
+    },
+  ), /gh exited with status 1/);
+  assert.ok(untrackedForcedArgs.includes("--force"), "explicit --force may replace untracked content");
+  fs.unlinkSync(path.join(path.dirname(skillFile), "local-notes.txt"));
+  let ghFailure;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { nonInteractive: true },
+    () => ({
+      status: 1,
+      stderr: "\u001b[31mGitHub API rate limit exceeded; retry later\u001b[0m token ghp_abcdefghijklmnopqrstuvwxyz123456 GH_TOKEN=super-secret-value\n",
+      stdout: "ignored stdout",
+    }),
+  ), (error) => {
+    ghFailure = error;
+    return true;
+  });
+  assert.equal(
+    ghFailure.message,
+    "Could not update team-alpha catalog skill demo-skill for github-copilot: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No agents were confirmed updated before this failure. gh diagnostic: GitHub API rate limit exceeded; retry later token [REDACTED] GH_TOKEN=[REDACTED]",
+  );
+  assert.doesNotMatch(ghFailure.message, /\u001b|\bghp_abcdefghijklmnopqrstuvwxyz123456\b|super-secret-value|ignored stdout/);
+  let truncatedFailure;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { nonInteractive: true },
+    () => ({ status: 1, stderr: "x".repeat(401) }),
+  ), (error) => {
+    truncatedFailure = error;
+    return true;
+  });
+  assert.match(truncatedFailure.message, /x{400}… \[diagnostic truncated\]$/);
+
+  let spawnOptions;
+  const captured = runGhSkill(["skill", "install"], target, (_program, _args, options) => {
+    spawnOptions = options;
+    return { status: 1, stdout: "out", stderr: "actionable error" };
+  }, { nonInteractive: true, captureOutput: true });
+  assert.deepEqual(spawnOptions.stdio, ["ignore", "pipe", "pipe"]);
+  assert.equal(spawnOptions.env.GH_PROMPT_DISABLED, "1");
+  assert.deepEqual(captured, { status: 1, stdout: "out", stderr: "actionable error" });
+  assert.throws(() => runGhSkill(
+    ["skill", "install", "https://example.invalid/?token=secret"],
+    target,
+    () => { throw Object.assign(new Error("secret process details"), { code: "EACCES" }); },
+  ), (error) => {
+    assert.equal(error.code, "GH_SPAWN_FAILED");
+    assert.match(error.message, /EACCES/);
+    assert.doesNotMatch(error.message, /example\.invalid|token=secret|secret process details/);
+    return true;
+  });
   assert.equal(checkInstalledResources(
     target, [updatedResource], { catalog: "team-alpha" },
   ).updateAvailable, false);
+  const partialResource = { ...updatedResource, source_ref: "e".repeat(40) };
+  const partialInstalled = readInstalledSourceSkills(target, [partialResource]);
+  partialInstalled[0].installations.push({
+    ...partialInstalled[0].installations[0],
+    agent: "claude-code",
+    path: ".claude/skills/demo-skill/SKILL.md",
+  });
+  let partialCalls = 0;
+  assert.throws(() => updateSourceResources(
+    partialInstalled,
+    target,
+    { nonInteractive: true },
+    (args) => {
+      partialCalls += 1;
+      return partialCalls === 1 ? invoke(args) : { status: 1, stderr: "unexpected failure" };
+    },
+  ), (error) => {
+    assert.equal(error.code, "GH_UPDATE_FAILED");
+    assert.match(error.userMessage, /for claude-code: gh exited with status 1/);
+    assert.match(error.userMessage, /did not provide a recognized cause/);
+    assert.match(error.userMessage, /github-copilot/);
+    assert.doesNotMatch(error.userMessage, /unexpected failure/);
+    return true;
+  });
+  assert.equal(partialCalls, 2);
+
   assert.match(uninstallSourceResource(updatedResource, target).join("\n"), /Removed team-alpha catalog skill entry point/);
   assert.equal(fs.existsSync(path.join(target, ".agents/skills/demo-skill")), false);
   assert.equal(readInstalledSourceSkills(target, []).length, 0);
@@ -1131,8 +1281,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.match(management.renderedOutput, /A add/);
   assert.match(management.renderedOutput, /Delete remove/);
   assert.match(management.renderedOutput, /R refresh/);
-  assert.match(management.renderedOutput, /A add - P presets - Delete remove - E edit - R refresh \| I import \/ X export/);
-  assert.match(management.renderedOutput, /I import \/ X export/);
+  assert.match(management.renderedOutput, /SHORTCUTS/);
   const presetRequests = [];
   const presetManager = await driveRefresh(["m", "p", "\x1b[B", "\r", "\r", "q"], refresh, {
     addCatalog: async (request) => {
@@ -1374,7 +1523,9 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.equal(initialDashboard.result, true);
   assert.doesNotMatch(initialDashboard.renderedOutput, /A add catalog|Delete remove selected|R refresh/);
   assert.doesNotMatch(initialDashboard.renderedOutput, /G refresh/);
-  assert.match(initialDashboard.renderedOutput, /F filter.*\|.*navigate/);
+  assert.match(initialDashboard.renderedOutput, /SHORTCUTS/);
+  assert.match(initialDashboard.renderedOutput, /F filter/);
+  assert.match(initialDashboard.renderedOutput, /↑↓ navigate/);
   const ignoredInventoryRefresh = await driveRefresh(["g", "q"], refresh);
   assert.equal(ignoredInventoryRefresh.result, true);
   assert.deepEqual(refreshed, []);
@@ -1868,6 +2019,127 @@ test("removing an unmanaged skill deletes its entire detected folder", async () 
   assert.ok(!result.resources.some((resource) => resource.id === "manual-skill"));
 });
 
+test("dashboard update dispatch reaches the CLI update command for the selected catalog resource", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-update-dispatch-"));
+  const configDirectory = path.join(temporary, "config");
+  const sourceIndexDirectory = path.join(configDirectory, "source-catalogs");
+  const target = path.join(temporary, "project");
+  const userTarget = path.join(temporary, "user");
+  const repository = "https://github.com/example/dashboard-update";
+  const previousConfigDirectory = process.env.KITIA_CONFIG_DIR;
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  fs.mkdirSync(target, { recursive: true });
+  fs.mkdirSync(userTarget, { recursive: true });
+  const source = createSource("dashboard-update-upstream", repository);
+  const configuration = { catalog_version: 1, sources: [{ name: "Test", repository }] };
+  writeJson(path.join(configDirectory, "catalogSources.json"), configuration);
+  writeJson(path.join(sourceIndexDirectory, "catalogSources.json"), configuration);
+  writeJson(
+    path.join(sourceIndexDirectory, "Test.json"),
+    createSourceIndex(repository, "Test", source),
+  );
+  const resource = {
+    ...createSourceIndex(repository, "Test", source).resources[0],
+    catalog: "Test",
+    scope: "project",
+    status: "attention",
+    managed: true,
+  };
+  let dispatched;
+  try {
+    const execute = createDashboardActionHandler(async (options) => {
+      dispatched = options;
+      return 0;
+    });
+    const result = await execute(
+      "update",
+      resource,
+      { target, userTarget },
+      { sourceResources: [resource] },
+    );
+
+    assert.equal(result.code, 0);
+    assert.equal(dispatched.command, "update");
+    assert.equal(dispatched.catalog, "Test");
+    assert.equal(dispatched.kind, "skill");
+    assert.equal(dispatched.id, resource.id);
+    assert.equal(dispatched.target, target);
+    assert.equal(dispatched.nonInteractive, true);
+    assert.deepEqual(dispatched.sourceResources, [resource]);
+  } finally {
+    if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
+  }
+});
+test("dashboard update reaches the production CLI and reports a safe local-conflict failure", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-update-cli-"));
+  const configDirectory = path.join(temporary, "config");
+  const sourceIndexDirectory = path.join(configDirectory, "source-catalogs");
+  const target = path.join(temporary, "project");
+  const repository = "https://github.com/example/dashboard-update";
+  const previousConfigDirectory = process.env.KITIA_CONFIG_DIR;
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  fs.mkdirSync(target, { recursive: true });
+  const source = createSource("dashboard-update-cli-upstream", repository);
+  const configuration = { catalog_version: 1, sources: [{ name: "Test", repository }] };
+  writeJson(path.join(configDirectory, "catalogSources.json"), configuration);
+  writeJson(path.join(sourceIndexDirectory, "catalogSources.json"), configuration);
+  const index = createSourceIndex(repository, "Test", source);
+  writeJson(path.join(sourceIndexDirectory, "Test.json"), index);
+  const resource = {
+    ...index.resources[0],
+    catalog: "Test",
+    source_repository: index.source_repository,
+    source_ref: index.source_ref,
+    scope: "project",
+    managed: true,
+  };
+  const skillFile = path.join(target, ".agents/skills/demo-skill/SKILL.md");
+  fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+  fs.writeFileSync(skillFile, [
+    "---",
+    "name: demo-skill",
+    "description: A generated source skill.",
+    "metadata:",
+    `  github-repo: "https://github.com/${resource.source_repository}"`,
+    `  github-path: "${resource.source_path}"`,
+    `  github-ref: "${resource.source_ref}"`,
+    `  github-pinned: "${resource.source_ref}"`,
+    "---",
+    "",
+    "Synthetic installed skill.",
+    "",
+  ].join("\n"));
+
+  try {
+    recordSourceInstallation(resource, target, "github-copilot");
+    fs.writeFileSync(skillFile, "Locally modified content that the updater must protect.\n");
+    const execute = createDashboardActionHandler(executeCommand);
+    await assert.rejects(
+      execute("update", resource, { target }, { sourceResources: [resource] }),
+      /Refusing to overwrite locally modified .*demo-skill.*SKILL\.md.*--force/,
+    );
+    const originalLog = console.log;
+    const output = [];
+    console.log = (line) => output.push(line);
+    try {
+      assert.equal(await runCliMain([
+        "update", "skill", "demo-skill", "--target", target, "--dry-run", "--json",
+      ]), 1);
+    } finally {
+      console.log = originalLog;
+    }
+    const report = JSON.parse(output.join("\n"));
+    assert.equal(report.errors[0].code, "LOCAL_CONFLICT");
+    assert.match(report.errors[0].message, /locally modified/);
+    assert.equal(fs.readFileSync(skillFile, "utf8"), "Locally modified content that the updater must protect.\n");
+  } finally {
+    if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
+  }
+});
+
+
 test("dashboard renders the resource list and selection panel at wide and narrow widths", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
@@ -2093,8 +2365,8 @@ test("dashboard toggles catalog management details with D", async () => {
   const panelTopEnd = rendered.indexOf("\n", panelTop);
   assert.ok((rendered.slice(panelTop, panelTopEnd).match(/┌/g) || []).length >= 2);
   const detailsPanel = rendered.slice(rendered.indexOf("CATALOG - Sample"));
-  assert.match(detailsPanel, /REPOSITORY[^\n]*\n[^\n]*example\/sample/);
-  assert.match(detailsPanel, /FRESHNESS[^\n]*\n[^\n]*UP TO DATE/);
+  assert.match(detailsPanel, /REPOSITORY example\/sample/);
+  assert.match(detailsPanel, /FRESHNESS UP TO DATE/);
   assert.match(rendered, /Updates catalog metadata only/);
   const beforeHide = rendered.length;
   input.write("d");

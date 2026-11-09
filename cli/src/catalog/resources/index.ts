@@ -27,10 +27,26 @@ const SOURCE_SKILL_DIRECTORIES = {
 
 class CatalogError extends Error {
   code: string;
+  category?: string;
+  paths?: string[];
+  recoverable?: boolean;
+  userMessage?: string;
+  technicalDetail?: string;
 
-  constructor(message, code = "CATALOG_ERROR") {
+  constructor(message, code = "CATALOG_ERROR", details: {
+    category?: string;
+    paths?: string[];
+    recoverable?: boolean;
+    userMessage?: string;
+    technicalDetail?: string;
+  } = {}) {
     super(message);
     this.code = code;
+    this.category = details.category;
+    this.paths = details.paths ? [...details.paths] : undefined;
+    this.recoverable = details.recoverable || false;
+    this.userMessage = details.userMessage;
+    this.technicalDetail = details.technicalDetail;
   }
 }
 
