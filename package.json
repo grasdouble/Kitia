@@ -43,7 +43,7 @@
   "scripts": {
     "build": "pnpm run cli:build && pnpm run web:build",
     "prepare": "pnpm run cli:build && husky",
-    "test": "pnpm run docs:test && pnpm run cli:test",
+    "test": "pnpm run docs:test && pnpm run cli:test && pnpm run web:test:components",
     "cli:build": "rimraf dist cli/dist && tsc -p tsconfig.json",
     "cli:test": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js cli/test/migrations.test.js",
     "cli:test:contract": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js",
@@ -55,6 +55,7 @@
     "docs:test": "node --test docs/test/documentation.test.js",
     "web:build": "vite build --config web/vite.config.ts",
     "web:dev": "vite --config web/vite.config.ts",
+    "web:test:components": "node --test web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs",
     "web:test:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node --test web/test/termless-dashboard.test.mjs",
     "web:screenshots:update:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node web/scripts/screenshots-generator/update-site-screenshots-termless.js"
   },
@@ -73,6 +74,7 @@
     "@types/react": "19.3.0",
     "ajv": "8.20.0",
     "husky": "^9.1.7",
+    "jsdom": "^31.0.0",
     "rimraf": "^6.1.4",
     "typescript": "5.9.3",
     "vite": "^6.4.1"
