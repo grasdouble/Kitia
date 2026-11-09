@@ -8,7 +8,8 @@ type ReleaseSection = { title: string; changes: Change[] };
 type Release = { version: string; sections: ReleaseSection[] };
 
 function parseReleases(source: string): Release[] {
-  return source.split(/^## /m).slice(1).map((entry) => {
+  const normalizedSource = source.replace(/\r\n?/g, '\n');
+  return normalizedSource.split(/^## /m).slice(1).map((entry) => {
     const [version, ...lines] = entry.split('\n');
     const sections: ReleaseSection[] = [];
     let currentSection: ReleaseSection | undefined;
