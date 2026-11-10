@@ -276,8 +276,31 @@ test("update confirmation distinguishes GH-backed skills from offline bundles an
     columns: 120,
   }).lines.map(({ bodyText, text }) => bodyText || text).join(" ");
   const ghText = confirmationText({ ...base, kind: "skill" });
-  assert.ok(ghText.includes("Kitia passes gh skill install --force to replace the installed copy,"));
-  assert.ok(ghText.includes("checks local conflicts first and asks before proceeding if any are found."));
+  assert.ok(ghText.includes("first gh skill install runs without --force"));
+  assert.ok(ghText.includes("If GH says overwrite requires --force, Kitia asks before retrying"));
+  const ghRetryText = confirmationModal({
+    confirmation: {
+      action: "update",
+      resource: { ...base, kind: "skill" },
+      forceRetry: true,
+      ghForceRetry: true,
+      ghForceAgent: "github-copilot",
+      conflict: {
+        category: "github-force-required",
+        paths: [],
+        message: "GitHub CLI says the skill already exists and requires --force.",
+      },
+    },
+    selectedButton: 0,
+    stage: 1,
+    columns: 120,
+  }).lines.map(({ bodyText, text }) => bodyText || text).join(" ");
+  assert.ok(ghRetryText.includes("GH REQUESTS OVERWRITE"));
+  assert.ok(ghRetryText.includes("requires --force"));
+  assert.ok(ghRetryText.includes("for github-copilot"));
+  assert.ok(ghRetryText.includes("Kitia's local-modification and untracked-content checks still apply"));
+  assert.ok(ghRetryText.includes("NO / CANCEL"));
+  assert.ok(ghRetryText.includes("YES, RETRY WITH --FORCE"));
   assert.ok(!ghText.includes("signed offline bundle"));
 
   const bundleText = confirmationText({
@@ -358,9 +381,9 @@ test("managed inventory U confirms an update and renders the successful result",
     const confirmation = await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"),
       "the update confirmation");
     const confirmationText = confirmation.replace(/[│]/g, " ").replace(/\s+/g, " ");
-    assert.ok(confirmationText.includes("gh skill install --force"));
-    assert.ok(confirmationText.includes("replace the installed copy"));
-    assert.ok(confirmationText.includes("checks local conflicts first"));
+    assert.ok(confirmationText.includes("first gh skill install runs without --force"));
+    assert.ok(confirmationText.includes("Kitia asks before retrying"));
+    assert.ok(confirmationText.includes("local safety checks apply"));
     assert.ok(confirmation.includes("Y/N SHORTCUTS"));
     assert.equal(executions.length, 0, "U must request confirmation, not execute immediately");
 
@@ -476,7 +499,7 @@ test("managed inventory U selects Update and Enter executes the confirmed action
   }
 });
 
-test("recoverable update conflicts ask for confirmation before retrying with force", async () => {
+test("local conflicts and GH force-required updates require explicit retry consent", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const resource = {
@@ -484,95 +507,184 @@ test("recoverable update conflicts ask for confirmation before retrying with for
     scope: "project", status: "update", managed: true,
   };
 
-  for (const category of ["tracked-modification", "untracked-skill-content"]) {
-    for (const accept of [false, true]) {
-    const input = new PassThrough();
-    input.isTTY = true;
-    input.setRawMode = () => {};
-    input.ref = () => {};
-    input.unref = () => {};
-    const output = new PassThrough();
-    output.isTTY = true;
-    output.columns = 100;
-    output.rows = 48;
-    let rendered = "";
-    output.on("data", (chunk) => { rendered += chunk.toString(); });
-    const calls = [];
-    const done = runDashboard([resource], input, output, [], {
-      showOnboarding: false,
-      execute: async (...args) => {
-        calls.push(args);
-        if (calls.length === 1) {
-          const error = new Error("local conflict");
-          error.code = "LOCAL_CONFLICT";
-          error.category = category;
-          error.paths = [category === "tracked-modification"
-            ? ".agents/skills/conflicted-skill/SKILL.md"
-            : ".agents/skills/conflicted-skill/local-note.txt"];
-          error.recoverable = true;
-          throw error;
+  for (const category of [
+    "tracked-modification", "untracked-skill-content", "github-force-required",
+    "github-next-agent", "github-repeated-agent",
+  ]) {
+    const ghForceRequired = category.startsWith("github-");
+    const responses = ghForceRequired ? ["no", "escape", "yes"] : ["no", "yes"];
+    for (const response of responses) {
+      const accept = response === "yes";
+      const input = new PassThrough();
+      input.isTTY = true;
+      input.setRawMode = () => {};
+      input.ref = () => {};
+      input.unref = () => {};
+      const output = new PassThrough();
+      output.isTTY = true;
+      output.columns = 100;
+      output.rows = 48;
+      let rendered = "";
+      output.on("data", (chunk) => { rendered += chunk.toString(); });
+      const calls = [];
+      const done = runDashboard([resource], input, output, [], {
+        showOnboarding: false,
+        execute: async (...args) => {
+          calls.push(args);
+          if (calls.length === 1 && ghForceRequired) {
+            const error = new Error("raw GH overwrite diagnostic");
+            error.code = "GH_FORCE_REQUIRED";
+            error.category = "github-force-required";
+            error.paths = [];
+            error.recoverable = true;
+            error.agent = "github-copilot";
+            error.userMessage = "GitHub CLI says this skill is already installed and requires --force.";
+            error.technicalDetail = "raw secret diagnostic: token=secret-value";
+            throw error;
+          }
+          if (calls.length === 1) {
+            const error = new Error("local conflict");
+            error.code = "LOCAL_CONFLICT";
+            error.category = category;
+            error.paths = [category === "tracked-modification"
+              ? ".agents/skills/conflicted-skill/SKILL.md"
+              : ".agents/skills/conflicted-skill/local-note.txt"];
+            error.recoverable = true;
+            throw error;
+          }
+          if (calls.length === 2 && category === "github-next-agent") {
+            const error = new Error("raw GH overwrite diagnostic for another agent");
+            error.code = "GH_FORCE_REQUIRED";
+            error.category = "github-force-required";
+            error.paths = [];
+            error.recoverable = true;
+            error.agent = "claude-code";
+            error.userMessage = "GitHub CLI says this skill is already installed and requires --force for claude-code.";
+            throw error;
+          }
+          if (calls.length === 2 && category === "github-repeated-agent") {
+            const error = new Error("raw GH overwrite diagnostic repeated");
+            error.code = "GH_FORCE_REQUIRED";
+            error.category = "github-force-required";
+            error.paths = [];
+            error.recoverable = true;
+            error.agent = "github-copilot";
+            error.userMessage = "GitHub CLI says this skill is already installed and requires --force.";
+            throw error;
+          }
+          return { code: 0, messages: ["Update complete"], resources: [resource], errors: [] };
+        },
+      });
+      const latestFrame = () => {
+        const start = rendered.lastIndexOf("\u001b[?2026h");
+        const end = rendered.indexOf("\u001b[?2026l", start);
+        return start >= 0 && end > start
+          ? rendered.slice(start, end)
+            .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+            .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
+          : "";
+      };
+      const waitForFrame = async (predicate, label) => {
+        const deadline = Date.now() + 5_000;
+        while (!predicate(latestFrame())) {
+          if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${label}`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
         }
-        return { code: 0, messages: ["Update complete"], resources: [resource], errors: [] };
-      },
-    });
-    const latestFrame = () => {
-      const start = rendered.lastIndexOf("\u001b[?2026h");
-      const end = rendered.indexOf("\u001b[?2026l", start);
-      return start >= 0 && end > start
-        ? rendered.slice(start, end)
-          .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-          .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
-        : "";
-    };
-    const waitForFrame = async (predicate, label) => {
-      const deadline = Date.now() + 5_000;
-      while (!predicate(latestFrame())) {
-        if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${label}`);
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      return latestFrame();
-    };
+        return latestFrame();
+      };
 
-    try {
-      await waitForFrame((frame) => frame.includes("SHORTCUTS"), "inventory");
-      input.write("u");
-      await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"), "update confirmation");
-      input.write("y");
-      const conflict = await waitForFrame((frame) => frame.includes("LOCAL CONFLICT"), "conflict confirmation");
-      assert.ok(conflict.includes("conflicted-skill"));
-      assert.ok(conflict.includes("catalog Test"));
-      assert.ok(conflict.includes("scope project"));
-      assert.ok(conflict.includes(category === "tracked-modification"
-        ? ".agents/skills/conflicted-skill/SKILL.md"
-        : ".agents/skills/conflicted-skill/local-note.txt"));
-      assert.ok(conflict.includes("FORCE AND RETRY"));
-      assert.equal(calls.length, 1, "the initial attempt stops before retry");
+      try {
+        await waitForFrame((frame) => frame.includes("SHORTCUTS"), "inventory");
+        input.write("u");
+        await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"), "update confirmation");
+        input.write("\r");
+        const promptTitle = ghForceRequired ? "GH REQUESTS OVERWRITE" : "LOCAL CONFLICT";
+        const conflict = await waitForFrame((frame) => frame.includes(promptTitle), "force confirmation");
+        const promptText = conflict.replace(/[│]/g, " ").replace(/\s+/g, " ");
+        assert.ok(conflict.includes("conflicted-skill"));
+        assert.ok(conflict.includes("catalog Test"));
+        assert.ok(conflict.includes("scope project"));
+        if (ghForceRequired) {
+          assert.ok(promptText.includes("already installed and requires --force"));
+          assert.ok(promptText.includes("for github-copilot"));
+          assert.ok(promptText.includes("local-modification and untracked-content checks still apply"));
+          assert.ok(!promptText.includes("secret-value"));
+        } else {
+          assert.ok(conflict.includes(category === "tracked-modification"
+            ? ".agents/skills/conflicted-skill/SKILL.md"
+            : ".agents/skills/conflicted-skill/local-note.txt"));
+        }
+        assert.ok(conflict.includes("YES, RETRY WITH --FORCE"));
+        assert.equal(calls.length, 1, "the first update attempt has no retry flag");
+        assert.deepEqual(calls[0][2], { scope: undefined, tool: undefined });
 
-      if (accept) {
-        input.write("\x1b[C");
-        await waitForFrame((frame) => frame.includes("‹ FORCE AND RETRY ›"), "force selection");
-        input.write("\r");
-        await waitForFrame((frame) => frame.includes("Update complete"), "forced update result");
-        assert.equal(calls.length, 2);
-        assert.deepEqual(calls[1][2], { scope: undefined, tool: undefined, force: true });
+        if (accept) {
+          input.write("\x1b[C");
+          await waitForFrame((frame) => frame.includes("‹ YES, RETRY WITH --FORCE ›"), "force selection");
+          input.write("\r");
+          if (category === "github-next-agent") {
+            const nextPrompt = await waitForFrame(
+              (frame) => {
+                const text = frame.replace(/[│]/g, " ").replace(/\s+/g, " ");
+                return text.includes("GH REQUESTS OVERWRITE") && text.includes("for claude-code");
+              },
+              "second agent force confirmation",
+            );
+            const nextPromptText = nextPrompt.replace(/[│]/g, " ").replace(/\s+/g, " ");
+            assert.ok(nextPromptText.includes("already installed and requires --force"));
+            assert.equal(calls.length, 2);
+            assert.deepEqual(calls[1][2], {
+              scope: undefined, tool: undefined, ghForce: true, ghForceAgent: "github-copilot",
+            });
+            input.write("\x1b[C");
+            await waitForFrame((frame) => frame.includes("‹ YES, RETRY WITH --FORCE ›"), "second agent force selection");
+            input.write("\r");
+            await waitForFrame((frame) => frame.includes("Update complete"), "second agent forced update");
+            assert.equal(calls.length, 3);
+            assert.deepEqual(calls[2][2], {
+              scope: undefined, tool: undefined, ghForce: true, ghForceAgent: "claude-code",
+            });
+            input.write("q");
+            assert.equal(await done, true);
+          } else if (category === "github-repeated-agent") {
+            const failure = await waitForFrame((frame) => frame.includes("UPDATE FAILED"), "same-agent retry failure");
+            assert.ok(!failure.includes("GH REQUESTS OVERWRITE"), "the same agent must not get an endless force prompt");
+            assert.equal(calls.length, 2);
+            input.write("\x1b");
+            await waitForFrame((frame) => !frame.includes("UPDATE FAILED"), "dismissed same-agent failure");
+            input.write("q");
+            assert.equal(await done, false);
+          } else {
+            await waitForFrame((frame) => frame.includes("Update complete"), "forced update result");
+            assert.equal(calls.length, 2);
+            assert.deepEqual(calls[1][2], ghForceRequired
+              ? { scope: undefined, tool: undefined, ghForce: true, ghForceAgent: "github-copilot" }
+              : { scope: undefined, tool: undefined, force: true });
+            input.write("q");
+            assert.equal(await done, true);
+          }
+        } else {
+          input.write(response === "escape" ? "\x1b" : "\r");
+          await waitForFrame((frame) => !frame.includes(promptTitle), "cancelled force prompt");
+          assert.equal(calls.length, 1, "declining must not retry");
+          input.write("q");
+          assert.equal(await done, false);
+        }
+      } finally {
+        input.write("\x1b");
+        await new Promise((resolve) => setTimeout(resolve, 20));
         input.write("q");
-        assert.equal(await done, true);
-      } else {
-        input.write("\r");
-        await waitForFrame((frame) => !frame.includes("LOCAL CONFLICT"), "cancelled conflict prompt");
-        assert.equal(calls.length, 1, "cancelling must not execute a second update");
-        input.write("q");
-        assert.equal(await done, false, "cancelling force recovery leaves the unresolved update failed");
+        await Promise.race([
+          done.catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 100)),
+        ]);
+        input.destroy();
+        output.destroy();
       }
-    } finally {
-      input.write("\x03");
-      await done.catch(() => {});
-      input.destroy();
-      output.destroy();
-    }
     }
   }
 });
+
 
 test("failed managed updates show an actionable error modal in compact and normal layouts", async () => {
   const { PassThrough } = require("node:stream");
@@ -976,3 +1088,4 @@ test("wide catalog management fills the terminal and wraps every active shortcut
   assert.equal(panelBottom(inventory), dimensions.rows - 1,
     "Inventory continues to fill the same terminal height");
 });
+

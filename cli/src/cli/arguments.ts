@@ -9,6 +9,7 @@ export interface CliOptions {
   target?: string;
   userTarget?: string;
   catalog?: string;
+  ref?: string;
   kind?: string;
   id?: string;
   scope?: InventoryScope;
@@ -19,6 +20,8 @@ export interface CliOptions {
   audit?: boolean;
   dryRun?: boolean;
   force?: boolean;
+  ghForce?: boolean;
+  ghForceAgent?: string;
   allCatalogs?: boolean;
   query?: string;
   tag?: string;
@@ -35,6 +38,7 @@ export interface CliOptions {
   resource?: CatalogResource;
   output?: { log(message: string): void; error(message: string): void };
   onAction?: (action: PlanAction) => void;
+  captureOutput?: boolean;
   onResource?: (resource: { catalog: string; kind: string; id: string; status?: string; source?: boolean }) => void;
 }
 const os = require("node:os");
@@ -91,6 +95,9 @@ function parseArguments(args: string[]): CliOptions {
       ? { ...parseCommandArguments(["check", ...remaining.slice(1)]), command: "doctor" }
       : parseCommandArguments(remaining);
     const action = options.action || options.command;
+    if (options.ref && extras.offline) {
+      throw new CatalogError("--ref cannot be used with --offline", "INVALID_ARGUMENT");
+    }
     if (extras.audit && !["preview", "install"].includes(action)) {
       throw new CatalogError("--audit is only supported for source preview and install commands", "INVALID_ARGUMENT");
     }
@@ -115,7 +122,7 @@ function parseArguments(args: string[]): CliOptions {
         !( ["install", "update", "uninstall"].includes(action) && options.dryRun)) {
       throw new CatalogError("--json is supported for discovery, check, doctor and lifecycle --dry-run only");
     }
-    if (extras.catalog && !["show", "preview", "install", "update", "uninstall", "check", "validate"].includes(command)) {
+    if (extras.catalog && !["show", "preview", "install", "update", "uninstall", "check", "validate", "versions"].includes(command)) {
       throw new CatalogError("--catalog is not supported for this command");
     }
     return { ...options, ...extras };
@@ -281,6 +288,13 @@ function parseCommandArguments(args: string[]): CliOptions {
     }
     return options;
   }
+  if (command === "versions") {
+    const [kind, id, ...extra] = remaining;
+    if (kind !== "skill" || !RESOURCE_ID.test(id || "") || extra.length) {
+      throw new CatalogError("Usage: Kitia versions skill <id>");
+    }
+    return { command, kind, id };
+  }
   if (command === "show" || command === "preview") {
     const typed = remaining.length >= 2 && KINDS.has(remaining[0]) && RESOURCE_ID.test(remaining[1]);
     const [kind, id, ...extra] = typed ? remaining : [null, remaining[0], ...remaining.slice(1)];
@@ -315,7 +329,13 @@ function parseCommandArguments(args: string[]): CliOptions {
     const option = options[index];
     if (option === "--dry-run") result.dryRun = true;
     else if (option === "--force") result.force = true;
-    else if (option === "--target" || (option === "--tool" && command === "install")) {
+    else if (option === "--ref" && ["install", "update"].includes(command)) {
+      const value = options[index + 1];
+      if (!value || value.startsWith("--")) throw new CatalogError("--ref requires a commit SHA or hexadecimal prefix");
+      if (!/^[a-f0-9]{7,40}$/i.test(value)) throw new CatalogError("--ref must be a 7- to 40-character hexadecimal commit SHA prefix");
+      result.ref = value.toLowerCase();
+      index += 1;
+    } else if (option === "--target" || (option === "--tool" && command === "install")) {
       const value = options[index + 1];
       if (!value || value.startsWith("--")) throw new CatalogError(`${option} requires a value`);
       if (option === "--target") result.target = value;
@@ -325,6 +345,9 @@ function parseCommandArguments(args: string[]): CliOptions {
       }
       index += 1;
     } else throw new CatalogError(`Unknown option: ${option}`);
+  }
+  if (result.ref && (result.kind !== "skill" || !result.id)) {
+    throw new CatalogError("--ref is supported only for a specific skill install or update");
   }
   return result;
 }
@@ -340,8 +363,9 @@ function printHelp() {
   Kitia validate [--catalog <catalog>]
   Kitia check [--target <dir>] [--catalog <catalog>] [--json]
   Kitia doctor [--target <dir>] [--network] [--json]
-  Kitia install [<kind>] <id> [--target <dir>] [options]
-  Kitia update [<kind> <id>] [--target <dir>] [--dry-run] [--force]
+  Kitia versions skill <id> [--catalog <catalog>]
+  Kitia install [<kind>] <id> [--ref <full-sha>] [--target <dir>] [options]
+  Kitia update [<kind> <id>] [--ref <full-sha>] [--target <dir>] [--dry-run] [--force]
   Kitia uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force]
   Kitia catalog add <name> <https-github-url>
   ${catalogPresetCommands.map((preset) => `Kitia catalog add ${preset}`).join("\n  ")}
@@ -376,6 +400,7 @@ Options:
                                 User scope cannot be combined with --target
   --tool <claude|copilot|both>  Install only: desired runtimes (default: copilot)
   --dry-run                     Preview files without writing
+  --ref <full-sha>              Install/update a source skill at a specific commit (not bundles/offline)
   --force                       Overwrite files or remove modified/untracked source skills
   F / A / U / Delete            Dashboard only: filter / browse / update / uninstall resources
   Omit <kind> when the resource ID is unique; ambiguous IDs open a selector.

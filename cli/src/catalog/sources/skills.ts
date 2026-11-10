@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const YAML = require("yaml");
-const { spawnSync, execFileSync } = require("node:child_process");
+const { spawnSync, execFileSync, execFile } = require("node:child_process");
 const {
   CatalogError, SOURCE_SKILL_DIRECTORIES, LOCK_PATH, addPlanEntry,
 } = require("../resources/index.js");
@@ -30,6 +30,190 @@ import type { InstalledSourceResource } from "./installed.js";
 const {
   MAX_BUNDLE_FILES, MAX_BUNDLE_CONTENT_BYTES, readCachedResourceFiles,
 } = require("../bundles.js");
+const SKILL_VERSION_PAGE_SIZE = 100;
+const SKILL_VERSION_MAX = 500;
+function sourceHistoryPath(resource: CatalogResource): string | null {
+  const { source_repository: repository, source_path: sourcePath } = resource;
+  if (typeof repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ||
+      typeof sourcePath !== "string" || !sourcePath || sourcePath.startsWith("/") ||
+      sourcePath.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(sourcePath) ||
+      sourcePath.split("/").some((part) => !part || part === "." || part === "..")) {
+    return null;
+  }
+  if (resource.kind === "skill") return `${sourcePath}/SKILL.md`;
+  if ((resource.kind === "agent" || resource.kind === "instruction") && /\.md$/i.test(sourcePath)) {
+    return sourcePath;
+  }
+  return null;
+}
+function latestSourceVersionAtRef(
+  resource: CatalogResource,
+  ref: string,
+  run = execFileSync,
+): string | null {
+  const historyPath = sourceHistoryPath(resource);
+  if (!historyPath) return null;
+  let response: string;
+  try {
+    response = run("gh", [
+      "api", "-X", "GET", `repos/${resource.source_repository}/commits`,
+      "-f", `path=${historyPath}`,
+      "-f", `sha=${ref}`,
+      "-F", "per_page=1",
+    ], {
+      encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const detail = String(error.stderr || error.message || "unknown error").trim().slice(0, 500);
+    throw new CatalogError(`Cannot check GitHub source history for ${resource.source_repository}/${historyPath}: ${detail}`);
+  }
+  let commits;
+  try {
+    commits = JSON.parse(response);
+  } catch {
+    throw new CatalogError("GitHub CLI returned invalid JSON while checking source history.");
+  }
+  if (!Array.isArray(commits) || commits.length !== 1 ||
+      !/^[a-f0-9]{40}$/i.test(commits[0]?.sha || "")) {
+    throw new CatalogError("GitHub CLI returned an invalid source-history response.");
+  }
+  return commits[0].sha.toLowerCase();
+}
+function validateSkillVersionResource(resource: CatalogResource): void {
+  if (resource.kind !== "skill" || !resource.source_repository || !resource.source_path) {
+    throw new CatalogError("Commit history is available only for configured GitHub source skills.", "INVALID_ARGUMENT");
+  }
+}
+function skillVersionArguments(resource: CatalogResource, page: number): string[] {
+  return [
+    "api", "-X", "GET", `repos/${resource.source_repository}/commits`,
+    "-f", `path=${resource.source_path}/SKILL.md`,
+    "-F", `per_page=${SKILL_VERSION_PAGE_SIZE}`,
+    "-F", `page=${page}`,
+  ];
+}
+function parseSkillVersionPage(response: string) {
+  let commits;
+  try {
+    commits = JSON.parse(response);
+  } catch {
+    throw new CatalogError("GitHub CLI returned invalid JSON while listing skill commit history.");
+  }
+  if (!Array.isArray(commits)) {
+    throw new CatalogError("GitHub CLI returned an invalid commit-history response.");
+  }
+  const versions = [];
+  for (const entry of commits) {
+    const sha = entry?.sha;
+    const commit = entry?.commit;
+    const date = commit?.committer?.date;
+    const message = commit?.message;
+    if (!/^[a-f0-9]{40}$/i.test(sha || "") || typeof date !== "string" ||
+        !Number.isFinite(Date.parse(date)) || typeof message !== "string" || !message.trim()) {
+      throw new CatalogError("GitHub CLI returned an invalid commit in skill history.");
+    }
+    versions.push({ sha: sha.toLowerCase(), date, subject: message.split(/\r?\n/, 1)[0] });
+  }
+  return { commits, versions };
+}
+function skillHistoryFailure(resource: CatalogResource, error) {
+  const detail = String(error.stderr || error.message || "unknown error").trim().slice(0, 500);
+  return new CatalogError(
+    `Cannot list GitHub commit history for ${resource.source_repository}/${resource.source_path}/SKILL.md: ${detail}`,
+  );
+}
+const runExecFile = (program, args, options) => {
+  const { promise, resolve, reject } = (Promise as PromiseConstructor & {
+    withResolvers<T>(): {
+      promise: Promise<T>;
+      resolve(value: T): void;
+      reject(reason?: unknown): void;
+    };
+  }).withResolvers<string>();
+  execFile(program, args, options, (error, stdout, stderr) => {
+    if (error) {
+      error.stderr = stderr;
+      reject(error);
+    } else {
+      resolve(stdout);
+    }
+  });
+  return promise;
+};
+function listSkillVersions(
+  resource: CatalogResource,
+  run = execFileSync,
+): Array<{ sha: string; date: string; subject: string }> {
+  validateSkillVersionResource(resource);
+  const versions = [];
+  for (let page = 1; page <= SKILL_VERSION_MAX / SKILL_VERSION_PAGE_SIZE; page += 1) {
+    let response: string;
+    try {
+      response = run("gh", skillVersionArguments(resource, page), {
+        encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      throw skillHistoryFailure(resource, error);
+    }
+    const parsed = parseSkillVersionPage(response);
+    versions.push(...parsed.versions);
+    if (parsed.commits.length < SKILL_VERSION_PAGE_SIZE || versions.length >= SKILL_VERSION_MAX) break;
+  }
+  return versions;
+}
+async function listSkillVersionsAsync(
+  resource: CatalogResource,
+  run = runExecFile,
+): Promise<Array<{ sha: string; date: string; subject: string }>> {
+  validateSkillVersionResource(resource);
+  const versions = [];
+  for (let page = 1; page <= SKILL_VERSION_MAX / SKILL_VERSION_PAGE_SIZE; page += 1) {
+    let response: string;
+    try {
+      response = await run("gh", skillVersionArguments(resource, page), {
+        encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      throw skillHistoryFailure(resource, error);
+    }
+    const parsed = parseSkillVersionPage(response);
+    versions.push(...parsed.versions);
+    if (parsed.commits.length < SKILL_VERSION_PAGE_SIZE || versions.length >= SKILL_VERSION_MAX) break;
+  }
+  return versions;
+}
+function uniqueSkillVersionPrefixes(versions): string[] {
+  return versions.map(({ sha }) => {
+    let length = 7;
+    while (length < 40 && versions.some((version) =>
+      version.sha !== sha && version.sha.startsWith(sha.slice(0, length)))) {
+      length += 1;
+    }
+    return sha.slice(0, length);
+  });
+}
+function formatSkillVersionTable(versions): string[] {
+  const prefixes = uniqueSkillVersionPrefixes(versions);
+  const shaWidth = Math.max(3, ...prefixes.map((prefix) => prefix.length));
+  const rows = [
+    `${"SHA".padEnd(shaWidth)}  DATE                  SUBJECT`,
+    `${"-".repeat(shaWidth)}  --------------------- -------`,
+  ];
+  for (const [index, version] of versions.entries()) {
+    rows.push(`${prefixes[index].padEnd(shaWidth)}  ${version.date.padEnd(21)} ${version.subject}`);
+  }
+  return rows;
+}
+function resolveSkillVersionPrefix(versions, prefix: string): string {
+  const matches = versions.filter(({ sha }) => sha.startsWith(prefix.toLowerCase()));
+  if (matches.length !== 1) {
+    throw new CatalogError(
+      matches.length ? `Commit prefix '${prefix}' is ambiguous.` : `Commit prefix '${prefix}' was not found in skill history.`,
+      matches.length ? "AMBIGUOUS_RESOURCE" : "RESOURCE_NOT_FOUND",
+    );
+  }
+  return matches[0].sha;
+}
 function catalogLabel(resource: CatalogResource): string {
   return `${resource.catalog || "source"} catalog`;
 }
@@ -558,12 +742,16 @@ function updateSourceResources(
   {
     dryRun = false,
     force = false,
+    ghForce = false,
+    ghForceAgent,
     onAction = () => {},
     nonInteractive = false,
     scope = "project",
   }: {
     dryRun?: boolean;
     force?: boolean;
+    ghForce?: boolean;
+    ghForceAgent?: string;
     onAction?: (action: PlanAction) => void;
     nonInteractive?: boolean;
     scope?: string;
@@ -574,7 +762,10 @@ function updateSourceResources(
     nonInteractive, captureOutput: nonInteractive,
   });
   const targetRoot = fs.realpathSync(target);
-  const installOptions = { force: true, scope, target: targetRoot };
+  if (ghForce && !ghForceAgent) {
+    throw new CatalogError("A GitHub force retry must identify the failed agent.", "INVALID_ARGUMENT");
+  }
+  const installOptions = { scope, target: targetRoot };
   validateSourceUpdates(installed, { force, target: targetRoot, scope });
   const fileResources = installed.filter(({ resource }) => resource.kind !== "skill");
   const fileMessages = updateSourceFileResources(fileResources, target, { dryRun, force, onAction, scope });
@@ -609,7 +800,9 @@ function updateSourceResources(
         onAction({
           action: "delegate_install", path: installation.path,
           resource: { catalog: sourceCatalogName(resource), kind: "skill", id: resource.id },
-          command: { program: "gh", args: buildSourceSkillArgs("install", resource, installation.agent, installOptions) },
+          command: { program: "gh", args: buildSourceSkillArgs("install", resource, installation.agent, {
+            ...installOptions, force: force || (ghForce && installation.agent === ghForceAgent),
+          }) },
         });
       }
       const installedRefs = [...new Set(stale.map(({ ref }) => ref?.slice(0, 7) || "unknown"))];
@@ -623,7 +816,9 @@ function updateSourceResources(
       let result: number | GhSkillResult;
       try {
         result = invokeGhSkill(
-          buildSourceSkillArgs("install", resource, installation.agent, installOptions),
+          buildSourceSkillArgs("install", resource, installation.agent, {
+            ...installOptions, force: force || (ghForce && installation.agent === ghForceAgent),
+          }),
           targetRoot,
         );
       } catch (error) {
@@ -637,7 +832,10 @@ function updateSourceResources(
       const status = typeof result === "number" ? result : result.status;
       if (status !== 0) {
         const diagnostic = typeof result === "number" ? "" : formatGhDiagnostics(result);
-        const cause = describeGhFailure(diagnostic);
+        const ghForceRequired = /^Skills already installed: [^\r\n]+ \(Use --force to overwrite\)$/im.test(diagnostic);
+        const cause = ghForceRequired
+          ? "GitHub CLI says this skill is already installed and requires --force to overwrite it."
+          : describeGhFailure(diagnostic);
         const priorUpdates = [
           ...messages,
           ...(completed.length ? [`Updated agents: ${completed.join(", ")}`] : []),
@@ -646,6 +844,16 @@ function updateSourceResources(
           ? ` Already updated: ${priorUpdates.join("; ")}. Those updates remain in place.`
           : " No agents were confirmed updated before this failure.";
         const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}: gh exited with status ${status}. ${cause}${partial}`;
+        if (ghForceRequired) {
+          throw new CatalogError(
+            `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
+            "GH_FORCE_REQUIRED",
+            {
+              category: "github-force-required", recoverable: true, agent: installation.agent,
+              userMessage, technicalDetail: diagnostic || undefined,
+            },
+          );
+        }
         throw new CatalogError(
           `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
           "GH_UPDATE_FAILED",
@@ -921,6 +1129,7 @@ function formatGhDiagnostics(result: GhSkillResult): string {
   return text.length > limit ? `${text.slice(0, limit)}… [diagnostic truncated]` : text;
 }
 
+
 function describeGhFailure(diagnostic: string): string {
   const text = diagnostic.toLowerCase();
   if (/rate.?limit|api rate limit/.test(text)) return "GitHub reports an API rate limit; wait for the limit to reset, then retry.";
@@ -1000,7 +1209,10 @@ function runSourceCommand(
   options: CliOptions,
   invokeGhSkill?: (args: string[], cwd: string) => number | GhSkillResult,
 ): number {
-  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, options);
+  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, {
+    nonInteractive: options.nonInteractive,
+    captureOutput: options.captureOutput,
+  });
   const output = options.output || console;
   const catalog = options.catalog || "source";
   let sourceResources: CatalogResource[] = options.sourceResources || [];
@@ -1107,6 +1319,10 @@ function runSourceCommand(
   if (options.action === "preview" || options.dryRun) {
     if (options.dryRun) output.error(`Dry run: previewing the ${catalogLabel(resource)} skill; no files will be installed.`);
     const result = invokeGhSkill(buildSourceSkillArgs("preview", resource), target);
+    if (typeof result !== "number" && options.captureOutput) {
+      if (result.stdout) output.log(String(result.stdout));
+      if (result.stderr) output.error(String(result.stderr));
+    }
     return typeof result === "number" ? result : result.status;
   }
   if (bundleFiles) {
@@ -1131,7 +1347,7 @@ function runSourceCommand(
 }
 
 module.exports = {
-  buildSourceSkillArgs, readPinnedSourceFiles, readInstalledSourceSkills, readInstalledSourceResources,
+  buildSourceSkillArgs, listSkillVersions, listSkillVersionsAsync, latestSourceVersionAtRef, uniqueSkillVersionPrefixes, formatSkillVersionTable, resolveSkillVersionPrefix, readPinnedSourceFiles, readInstalledSourceSkills, readInstalledSourceResources,
   installSourceFileResource, installBundledSourceSkill, validateSourceUpdates, updateSourceResources,
   uninstallSourceResource, runGhSkill, formatSourceResource, runSourceCommand,
 };

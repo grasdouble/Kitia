@@ -7,13 +7,19 @@ import type { ScanError } from "../catalog/lifecycle.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
 
 export interface PendingDashboardAction {
-  action: "install" | "update" | "uninstall" | "remove-unmanaged";
+  action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview" | "audit";
   resource: CatalogResource;
   scope?: string;
   tool?: string;
+  ref?: string;
   forceRetry?: boolean;
-  conflict?: { category: string; paths: string[] };
+  ghForceRetry?: boolean;
+  ghForceAgent?: string;
+  ghForceAgents?: string[];
+  conflict?: { category: string; paths: string[]; message?: string };
 }
+
+export type SkillVersionOption = { sha: string; prefix: string; date: string; subject: string };
 
 const h = React.createElement;
 const MODAL_BACKGROUND = "#111827";
@@ -106,6 +112,7 @@ export function optionsModal({
   resources,
   errors,
   columns,
+  ref,
 }: {
   resource: CatalogResource;
   scope: string;
@@ -114,6 +121,7 @@ export function optionsModal({
   resources: CatalogResource[];
   errors: ScanError[];
   columns: number;
+  ref?: string | null;
 }) {
   const source = (resource.catalog || "-").toUpperCase();
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
@@ -141,9 +149,11 @@ export function optionsModal({
     { text: "DESTINATION", bold: true },
     choiceGroup("SCOPE", scopeChoices, scopeChoices.indexOf(scope), focus === 0),
     choiceGroup("CLIENT", toolChoices, toolChoices.indexOf(tool), focus === 1),
+    ...(ref ? [{ text: `Selected commit: ${ref}. The catalog pin remains unchanged.`, color: "cyan" }] : []),
+    { text: "Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.", color: "yellow" },
     scopeError || alreadyInstalled
       ? "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ESC BACK"
-      : "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REVIEW · ESC BACK",
+      : "↑↓ FIELD · ←→ CHOOSE · ENTER REVIEW · ESC BACK",
   ], columns, "cyan");
 }
 
@@ -165,30 +175,36 @@ export function confirmationModal({
         ? permanentRemoval ? "Remove permanently" : "Remove"
         : "Uninstall";
   const conflict = confirmation.conflict;
-  const conflictCategory = conflict?.category === "tracked-modification"
-    ? "Tracked files were locally modified."
-    : conflict?.category === "untracked-skill-content"
-      ? "Untracked content is present in the skill directory."
-      : "A local conflict was detected.";
+  const conflictCategory = confirmation.ghForceRetry
+    ? "GitHub CLI reported that the skill is already installed and requires --force to overwrite it."
+    : conflict?.category === "tracked-modification"
+      ? "Tracked files were locally modified."
+      : conflict?.category === "untracked-skill-content"
+        ? "Untracked content is present in the skill directory."
+        : "A local conflict was detected.";
   const conflictPaths = conflict?.paths || [];
-  const forceImpact = conflict?.category === "tracked-modification"
-    ? "Forcing will overwrite the locally modified tracked files listed above."
-    : conflict?.category === "untracked-skill-content"
-      ? "Forcing may replace or remove untracked content in this skill directory."
-      : "Forcing will overwrite the conflicting local destination files listed above.";
+  const forceImpact = confirmation.ghForceRetry
+    ? "Retry will pass --force to GitHub CLI only; Kitia's local-modification and untracked-content checks still apply."
+    : conflict?.category === "tracked-modification"
+      ? "Forcing will overwrite the locally modified tracked files listed above."
+      : conflict?.category === "untracked-skill-content"
+        ? "Forcing may replace or remove untracked content in this skill directory."
+        : "Forcing will overwrite the conflicting local destination files listed above.";
   const targetContext = [
     confirmation.resource.catalog && `catalog ${confirmation.resource.catalog}`,
     confirmation.resource.scope && `scope ${confirmation.resource.scope}`,
   ].filter(Boolean).join(" · ");
-  const question = confirmation.forceRetry
-    ? `Conflict detected while updating ${confirmation.resource.kind}:${confirmation.resource.id}${targetContext ? ` (${targetContext})` : ""}. Force update and retry?`
-    : confirmation.action === "install"
-      ? `Install ${confirmation.resource.kind}:${confirmation.resource.id}?`
-      : confirmation.action === "remove-unmanaged"
-        ? permanentRemoval
-          ? `Permanently remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
-          : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
-        : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
+  const question = confirmation.ghForceRetry
+    ? `GitHub CLI asked to overwrite ${confirmation.resource.kind}:${confirmation.resource.id}${confirmation.ghForceAgent ? ` for ${confirmation.ghForceAgent}` : ""}${targetContext ? ` (${targetContext})` : ""}. Retry with --force?`
+    : confirmation.forceRetry
+      ? `Conflict detected while updating ${confirmation.resource.kind}:${confirmation.resource.id}${targetContext ? ` (${targetContext})` : ""}. Force update and retry?`
+      : confirmation.action === "install"
+        ? `Install ${confirmation.resource.kind}:${confirmation.resource.id}?`
+        : confirmation.action === "remove-unmanaged"
+          ? permanentRemoval
+            ? `Permanently remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
+            : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
+          : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
   const removalWarning = permanentRemoval
     ? `This artifact is not managed by a Kitia catalog. This action is irreversible; ${
       confirmation.resource.kind === "skill" ? "all data in its skill directory" : "the artifact file"
@@ -198,35 +214,45 @@ export function confirmationModal({
       : "Kitia will remove the detected artifact file.";
   const updateSafeguard = confirmation.resource.kind === "skill" &&
       confirmation.resource.source_repository && !confirmation.resource.bundle_id
-    ? "Kitia passes gh skill install --force to replace the installed copy, but checks local conflicts first and asks before proceeding if any are found."
+    ? "The first gh skill install runs without --force. If GH says overwrite requires --force, Kitia asks before retrying; local safety checks apply."
     : confirmation.resource.kind === "skill" && confirmation.resource.bundle_id
       ? "This skill is updated from an imported signed offline bundle; no gh command or gh --force is used. Kitia checks local conflicts and asks separately before Kitia force can overwrite them."
       : "This resource update does not use gh --force. Kitia checks local conflicts and asks separately before Kitia force can overwrite them.";
   return modalFrame(
-    confirmation.forceRetry ? "LOCAL CONFLICT" : permanentRemoval ? "CONFIRM PERMANENT REMOVAL" : `CONFIRM ${actionLabel.toUpperCase()}`,
+    confirmation.ghForceRetry
+      ? "GH REQUESTS OVERWRITE"
+      : confirmation.forceRetry ? "LOCAL CONFLICT" : permanentRemoval ? "CONFIRM PERMANENT REMOVAL" : `CONFIRM ${actionLabel.toUpperCase()}`,
     [
       question,
       ...(confirmation.forceRetry
         ? [
-          conflictCategory,
-          ...conflictPaths.slice(0, 12).map((item) => `• ${item}`),
-          ...(conflictPaths.length > 12 ? [`…and ${conflictPaths.length - 12} more path(s)`] : []),
+          conflict?.message || conflictCategory,
+          ...(!confirmation.ghForceRetry ? conflictPaths.slice(0, 12).map((item) => `• ${item}`) : []),
+          ...(!confirmation.ghForceRetry && conflictPaths.length > 12
+            ? [`…and ${conflictPaths.length - 12} more path(s)`]
+            : []),
           forceImpact,
         ]
         : confirmation.action === "install"
-          ? [`Destination: ${confirmation.scope} · Client: ${confirmation.tool}`,
-            "Normal CLI safeguards apply; --force is not used."]
+          ? [
+            `Destination: ${confirmation.scope} · Client: ${confirmation.tool}`,
+            ...(confirmation.ref ? [`Selected revision: ${confirmation.ref} (catalog pin unchanged).`] : []),
+            "Normal CLI safeguards apply; --force is not used.",
+          ]
           : confirmation.action === "update"
-            ? [updateSafeguard]
+            ? [
+              updateSafeguard,
+              ...(confirmation.ref ? [`Selected revision: ${confirmation.ref} (catalog pin unchanged).`] : []),
+            ]
             : confirmation.action === "remove-unmanaged"
               ? [removalWarning]
-            : confirmation.action === "uninstall" && confirmation.resource.kind === "skill"
-              ? ["Kitia removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
-              : ["The CLI safety checks apply; locally modified tracked files are protected."]),
+              : confirmation.action === "uninstall" && confirmation.resource.kind === "skill"
+                ? ["Kitia removes the entire managed skill folder and all of its contents; locally modified tracked files still block uninstall."]
+                : ["The CLI safety checks apply; locally modified tracked files are protected."]),
       "",
       choiceGroup("", [
-        { label: "CANCEL" },
-        { label: confirmation.forceRetry ? "FORCE AND RETRY" : actionLabel, color: confirmation.action !== "install" ? "redBright" : "cyan" },
+        { label: confirmation.forceRetry ? "NO / CANCEL" : "CANCEL" },
+        { label: confirmation.forceRetry ? "YES, RETRY WITH --FORCE" : actionLabel, color: confirmation.action !== "install" ? "redBright" : "cyan" },
       ], selectedButton),
       "←/→ CHOOSE · ENTER CONFIRM · Y/N SHORTCUTS",
     ],
@@ -256,6 +282,85 @@ export function actionFailureModal({
     88,
   );
 }
+export function inspectionModal({ action, resource, content, columns, rows }: {
+  action: "preview" | "audit";
+  resource: CatalogResource;
+  content: string;
+  columns: number;
+  rows: number;
+}) {
+  const title = action === "preview" ? "SOURCE PREVIEW" : "RESOURCE AUDIT";
+  const width = Math.max(20, Math.min(96, columns - 4));
+  const innerWidth = width - 4;
+  const metadata = `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`;
+  const metadataRows = wrapText(metadata, innerWidth).length;
+  const maxBodyRows = Math.max(1, rows - metadataRows - 9);
+  const sourceLines = content.split(/\r?\n/);
+  const bodyLines: string[] = [];
+  let truncated = false;
+  for (const sourceLine of sourceLines) {
+    const wrapped = wrapText(sourceLine, innerWidth);
+    if (bodyLines.length + wrapped.length > maxBodyRows) {
+      truncated = true;
+      break;
+    }
+    bodyLines.push(...wrapped);
+  }
+  if (truncated) {
+    bodyLines.splice(Math.max(0, maxBodyRows - 1));
+    bodyLines.push("… output truncated in dashboard");
+  }
+  return modalFrame(title, [
+    metadata,
+    "",
+    ...(bodyLines.length ? bodyLines : ["No output was returned."]),
+    "ENTER / ESC CLOSE",
+  ], columns, action === "audit" ? "yellow" : "cyan", 96);
+}
+export function loadingModal({ message, frame, columns }: {
+  message: string;
+  frame: string;
+  columns: number;
+}) {
+  return modalFrame("LOADING", [
+    { text: `${frame} ${message}`, color: "cyan", bold: true },
+    "",
+    "Please wait while Kitia completes this operation.",
+  ], columns, "cyan", 72);
+}
+export function skillVersionsModal({
+  resource,
+  versions,
+  selectedIndex,
+  columns,
+}: {
+  resource: CatalogResource;
+  versions: SkillVersionOption[];
+  selectedIndex: number;
+  columns: number;
+}) {
+  const count = Math.min(14, versions.length);
+  const first = Math.max(0, Math.min(selectedIndex - Math.floor(count / 2), versions.length - count));
+  const visible = versions.slice(first, first + count);
+  const lineWidth = Math.max(1, Math.min(84, columns - 12));
+  return modalFrame("SKILL REVISIONS", [
+    `${resource.catalog || "source"} / skill:${resource.id}`,
+    "Select a commit to install; the catalog pin remains unchanged.",
+    "",
+    ...visible.map((version, offset) => ({
+      text: fitText(
+        `${first + offset === selectedIndex ? "›" : " "} ${version.prefix}  ${version.date.slice(0, 10)}  ${version.subject}`,
+        lineWidth,
+      ),
+      color: first + offset === selectedIndex ? "cyan" : undefined,
+      bold: first + offset === selectedIndex,
+    })),
+    versions.length > count ? `Showing ${first + 1}-${first + count} of ${versions.length} commits.` : "",
+    "↑↓ SELECT · ENTER INSTALL · ESC BACK",
+  ], columns, "cyan", Math.min(96, lineWidth + 8));
+}
+
+
 
 
 

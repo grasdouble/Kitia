@@ -5,6 +5,7 @@ import type { CatalogResource } from "../catalog/entries.js";
 
 const require = createRequire(import.meta.url);
 const { matchesSearchText, searchRelevance } = require("../catalog/search.js");
+const { matchesLicense } = require("../catalog/license.js");
 
 export interface InventoryCatalogConfiguration {
   name: string;
@@ -96,15 +97,24 @@ export function filterCatalogResources(
   catalogFilter: string,
   kindFilter: string,
   catalogs: InventoryCatalogConfiguration[] = [],
+  filters: { tag?: string; status?: string; license?: string } = {},
 ): CatalogResource[] {
   const labels = inventoryCatalogLabels(resources, catalogs);
   const visible = resources.filter((resource) => {
     const catalog = catalogCandidateLabel(resource, labels);
     if (catalogFilter !== "all" && catalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
+    if (filters.tag && !(resource.tags || []).includes(filters.tag)) return false;
+    if (filters.status && resource.status !== filters.status) return false;
+    if (filters.license && !matchesLicense(resource, filters.license)) return false;
     return matchesSearchText(query, [
       catalog, resource.kind, resource.id, resource.description,
-      resource.license_status || "",
+      resource.license_status || "", resource.license_spdx || "",
+      resource.category || "", resource.owner || "",
+      ...(resource.tags || []), resource.status || "",
+      resource.use_when || "", resource.example || "",
+      resource.expected_output || "", resource.source_repository || "",
+      resource.source_path || "",
     ]);
   });
   if (query.trim()) {
@@ -145,17 +155,30 @@ export function mergeRefreshedCatalogResources(
   }
   return merged;
 }
-type CatalogFilterProperty = "catalog" | "kind";
+type CatalogFilterProperty = "catalog" | "kind" | "tag" | "status" | "license";
 
-function catalogFilterValue(
+function catalogFilterValues(
   resource: CatalogResource,
   property: CatalogFilterProperty,
   labels?: Map<CatalogResource, string>,
-): string {
+): string[] {
   if (property === "catalog") {
-    return labels ? catalogCandidateLabel(resource, labels) : catalogLabel(resource);
+    return [labels ? catalogCandidateLabel(resource, labels) : catalogLabel(resource)];
   }
-  return resource.kind;
+  if (property === "kind") return [resource.kind];
+  if (property === "tag") return resource.tags || [];
+  if (property === "status") return resource.status ? [resource.status] : [];
+  return [resource.license_status, resource.license_spdx].filter((value): value is string => Boolean(value));
+}
+
+function matchesCatalogFilter(
+  resource: CatalogResource,
+  property: CatalogFilterProperty,
+  filter: string,
+  labels?: Map<CatalogResource, string>,
+): boolean {
+  if (property === "license") return matchesLicense(resource, filter);
+  return catalogFilterValues(resource, property, labels).includes(filter);
 }
 
 export function cycleFilter(
@@ -168,8 +191,9 @@ export function cycleFilter(
 ): string {
   const labels = inventoryCatalogs ? inventoryCatalogLabels(resources, inventoryCatalogs) : undefined;
   const values = [...new Set(resources
-    .filter((resource) => otherFilter === "all" || catalogFilterValue(resource, otherProperty, labels) === otherFilter)
-    .map((resource) => catalogFilterValue(resource, property, labels))
+    .filter((resource) => otherFilter === "all" ||
+      matchesCatalogFilter(resource, otherProperty, otherFilter, labels))
+    .flatMap((resource) => catalogFilterValues(resource, property, labels))
     .filter(Boolean))].sort((left, right) => left.localeCompare(right));
   const choices = ["all", ...values];
   return choices[(choices.indexOf(current) + 1) % choices.length];

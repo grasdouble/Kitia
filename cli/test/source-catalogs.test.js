@@ -11,7 +11,10 @@ const {
   checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog, importCatalogConfigurationText,
 } = require("../dist/catalog/sources/manage.js");
 const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
-const { installSourceFileResource, runGhSkill } = require("../dist/catalog/sources/skills.js");
+const {
+  installSourceFileResource, runGhSkill, listSkillVersions, listSkillVersionsAsync, latestSourceVersionAtRef, uniqueSkillVersionPrefixes,
+  formatSkillVersionTable, resolveSkillVersionPrefix, buildSourceSkillArgs,
+} = require("../dist/catalog/sources/skills.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
 const { recordSourceInstallation } = require("../dist/catalog/sources/installed.js");
@@ -19,7 +22,7 @@ const { loadCommandCatalogs } = require("../dist/catalog/loading.js");
 const { findUnmanagedArtifacts, installedFingerprint, readInstallState } = require("../dist/catalog/inventory/index.js");
 const { collectInstalledScopes } = require("../dist/catalog/lifecycle.js");
 const { formatDashboardRows, listCatalogResources } = require("../dist/cli/catalog.js");
-const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel } =
+const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel, dashboardStatus } =
   require("../dist/dashboard/helpers.mjs");
 const { renderInstalledResources } = require("../dist/dashboard/terminal.js");
 const {
@@ -43,6 +46,263 @@ test("catalog discovery ranks exact identifiers and preserves existing filters",
   assert.deepEqual(filterCatalogResources(resources, "release", "main", "all")
     .map(({ id }) => id), ["release", "release-helper"]);
 });
+
+test("catalog browser search covers discovery metadata fields", () => {
+  const resource = {
+    id: "deploy-helper", kind: "skill", catalog: "main",
+    category: "deployment", owner: "platform", tags: ["release"],
+    status: "stable", license_status: "MIT", license_spdx: "MIT",
+    use_when: "shipping software", example: "deploy release",
+    expected_output: "deployment plan", source_repository: "org/tools",
+    source_path: "skills/deploy-helper",
+  };
+  for (const query of [
+    "deployment", "platform", "release", "stable", "MIT", "shipping",
+    "deploy", "plan", "org/tools", "skills/deploy-helper",
+  ]) {
+    assert.deepEqual(filterCatalogResources([resource], query, "all", "all"), [resource], query);
+  }
+});
+test("catalog browser filters compose tag, status, and SPDX license constraints", () => {
+  const resources = [
+    { id: "release-helper", kind: "skill", catalog: "main", tags: ["release"], status: "stable", license_status: "MIT", license_spdx: "MIT" },
+    { id: "release-agent", kind: "agent", catalog: "main", tags: ["review"], status: "experimental", license_status: "Apache-2.0", license_spdx: "Apache-2.0" },
+    { id: "release-guide", kind: "instruction", catalog: "other", tags: ["review"], status: "stable", license_status: "Proprietary" },
+  ];
+  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { tag: "review" })
+    .map(({ id }) => id), ["release-agent", "release-guide"]);
+  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { status: "stable" })
+    .map(({ id }) => id), ["release-helper", "release-guide"]);
+  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { license: "Apache-2.0" })
+    .map(({ id }) => id), ["release-agent"]);
+  assert.deepEqual(filterCatalogResources(resources, "release", "main", "skill", [], {
+    tag: "release", status: "stable", license: "MIT",
+  }).map(({ id }) => id), ["release-helper"]);
+  assert.equal(cycleFilter("all", resources, "tag", "kind", "all"), "release");
+});
+test("dashboard preview, audit, and install dispatch use source audit and capture semantics", async () => {
+  const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-inspection-"));
+  const configDirectory = path.join(temporary, "config");
+  const indexDirectory = path.join(configDirectory, "source-catalogs");
+  fs.mkdirSync(indexDirectory, { recursive: true });
+  const repository = "https://github.com/org/repo";
+  const configuration = { catalog_version: 1, sources: [{ name: "Test", repository }] };
+  writeJson(path.join(configDirectory, "catalogSources.json"), configuration);
+  writeJson(path.join(indexDirectory, "catalogSources.json"), configuration);
+  const resource = {
+    catalog: "Test", kind: "skill", id: "reviewer",
+    source_repository: "org/repo", source_path: "skills/reviewer/SKILL.md",
+    source_ref: "a".repeat(40), license_status: "MIT", description: "Review changes.",
+  };
+  writeJson(path.join(indexDirectory, "Test.json"), {
+    catalog_version: 1, catalog_name: "Test", source_repository: "org/repo",
+    source_ref: "a".repeat(40), resources: [{
+      kind: "skill", id: "reviewer", source_path: "skills/reviewer/SKILL.md",
+      description: "Review changes.", license_status: "MIT",
+    }],
+  });
+  const previousConfig = process.env.KITIA_CONFIG_DIR;
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  try {
+    const dispatched = [];
+    const handler = createDashboardActionHandler(async (options) => {
+      dispatched.push(options);
+      options.output.log("Inspection output");
+      return 0;
+    });
+    const invoke = (action, installOptions = {}) => handler(action, resource, {
+      target: temporary, userTarget: temporary,
+    }, { sourceResources: [resource] }, installOptions);
+    await invoke("preview");
+    await invoke("audit");
+    await invoke("install");
+    const ref = "b".repeat(40);
+    await invoke("install", { ref });
+    await invoke("update", { ref });
+    assert.deepEqual(dispatched.map(({ command, audit, captureOutput, ref: selectedRef }) =>
+      ({ command, audit, captureOutput, ref: selectedRef })), [
+      { command: "preview", audit: undefined, captureOutput: true, ref: undefined },
+      { command: "preview", audit: true, captureOutput: true, ref: undefined },
+      { command: "install", audit: true, captureOutput: false, ref: undefined },
+      { command: "install", audit: true, captureOutput: false, ref },
+      { command: "update", audit: undefined, captureOutput: false, ref },
+    ]);
+  } finally {
+    if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfig;
+  }
+});
+test("dashboard installs the selected full skill revision from the revision picker", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const selectedSha = "b".repeat(40);
+  const actions = [];
+  const done = runDashboard([], input, output, [], {
+    catalogResources: [{
+      catalog: "Test", kind: "skill", id: "revision-skill",
+      source_repository: "org/repo", source_path: "skills/revision-skill",
+      source_ref: "a".repeat(40), license_status: "MIT",
+    }],
+    listSkillVersions: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return [
+        { sha: "a".repeat(40), prefix: "aaaaaaa", date: "2026-11-09T00:00:00Z", subject: "Current pin" },
+        { sha: selectedSha, prefix: "bbbbbbb", date: "2026-11-08T00:00:00Z", subject: "Previous revision" },
+      ];
+    },
+    execute: async (action, resource, options) => {
+      actions.push({ action, resource: resource.id, ref: options.ref });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return { code: 0, messages: ["Installed selected revision."], resources: [], errors: [] };
+    },
+  });
+  let dashboardFinished = false;
+  void done.then(() => { dashboardFinished = true; });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("v");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.ok(["|", "/", "-", "\\"].some((frame) =>
+    rendered.includes(`${frame} Loading commit history for revision-skill`)));
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  input.write("\x1b[B");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /Selected commit:/);
+  assert.ok(rendered.includes(selectedSha));
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /CONFIRM INSTALL/);
+  input.write("y");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.ok(["|", "/", "-", "\\"].some((frame) =>
+    rendered.includes(`${frame} Installing skill:revision-skill`)));
+  assert.match(rendered, /LOADING/);
+  input.write("q");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(dashboardFinished, false, "input remains blocked while the loader popup is active");
+  const displayedFrames = ["|", "/", "-", "\\"].filter((frame) =>
+    rendered.includes(`${frame} Installing skill:revision-skill`));
+  assert.ok(displayedFrames.length >= 2, `expected animation frames, got ${displayedFrames.join(", ")}`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
+test("dashboard shows the loading popup for consecutive actions", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  let callCount = 0;
+  const done = runDashboard([], input, output, [], {
+    catalogResources: [{
+      catalog: "Test", kind: "skill", id: "repeat-skill",
+      source_repository: "org/repo", source_path: "skills/repeat-skill",
+      source_ref: "a".repeat(40), license_status: "MIT",
+    }],
+    execute: async () => {
+      callCount += 1;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return { code: 0, messages: ["Preview ready."], resources: [], errors: [] };
+    },
+  });
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("p");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /LOADING/);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const secondActionStart = rendered.length;
+  input.write("p");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered.slice(secondActionStart), /LOADING/);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(callCount, 2);
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
+test("dashboard revision picker applies a selected full SHA to a confirmed skill update", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const selectedSha = "c".repeat(40);
+  const installedSkill = {
+    catalog: "Test", kind: "skill", id: "revision-skill", managed: true,
+    scope: "project", status: "current", source_repository: "org/repo",
+    source_path: "skills/revision-skill/SKILL.md", source_ref: "a".repeat(40),
+  };
+  const actions = [];
+  const done = runDashboard([installedSkill], input, output, [], {
+    listSkillVersions: () => [
+      { sha: "a".repeat(40), prefix: "aaaaaaa", date: "2026-11-09T00:00:00Z", subject: "Current pin" },
+      { sha: selectedSha, prefix: "ccccccc", date: "2026-11-08T00:00:00Z", subject: "Previous revision" },
+    ],
+    execute: async (action, resource, options) => {
+      actions.push({ action, resource: resource.id, ref: options.ref });
+      return { code: 0, messages: ["Updated selected revision."], resources: [installedSkill], errors: [] };
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("v");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /SKILL REVISIONS/);
+  input.write("\x1b[B");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /CONFIRM UPDATE/);
+  assert.ok(rendered.includes(selectedSha));
+  input.write("y");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(actions, [{ action: "update", resource: "revision-skill", ref: selectedSha }]);
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
+});
+
+
 
 let temporary;
 
@@ -934,6 +1194,273 @@ test("identical skill IDs from different sources cannot collide in one installat
   }, () => assert.fail("a colliding install must not invoke gh")), /already tracked from another catalog/);
 });
 
+test("skill freshness compares the latest SKILL.md revision at installed and catalog pins", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-skill-freshness-"));
+  const target = path.join(temporary, "target");
+  fs.mkdirSync(target);
+  const skillCommit = "26d8943616ffc1be09e121a3a666c284c526a761";
+  const previousRepositoryHead = "6f86fd3c8aeda1edebd04ec66261e36ec1d06b7c";
+  const resource = {
+    catalog: "AI-Kit",
+    id: "conventional-commits",
+    kind: "skill",
+    description: "Conventional commits guidance.",
+    source_repository: "grasdouble/AI-Kit",
+    source_path: "skills/conventional-commits",
+    source_ref: previousRepositoryHead,
+    license_status: "MIT",
+  };
+  const relativePath = ".agents/skills/conventional-commits/SKILL.md";
+  let installedRef = skillCommit;
+  let skill = [
+    "---",
+    "name: conventional-commits",
+    "description: Conventional commits guidance.",
+    "metadata:",
+    `  github-repo: "https://github.com/${resource.source_repository}"`,
+    `  github-path: "${resource.source_path}"`,
+    `  github-ref: "${installedRef}"`,
+    `  github-pinned: "${installedRef}"`,
+    "---",
+    "",
+    "Synthetic body.",
+    "",
+  ].join("\n");
+  const skillFile = path.join(target, relativePath);
+  fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+  fs.writeFileSync(skillFile, skill);
+  const lockFile = path.join(target, ".agents/kitia-lock.json");
+  writeJson(lockFile, {
+    lock_version: 1,
+    catalog: "grasdouble/Kitia",
+    sources: {
+      "AI-Kit": {
+        skills: {
+          "conventional-commits": {
+            source_repository: resource.source_repository,
+            source_path: resource.source_path,
+            source_ref: installedRef,
+            files: { [relativePath]: installedFingerprint(target, relativePath) },
+          },
+        },
+      },
+    },
+  });
+  const writeInstalledRef = (ref) => {
+    skill = skill.replaceAll(installedRef, ref);
+    installedRef = ref;
+    fs.writeFileSync(skillFile, skill);
+    const state = readInstallState(target);
+    const record = state.sources["AI-Kit"].skills["conventional-commits"];
+    record.source_ref = installedRef;
+    record.files[relativePath] = installedFingerprint(target, relativePath);
+    writeJson(lockFile, state);
+  };
+  const history = (revisions) => {
+    let calls = 0;
+    const run = (program, args) => {
+      calls += 1;
+      assert.equal(program, "gh");
+      assert.equal(args[0], "api");
+      assert.equal(args[1], "-X");
+      assert.equal(args[2], "GET");
+      assert.equal(args[3], "repos/grasdouble/AI-Kit/commits");
+      assert.ok(args.includes("-f"));
+      assert.ok(args.includes(`path=${resource.source_path}/SKILL.md`));
+      assert.ok(args.includes("-F"));
+      assert.ok(args.includes("per_page=1"));
+      const ref = args.find((arg) => arg.startsWith("sha="))?.slice(4);
+      assert.ok(ref && Object.hasOwn(revisions, ref), `unexpected history lookup for ${ref}`);
+      return JSON.stringify([{ sha: revisions[ref] }]);
+    };
+    return { run, calls: () => calls, revisions };
+  };
+
+  const initialHistory = history({
+    [skillCommit]: skillCommit,
+    [previousRepositoryHead]: skillCommit,
+  });
+  const initial = checkInstalledResources(target, [resource], { run: initialHistory.run });
+  assert.equal(initialHistory.calls(), 2, "both installed and catalog pins need path-history lookups");
+  assert.equal(initial.updateAvailable, false);
+  assert.equal(initial.resources[0].status, "current");
+  assert.equal(dashboardStatus(initial.resources[0]), "current");
+  const dashboardHistory = history({
+    [skillCommit]: skillCommit,
+    [previousRepositoryHead]: skillCommit,
+  });
+  const initialInventory = collectInstalledScopes(
+    { project: target, user: target }, [resource], { run: dashboardHistory.run },
+  );
+  assert.deepEqual(initialInventory.errors, []);
+  assert.equal(dashboardHistory.calls(), 2, "inventory scopes share both path-history lookups");
+  assert.equal(initialInventory.resources[0].status, "current");
+  assert.equal(dashboardStatus(initialInventory.resources[0]), "current");
+
+  writeInstalledRef(previousRepositoryHead);
+  const newerRepositoryHead = "7".repeat(40);
+  resource.source_ref = newerRepositoryHead;
+  const unrelatedRepositoryHistory = history({
+    [previousRepositoryHead]: skillCommit,
+    [newerRepositoryHead]: skillCommit,
+  });
+  assert.notEqual(previousRepositoryHead, newerRepositoryHead);
+  assert.equal(
+    unrelatedRepositoryHistory.revisions[previousRepositoryHead],
+    unrelatedRepositoryHistory.revisions[newerRepositoryHead],
+    "different repository commits with the same SKILL.md path commit must be current",
+  );
+  const unchangedAtNewerRepositoryHead = checkInstalledResources(
+    target, [resource], { run: unrelatedRepositoryHistory.run },
+  );
+  assert.equal(unrelatedRepositoryHistory.calls(), 2);
+  assert.equal(unchangedAtNewerRepositoryHead.updateAvailable, false);
+  assert.equal(unchangedAtNewerRepositoryHead.resources[0].status, "current");
+  assert.equal(dashboardStatus(unchangedAtNewerRepositoryHead.resources[0]), "current");
+
+  const changedCatalogHead = "8".repeat(40);
+  resource.source_ref = changedCatalogHead;
+  const changedHistory = history({
+    [previousRepositoryHead]: skillCommit,
+    [changedCatalogHead]: "c".repeat(40),
+  });
+  const changed = checkInstalledResources(target, [resource], { run: changedHistory.run });
+  assert.equal(changedHistory.calls(), 2);
+  assert.equal(changed.updateAvailable, true);
+  assert.equal(changed.resources[0].issues[0].code, "UPDATE_AVAILABLE");
+  assert.equal(dashboardStatus(changed.resources[0]), "update");
+  assert.throws(
+    () => checkInstalledResources(target, [resource], {
+      run: () => { throw new Error("offline"); },
+    }),
+    /Cannot check GitHub source history/,
+  );
+  const unavailableHistory = collectInstalledScopes(
+    { project: target }, [resource], { run: () => { throw new Error("offline"); } },
+  );
+  assert.equal(unavailableHistory.resources.length, 0);
+  assert.match(unavailableHistory.errors[0].message, /Cannot check GitHub source history/);
+});
+
+for (const { kind, id, sourcePath, installPath } of [
+  {
+    kind: "agent",
+    id: "release-helper",
+    sourcePath: "agents/release-helper.agent.md",
+    installPath: ".copilot/agents/release-helper.agent.md",
+  },
+  {
+    kind: "instruction",
+    id: "review-policy",
+    sourcePath: "instructions/review-policy.instructions.md",
+    installPath: ".github/instructions/review-policy.instructions.md",
+  },
+]) {
+  test(`${kind} freshness tracks its exact source file at both repository pins`, () => {
+    temporary = fs.mkdtempSync(path.join(os.tmpdir(), `kitia-${kind}-freshness-`));
+    const target = path.join(temporary, "target");
+    fs.mkdirSync(target);
+    const installedRef = "a".repeat(40);
+    const catalogRef = "b".repeat(40);
+    const sourceRevision = "c".repeat(40);
+    const updatedCatalogRef = "d".repeat(40);
+    const updatedSourceRevision = "e".repeat(40);
+    const resource = {
+      catalog: "AI-Kit",
+      id,
+      kind,
+      description: `${kind} fixture.`,
+      source_repository: "grasdouble/AI-Kit",
+      source_path: sourcePath,
+      source_ref: catalogRef,
+      license_status: "MIT",
+    };
+    const installedText = `Managed ${kind} fixture.\n`;
+    const installedFile = path.join(target, installPath);
+    fs.mkdirSync(path.dirname(installedFile), { recursive: true });
+    fs.writeFileSync(installedFile, installedText);
+    const lockFile = path.join(target, ".agents/kitia-lock.json");
+    writeJson(lockFile, {
+      lock_version: 1,
+      catalog: "grasdouble/Kitia",
+      sources: {
+        "AI-Kit": {
+          [`${kind}s`]: {
+            [id]: {
+              source_repository: resource.source_repository,
+              source_path: resource.source_path,
+              source_ref: installedRef,
+              files: { [installPath]: installedFingerprint(target, installPath) },
+            },
+          },
+        },
+      },
+    });
+    const history = (revisions) => {
+      let calls = 0;
+      const run = (program, args) => {
+        calls += 1;
+        assert.equal(program, "gh");
+        assert.equal(args[0], "api");
+        assert.equal(args[1], "-X");
+        assert.equal(args[2], "GET");
+        assert.equal(args[3], "repos/grasdouble/AI-Kit/commits");
+        assert.ok(args.includes(`path=${sourcePath}`), `${kind} history must query its exact source file`);
+        const ref = args.find((arg) => arg.startsWith("sha="))?.slice(4);
+        assert.ok(ref && Object.hasOwn(revisions, ref), `unexpected ${kind} history lookup for ${ref}`);
+        return JSON.stringify([{ sha: revisions[ref] }]);
+      };
+      return { run, calls: () => calls };
+    };
+
+    const sameFileHistory = history({
+      [installedRef]: sourceRevision,
+      [catalogRef]: sourceRevision,
+    });
+    const current = checkInstalledResources(target, [resource], { run: sameFileHistory.run });
+    assert.equal(sameFileHistory.calls(), 2);
+    assert.equal(current.updateAvailable, false);
+    assert.equal(current.resources[0].status, "current");
+    assert.equal(dashboardStatus(current.resources[0]), "current");
+
+    resource.source_ref = updatedCatalogRef;
+    const changedFileHistory = history({
+      [installedRef]: sourceRevision,
+      [updatedCatalogRef]: updatedSourceRevision,
+    });
+    const changed = checkInstalledResources(target, [resource], { run: changedFileHistory.run });
+    assert.equal(changedFileHistory.calls(), 2);
+    assert.equal(changed.updateAvailable, true);
+    assert.equal(changed.resources[0].issues[0].code, "UPDATE_AVAILABLE");
+    assert.equal(dashboardStatus(changed.resources[0]), "update");
+
+    const unavailable = collectInstalledScopes(
+      { project: target }, [resource], { run: () => { throw new Error("offline"); } },
+    );
+    assert.equal(unavailable.resources.length, 0);
+    assert.match(unavailable.errors[0].message, /Cannot check GitHub source history/);
+    assert.equal(
+      latestSourceVersionAtRef(
+        { ...resource, source_repository: "https://gitlab.com/example/AI-Kit" },
+        installedRef,
+        () => assert.fail("non-GitHub resources must retain exact-pin comparison"),
+      ),
+      null,
+    );
+    const unsupported = { source_path: sourcePath.slice(0, sourcePath.lastIndexOf("/")) };
+    const state = readInstallState(target);
+    const record = state.sources["AI-Kit"][`${kind}s`][id];
+    Object.assign(record, unsupported);
+    writeJson(lockFile, state);
+    const fallback = checkInstalledResources(
+      target, [{ ...resource, ...unsupported }],
+      { run: () => assert.fail("uninterpretable paths must retain exact-pin comparison") },
+    );
+    assert.equal(fallback.updateAvailable, true);
+    assert.equal(fallback.resources[0].issues[0].code, "UPDATE_AVAILABLE");
+  });
+}
+
 test("configured source skills use the same pinned install, check, update and uninstall lifecycle", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-lifecycle-"));
   const target = path.join(temporary, "target");
@@ -994,7 +1521,7 @@ test("configured source skills use the same pinned install, check, update and un
   const updatedResource = { ...sourceResource, source_ref: "c".repeat(40) };
   const installed = readInstalledSourceSkills(target, [updatedResource]);
   assert.match(updateSourceResources(installed, target, {}, invoke).join("\n"), /Updated team-alpha catalog skill/);
-  assert.ok(updateArgs.includes("--force"), "managed skill updates must ask gh to overwrite the installed skill");
+  assert.equal(updateArgs.includes("--force"), false, "the first managed update attempt must not force GH overwrite");
   assert.equal(installedRef, updatedResource.source_ref);
   const failedResource = { ...updatedResource, source_ref: "d".repeat(40) };
   let plannedUpdate;
@@ -1004,7 +1531,7 @@ test("configured source skills use the same pinned install, check, update and un
     { dryRun: true, onAction: (action) => { plannedUpdate = action; } },
     () => assert.fail("a dry-run update must not invoke gh"),
   );
-  assert.ok(plannedUpdate.command.args.includes("--force"), "dry-run plans must include gh's required overwrite flag");
+  assert.equal(plannedUpdate.command.args.includes("--force"), false, "dry-run plans must not force GH overwrite by default");
   const skillFile = path.join(target, ".agents/skills/demo-skill/SKILL.md");
   const installedSkill = fs.readFileSync(skillFile, "utf8");
   fs.writeFileSync(skillFile, "Locally modified managed skill.\n");
@@ -1025,6 +1552,16 @@ test("configured source skills use the same pinned install, check, update and un
     return true;
   });
   assert.equal(guardedGhCalls, 0, "local modifications must be rejected before invoking gh");
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { ghForce: true, ghForceAgent: "github-copilot" },
+    () => {
+      guardedGhCalls++;
+      return 0;
+    },
+  ), (error) => error.code === "LOCAL_CONFLICT");
+  assert.equal(guardedGhCalls, 0, "GH-only force retry must not bypass Kitia's tracked-file guard");
   let forcedArgs;
   assert.throws(() => updateSourceResources(
     readInstalledSourceSkills(target, [failedResource]),
@@ -1055,6 +1592,16 @@ test("configured source skills use the same pinned install, check, update and un
     return true;
   });
   assert.equal(guardedGhCalls, 0, "untracked files must be protected before invoking gh");
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [failedResource]),
+    target,
+    { ghForce: true, ghForceAgent: "github-copilot" },
+    () => {
+      guardedGhCalls++;
+      return 0;
+    },
+  ), (error) => error.code === "LOCAL_CONFLICT");
+  assert.equal(guardedGhCalls, 0, "GH-only force retry must not bypass Kitia's untracked-file guard");
   let untrackedForcedArgs;
   assert.throws(() => updateSourceResources(
     readInstalledSourceSkills(target, [failedResource]),
@@ -1097,6 +1644,57 @@ test("configured source skills use the same pinned install, check, update and un
     return true;
   });
   assert.match(truncatedFailure.message, /x{400}… \[diagnostic truncated\]$/);
+  assert.equal(ghFailure.code, "GH_UPDATE_FAILED", "unrelated GH failures must remain ordinary failures");
+  const forceRequiredResource = { ...updatedResource, source_ref: "f".repeat(40) };
+  let firstAttemptArgs;
+  assert.throws(() => updateSourceResources(
+    readInstalledSourceSkills(target, [forceRequiredResource]),
+    target,
+    {},
+    (args) => {
+      firstAttemptArgs = args;
+      return { status: 1, stderr: "skills already installed: demo-skill (Use --force to overwrite)" };
+    },
+  ), (error) => {
+    assert.equal(error.code, "GH_FORCE_REQUIRED");
+    assert.equal(error.category, "github-force-required");
+    assert.equal(error.recoverable, true);
+    assert.equal(error.agent, "github-copilot");
+    assert.match(error.userMessage, /already installed and requires --force/);
+    assert.doesNotMatch(error.userMessage, /Skills already installed/);
+    return true;
+  });
+  assert.equal(firstAttemptArgs.includes("--force"), false);
+  for (const diagnostic of [
+    "skills already installed: demo-skill (Use --force to overwrite!)",
+    "Skills already installed: demo-skill (Use --force to overwrite!)",
+    "Skills already installed:\ndemo-skill (Use --force to overwrite)",
+    "prefix Skills already installed: demo-skill (Use --force to overwrite)",
+  ]) {
+    let nearMatchArgs;
+    assert.throws(() => updateSourceResources(
+      readInstalledSourceSkills(target, [forceRequiredResource]),
+      target,
+      {},
+      (args) => {
+        nearMatchArgs = args;
+        return { status: 1, stderr: diagnostic };
+      },
+    ), (error) => error.code === "GH_UPDATE_FAILED");
+    assert.equal(nearMatchArgs.includes("--force"), false);
+  }
+  updateSourceResources(
+    readInstalledSourceSkills(target, [forceRequiredResource]),
+    target,
+    { ghForce: true, ghForceAgent: "github-copilot" },
+    invoke,
+  );
+  assert.ok(updateArgs.includes("--force"));
+  assert.equal(installedRef, forceRequiredResource.source_ref);
+  assert.equal(
+    readInstallState(target).sources["team-alpha"].skills["demo-skill"].source_ref,
+    forceRequiredResource.source_ref,
+  );
 
   let spawnOptions;
   const captured = runGhSkill(["skill", "install"], target, (_program, _args, options) => {
@@ -1117,7 +1715,7 @@ test("configured source skills use the same pinned install, check, update and un
     return true;
   });
   assert.equal(checkInstalledResources(
-    target, [updatedResource], { catalog: "team-alpha" },
+    target, [forceRequiredResource], { catalog: "team-alpha" },
   ).updateAvailable, false);
   const partialResource = { ...updatedResource, source_ref: "e".repeat(40) };
   const partialInstalled = readInstalledSourceSkills(target, [partialResource]);
@@ -2066,6 +2664,17 @@ test("dashboard update dispatch reaches the CLI update command for the selected 
     assert.equal(dispatched.target, target);
     assert.equal(dispatched.nonInteractive, true);
     assert.deepEqual(dispatched.sourceResources, [resource]);
+    assert.equal(dispatched.ghForce, undefined, "the initial dashboard update must not request GH force");
+    await execute(
+      "update",
+      resource,
+      { target, userTarget },
+      { sourceResources: [resource] },
+      { ghForce: true, ghForceAgent: "github-copilot" },
+    );
+    assert.equal(dispatched.ghForce, true, "the explicit retry carries GH-only force state");
+    assert.equal(dispatched.ghForceAgent, "github-copilot", "the GH retry identifies the failed agent");
+    assert.equal(dispatched.force, false, "a GH retry must not activate Kitia's local-force override");
   } finally {
     if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
     else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
@@ -2242,14 +2851,74 @@ test("catalog browser renders ordered columns without list descriptions at wide 
     const idPosition = row.indexOf("catalog-skill");
     assert.ok(sourcePosition >= 0 && kindPosition > sourcePosition && idPosition > kindPosition,
       `source, kind, and ID values render in order: ${JSON.stringify({ sourcePosition, kindPosition, idPosition, row })}`);
-    assert.doesNotMatch(row, /Catalog panel toggle behavior\./);
-    assert.doesNotMatch(header, /DESC/);
+    const listRow = row.split("│ │", 1)[0];
+    assert.doesNotMatch(listRow, /Catalog panel toggle behavior\./);
+    const listHeader = header.split("│ │", 1)[0];
+    assert.doesNotMatch(listHeader, /DESC/);
     assert.match(rendered, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
     input.write("q");
     assert.equal(await done, true);
     input.destroy();
     output.destroy();
   }
+});
+test("inspection modal bounds wrapped preview content to the terminal height", async () => {
+  const { inspectionModal } = await import("../dist/dashboard/modals.mjs");
+  const rows = 30;
+  const modal = inspectionModal({
+    action: "preview",
+    resource: { catalog: "AI-Kit", kind: "skill", id: "conventional-commits" },
+    content: Array.from({ length: 24 }, (_, index) =>
+      `Preview paragraph ${index}: ${"conventional commit guidance ".repeat(5)}`).join("\n"),
+    columns: 100,
+    rows,
+  });
+  const modalHeight = modal.lines.length + modal.shortcuts.length + 1;
+  assert.ok(modalHeight <= rows - 2, `modal height ${modalHeight} must fit inside ${rows} terminal rows`);
+  assert.ok(modal.lines.some(({ text }) => text.includes("output truncated in dashboard")));
+});
+test("catalog browser previews source text and reports audits from keyboard actions", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const calls = [];
+  const done = runDashboard([], input, output, [], {
+    catalogResources: [{ catalog: "sample", kind: "agent", id: "reviewer", source_repository: "org/repo" }],
+    execute: async (action) => {
+      calls.push(action);
+      return { code: 0, messages: [action === "preview" ? "# Source body" : "Audit coverage: 1/1 files analyzed."], resources: [], errors: [] };
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("p");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /SOURCE PREVIEW/);
+  assert.match(rendered, /# Source body/);
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  input.write("a");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered, /RESOURCE AUDIT/);
+  assert.match(rendered, /Audit coverage: 1\/1 files analyzed/);
+  assert.deepEqual(calls, ["preview", "audit"]);
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  input.write("q");
+  assert.equal(await done, true);
+  input.destroy();
+  output.destroy();
 });
 test("dashboard toggles the selection panel with D", async () => {
   const { PassThrough } = require("node:stream");
@@ -2408,3 +3077,160 @@ test("dashboard uses a shared list/details split at wide terminal widths", async
 });
 
 
+test("versions parser selects a skill and installs accept full SHAs or strict hexadecimal prefixes", () => {
+  const sha = "c".repeat(40);
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-versions-args-"));
+  const previous = process.env.KITIA_CONFIG_DIR;
+  process.env.KITIA_CONFIG_DIR = temporary;
+  writeJson(path.join(temporary, "catalogSources.json"), {
+    catalog_version: 1, sources: [{ name: "Test", repository: "https://github.com/example/skills" }],
+  });
+  try {
+    assert.deepEqual(parseArguments(["versions", "skill", "demo-skill", "--catalog", "Test"]), {
+      command: "versions", kind: "skill", id: "demo-skill", catalog: "Test",
+    });
+  } finally {
+    if (previous === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previous;
+  }
+  assert.equal(parseArguments(["install", "skill", "demo-skill", "--ref", sha]).ref, sha);
+  assert.equal(parseArguments(["update", "skill", "demo-skill", "--ref", sha.slice(0, 7)]).ref, sha.slice(0, 7));
+  assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--ref", "abc"]), /7- to 40-character hexadecimal/);
+  assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--ref", "g".repeat(7)]), /7- to 40-character hexadecimal/);
+  assert.throws(() => parseArguments(["update", "--ref", sha]), /specific skill install or update/);
+});
+
+test("skill history displays unique, aligned prefixes when seven-character SHAs collide", () => {
+  const versions = [
+    { sha: `abcdef0${"0".repeat(33)}`, date: "2025-04-03T12:13:14Z", subject: "first" },
+    { sha: `abcdef0${"1".repeat(33)}`, date: "2025-04-03T12:13:14Z", subject: "second" },
+  ];
+  const prefixes = uniqueSkillVersionPrefixes(versions);
+  assert.deepEqual(prefixes, ["abcdef00", "abcdef01"]);
+  for (const [index, prefix] of prefixes.entries()) {
+    assert.equal(resolveSkillVersionPrefix(versions, prefix), versions[index].sha);
+  }
+  const [header, , ...rows] = formatSkillVersionTable(versions);
+  const dateColumn = header.indexOf("DATE");
+  assert.equal(rows[0].indexOf(versions[0].date), dateColumn);
+  assert.equal(rows[1].indexOf(versions[1].date), dateColumn);
+});
+
+test("skill history resolves only unique listed SHA prefixes", () => {
+  const versions = [{ sha: "abcdef0".padEnd(40, "0") }, { sha: "abcdef1".padEnd(40, "1") }];
+  assert.equal(resolveSkillVersionPrefix(versions, "ABCDEF0"), versions[0].sha);
+  assert.throws(() => resolveSkillVersionPrefix(versions, "abcdef"), /ambiguous/);
+  assert.throws(() => resolveSkillVersionPrefix(versions, "1234567"), /not found/);
+});
+
+test("skill versions query GitHub API pages and expose SHA, committer date and commit subject", () => {
+  const resource = {
+    kind: "skill", id: "demo-skill", source_repository: "example/skills",
+    source_path: "skills/demo-skill",
+  };
+  const calls = [];
+  const versions = listSkillVersions(resource, (program, args) => {
+    calls.push([program, args]);
+    return JSON.stringify([{
+      sha: "d".repeat(40),
+      commit: {
+        committer: { date: "2025-04-03T12:13:14Z" },
+        message: "Improve demo skill\n\nDetails",
+      },
+    }]);
+  });
+  assert.deepEqual(versions, [{
+    sha: "d".repeat(40), date: "2025-04-03T12:13:14Z", subject: "Improve demo skill",
+  }]);
+  assert.deepEqual(calls, [[
+    "gh",
+    [
+      "api", "-X", "GET", "repos/example/skills/commits", "-f", "path=skills/demo-skill/SKILL.md",
+      "-F", "per_page=100", "-F", "page=1",
+    ],
+  ]]);
+});
+test("async skill history keeps GitHub queries off the dashboard event loop", async () => {
+  const resource = {
+    kind: "skill", id: "demo-skill", source_repository: "example/skills",
+    source_path: "skills/demo-skill",
+  };
+  const calls = [];
+  const versions = await listSkillVersionsAsync(resource, async (program, args) => {
+    calls.push([program, args]);
+    await new Promise((resolve) => setImmediate(resolve));
+    return JSON.stringify([{
+      sha: "e".repeat(40),
+      commit: { committer: { date: "2025-04-03T12:13:14Z" }, message: "Async history" },
+    }]);
+  });
+  assert.equal(versions[0].subject, "Async history");
+  assert.equal(calls[0][0], "gh");
+  assert.ok(calls[0][1].includes("-F") && calls[0][1].includes("page=1"));
+});
+
+test("skill version history caps API pagination and reports authentication/network failures", () => {
+  const resource = {
+    kind: "skill", id: "demo-skill", source_repository: "example/skills",
+    source_path: "skills/demo-skill",
+  };
+  let pages = 0;
+  assert.equal(listSkillVersions(resource, (_program, args) => {
+    pages += 1;
+    assert.equal(args[args.indexOf("-F") + 1], "per_page=100");
+    return JSON.stringify(Array.from({ length: 100 }, (_, index) => ({
+      sha: index.toString(16).padStart(40, "0"),
+      commit: { committer: { date: "2025-04-03T12:13:14Z" }, message: `change ${index}` },
+    })));
+  }).length, 500);
+  assert.equal(pages, 5);
+  assert.throws(() => listSkillVersions(resource, () => {
+    const error = new Error("gh failed");
+    error.stderr = Buffer.from("HTTP 401: authentication required");
+    throw error;
+  }), /HTTP 401: authentication required/);
+  assert.throws(() => listSkillVersions(resource, () => { throw new Error("network unavailable"); }), /network unavailable/);
+  assert.throws(() => listSkillVersions({ ...resource, kind: "agent" }, () => assert.fail()), /GitHub source skills/);
+});
+
+test("an explicit skill ref is installed and recorded without changing the catalog resource pin", () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-explicit-ref-"));
+  const target = path.join(temporary, "target");
+  fs.mkdirSync(target);
+  const catalogResource = {
+    catalog: "team-alpha", id: "demo-skill", kind: "skill",
+    description: "A source skill.", source_repository: "example/team-alpha",
+    source_path: "skills/demo-skill", source_ref: "a".repeat(40), license_status: "MIT",
+  };
+  const requestedRef = "b".repeat(40);
+  let installedRef;
+  const invoke = (args) => {
+    installedRef = args[args.indexOf("--pin") + 1];
+    const skillFile = path.join(target, ".agents/skills/demo-skill/SKILL.md");
+    fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+    fs.writeFileSync(skillFile, [
+      "---", "name: demo-skill", "description: A source skill.", "metadata:",
+      `  github-repo: "https://github.com/${catalogResource.source_repository}"`,
+      `  github-path: "${catalogResource.source_path}"`,
+      `  github-ref: "${installedRef}"`, `  github-pinned: "${installedRef}"`,
+      "---", "", "Pinned test revision.", "",
+    ].join("\n"));
+    return 0;
+  };
+  assert.equal(runSourceCommand({
+    action: "install", id: catalogResource.id, catalog: catalogResource.catalog,
+    resource: { ...catalogResource, source_ref: requestedRef }, target, tool: "copilot",
+  }, invoke), 0);
+  assert.equal(installedRef, requestedRef);
+  assert.equal(catalogResource.source_ref, "a".repeat(40));
+  assert.equal(readInstallState(target).sources["team-alpha"].skills["demo-skill"].source_ref, requestedRef);
+  assert.deepEqual(updateSourceResources(
+    readInstalledSourceSkills(target, [catalogResource]), target, {},
+    invoke,
+  ), [`Updated ${catalogResource.catalog} catalog skill: ${catalogResource.id}`]);
+  assert.equal(installedRef, catalogResource.source_ref);
+  assert.equal(readInstallState(target).sources["team-alpha"].skills["demo-skill"].source_ref, catalogResource.source_ref);
+  assert.equal(catalogResource.source_ref, "a".repeat(40));
+  assert.equal(buildSourceSkillArgs("install", { ...catalogResource, source_ref: requestedRef }, "github-copilot")
+    .at(-1), requestedRef);
+});

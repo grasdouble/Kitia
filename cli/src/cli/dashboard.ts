@@ -10,6 +10,7 @@ export interface DashboardActionFailure {
   paths?: string[];
   recoverable?: boolean;
   userMessage: string;
+  agent?: string;
 }
 export interface DashboardActionResult {
   code: number;
@@ -46,7 +47,9 @@ function createDashboardActionHandler(
     if (removingUnmanaged && resource.managed !== false) {
       throw new Error("Only unmanaged dashboard artifacts can be removed this way.");
     }
-    const scope = action === "install" ? installOptions.scope || "project" : resource.scope;
+    const audit = action === "audit" || action === "install";
+    const command = action === "audit" ? "preview" : action;
+    const scope = command === "install" ? installOptions.scope || "project" : resource.scope;
     const options: CliOptions = removingUnmanaged
       ? {
         target: scope === "user" ? dashboardOptions.userTarget || os.homedir() : dashboardOptions.target,
@@ -55,15 +58,22 @@ function createDashboardActionHandler(
         sourceResources: catalogs.sourceResources,
       }
       : (() => {
-        const args = [action, resource.kind, resource.id, "--catalog", resource.catalog];
+        const args = [command, resource.kind, resource.id, "--catalog", resource.catalog];
         if (scope === "user") args.push("--scope", "user");
-        else args.push("--target", dashboardOptions.target);
-        if (action === "install") args.push("--tool", installOptions.tool || "copilot");
-        if (action === "update" && installOptions.force) args.push("--force");
+        else if (command !== "preview") args.push("--target", dashboardOptions.target);
+        if (command === "install") args.push("--tool", installOptions.tool || "copilot");
+        if (["install", "update"].includes(command) && installOptions.ref) args.push("--ref", installOptions.ref);
+        if (audit) args.push("--audit");
         const parsed = parseArguments(args);
+        if (command === "update" && installOptions.ghForce) {
+          parsed.ghForce = true;
+          parsed.ghForceAgent = installOptions.ghForceAgent;
+        }
         parsed.nonInteractive = true;
+        parsed.captureOutput = command === "preview";
         parsed.offline = dashboardOptions.offline;
         parsed.sourceResources = catalogs.sourceResources;
+        if (command === "preview") parsed.target = dashboardOptions.target;
         if (scope === "user" && dashboardOptions.userTarget) parsed.target = dashboardOptions.userTarget;
         return parsed;
       })();
@@ -71,7 +81,7 @@ function createDashboardActionHandler(
     let release: (() => void) | undefined;
     let code: number;
     try {
-      release = acquireOperationLock(options.target);
+      if (!["preview", "audit"].includes(action)) release = acquireOperationLock(options.target);
       const targetRoot = fs.realpathSync(options.target);
       const state = readInstallState(targetRoot);
       if (removingUnmanaged) {

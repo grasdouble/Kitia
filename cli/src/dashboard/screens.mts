@@ -441,6 +441,8 @@ export function InventoryScreen({
     ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
     : [
       ...(catalogAvailable ? ["A install"] : []),
+      ...(canExecute && selected && selected.kind === "skill" && selected.managed !== false &&
+          selected.source_repository && !selected.bundle_id ? ["V revision"] : []),
       ...(canExecute && selected
         ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
         : []),
@@ -562,6 +564,9 @@ export function CatalogScreen({
   filterMode,
   catalogFilter,
   kindFilter,
+  tagFilter,
+  statusFilter,
+  licenseFilter,
   selectedIndex,
   versionLabel,
   screenName,
@@ -578,6 +583,9 @@ export function CatalogScreen({
   filterMode: boolean;
   catalogFilter: string;
   kindFilter: string;
+  tagFilter: string;
+  statusFilter: string;
+  licenseFilter: string;
   selectedIndex: number;
   versionLabel: string;
   screenName: string;
@@ -592,7 +600,11 @@ export function CatalogScreen({
     resource.managed === false || !resource.source_repository
       ? resource.catalog
       : candidateLabels.get(resource) || resource.catalog;
-  const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter, catalogs);
+  const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter, catalogs, {
+    tag: tagFilter === "all" ? undefined : tagFilter,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    license: licenseFilter === "all" ? undefined : licenseFilter,
+  });
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
   const panelLayout = detailPanelLayout(columns);
@@ -622,25 +634,33 @@ export function CatalogScreen({
     ? detailRows.flatMap((row, index) =>
       detailField(`catalog-entry-${index}`, row.label, row.value, detailsContentWidth, row.maxLines))
     : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
-  const shortcutLines = modalActive ? [] : screenName === "INSTALL OPTIONS"
+  const catalogShortcutLines = modalActive ? [] : screenName === "INSTALL OPTIONS"
     ? []
     : filterMode
       ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
       : [
-        "C catalog · K kind · F filter",
-        "D details · ↑↓ navigate",
-        "ENTER select · ESC back",
+        "C catalog · K kind · T tag",
+        "S status · L license · F search",
+        "V revisions · P preview · A audit · D details",
+        "↑↓ navigate · ENTER install · ESC back",
         "? guide · Q quit",
       ];
+  const shortcutLines = catalogShortcutLines;
   const catalogShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
   const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, catalogShortcutWidth).length + 4;
   const stackedDetailsRows = !detailsSideBySide
     ? (showDetails ? entryContent.length + 4 : 0) + shortcutsPanelRows
     : 0;
-  const viewport = Math.max(1, rows - (12 + stackedDetailsRows));
+  const viewport = Math.max(1, rows - (13 + stackedDetailsRows));
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
   const pageRange = visible.length ? `${first + 1}-${first + page.length}` : "0-0";
+  const activeFilters = [
+    tagFilter !== "all" && `TAG ${tagFilter}`,
+    statusFilter !== "all" && `STATUS ${statusFilter}`,
+    licenseFilter !== "all" && `LICENSE ${licenseFilter}`,
+  ].filter(Boolean);
+  const filterSummary = activeFilters.join(" · ") || "No tag/status/license filters";
   const tableHeader = tableLine([
     ["", columnsByField.marker],
     ["INSTALLED", columnsByField.installed],
@@ -682,6 +702,7 @@ export function CatalogScreen({
   },
   h(Text, { color: "gray" },
     fitText(`Filter ${filterMode ? `${query}▏` : query || "(F to filter)"}`, contentWidth)),
+  h(Text, { color: "gray" }, fitText(filterSummary, contentWidth)),
   h(Text, { bold: true }, tableHeader),
   ...tableRows);
   const entryPanel = showDetails ? h(DetailsPanel, {
@@ -854,7 +875,7 @@ export function CatalogManagementScreen({
         ),
       ]
     : detailValue("catalog-empty", "Add a user catalog to browse and install external resources.", detailsContentWidth, 2);
-  const shortcuts = modalActive ? [] : [
+  const managementShortcutLines = modalActive ? [] : [
     [
       ...(canAdd ? ["A add", "P presets"] : []),
       ...(canRemove && selected ? ["Delete remove"] : []),
@@ -867,6 +888,7 @@ export function CatalogManagementScreen({
     "D details · ↑↓ nav · ? guide",
     "ESC inventory · Q quit",
   ].filter(Boolean);
+  const shortcuts = managementShortcutLines;
   const managementShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
   const shortcutsPanelRows = modalActive
     ? 0

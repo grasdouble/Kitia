@@ -32,6 +32,7 @@ class CatalogError extends Error {
   recoverable?: boolean;
   userMessage?: string;
   technicalDetail?: string;
+  agent?: string;
 
   constructor(message, code = "CATALOG_ERROR", details: {
     category?: string;
@@ -39,6 +40,7 @@ class CatalogError extends Error {
     recoverable?: boolean;
     userMessage?: string;
     technicalDetail?: string;
+    agent?: string;
   } = {}) {
     super(message);
     this.code = code;
@@ -47,6 +49,7 @@ class CatalogError extends Error {
     this.recoverable = details.recoverable || false;
     this.userMessage = details.userMessage;
     this.technicalDetail = details.technicalDetail;
+    this.agent = details.agent;
   }
 }
 

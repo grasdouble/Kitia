@@ -39,6 +39,7 @@ check.
 | `list`, `search` | Discover resources; support `--catalog`, `--kind`, `--tag`, `--status`, and `--license`; `--json` retains its existing array format |
 | `show`, `preview` | Human-readable inspection; an omitted kind uses the normal ambiguity rules |
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
+| `versions skill <id>` | List up to 500 newest GitHub commits affecting the skill's `SKILL.md`, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
@@ -57,6 +58,33 @@ directory. Updates preserve registered runtimes; they do not silently remove
 resources absent from the current catalog. `--force` remains explicit and does
 not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
+
+`kitia versions skill <id> [--catalog <name>]` uses `gh api` against the
+GitHub commits endpoint filtered to `<source_path>/SKILL.md`. The history
+covers commits affecting that entrypoint only; changes to supporting files are
+not listed. Results are newest first and bounded to five pages of 100 commits;
+displayed dates are the commit committer dates. GitHub CLI authentication and
+network access are required.
+`kitia install skill <id> --ref <sha-or-prefix>` and the corresponding targeted
+`kitia update skill <id> --ref <sha-or-prefix>` use that commit for this
+operation without changing the catalog index pin. The installed inventory
+records the chosen full SHA, so a later ordinary update returns the installation
+to the catalog pin. A hexadecimal prefix must be at least 7 characters and is
+resolved only against the selected source skill's listed history; ambiguous or
+unknown prefixes are rejected. Full 40-character commit SHAs remain accepted.
+`--ref` is supported only for online, unbundled GitHub source skills, not
+bundles or `--offline`.
+When an installed GitHub source resource ref differs from its catalog pin,
+`check` and dashboard inventory compare the latest commit affecting its source
+file at each ref. For skills, `source_path` is a directory and the history path
+is `<source_path>/SKILL.md` (supporting files are not covered by this
+entrypoint history); for agents and instructions, `source_path` is the exact
+Markdown file path. Thus unrelated repository commits do not imply a resource
+update. Resources without a supported GitHub repository/file path retain exact
+pin comparison. Path-history checks require GitHub CLI authentication and
+network access. If either lookup fails or is invalid, `check` reports an error
+(dashboard inventory reports a scope scan error); it must not report the
+resource as current.
 `--audit` is opt-in and applies only to `preview` and `install` of pinned
 source-catalog resources; it is not an update check. It is rejected for other
 commands and for resources without pinned source metadata. Preview reports
@@ -83,18 +111,40 @@ Read-only commands and previews do not create home configuration directories.
 other scope and reports the failing scope explicitly instead of rewriting it.
 Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
+Long-running dashboard operations show a centered blocking popup with an
+animated spinner and progress label. Input is ignored until the operation ends.
+Skill revision history requests run asynchronously so the spinner can animate
+while GitHub CLI queries are pending.
+The dashboard is the interactive resource-management interface. CLI-only
+`validate` and `doctor` provide strict catalog validation and environment/
+installation diagnostics for terminal automation; `--json` provides stable
+machine-readable discovery and maintenance reports. These automation and
+diagnostic commands intentionally have no dashboard equivalents.
+Collection and signed-bundle import/export remain CLI-only. Their filesystem
+paths, signing keys, and out-of-band trust decisions are explicit command
+arguments; the dashboard's catalog transfer is intentionally limited to catalog
+configuration, not resource collections or content bundles.
+
+
 
 Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
 New installations can choose project/user scope and Copilot/Claude/both
-clients; instructions remain project-scoped. Press `F` to enter filter mode and
-`D` to toggle the selected resource's details panel in inventory and catalog
-browsing or catalog management.
-In the catalog browser, selected-resource details expose license status and,
-when source provenance is available, the pinned repository/path/commit. Missing
-license metadata is shown as undeclared; incomplete pin metadata may show as unknown.
+clients; instructions remain project-scoped. In the catalog browser, `F` enters
+search mode; `C`/`K` cycle catalog/type filters, and `T`/`S`/`L` cycle tag,
+status, and license filters. `V` on a skill opens its pinned commit history.
+Choosing a commit in the catalog browser applies that full SHA to this install
+only; choosing one in inventory applies it to the confirmed update. Neither
+changes the catalog pin. `D` toggles the selected resource's details panel.
+`P` previews the selected pinned source and `A` reports deterministic audit
+findings and coverage. Dashboard installations always audit pinned source
+content first and are blocked on findings or incomplete coverage; audit results
+are warnings, not a safety guarantee.
+Selected-resource details expose license status and, when source provenance is
+available, the pinned repository/path/commit. Missing license metadata is shown
+as undeclared; incomplete pin metadata may show as unknown.
 The inventory's Catalog column shows the configured source-catalog name for a
 tracked artifact with source-repository metadata. For a custom user catalog, it
 adds the folder selected by the saved path mapping, such as

@@ -142,7 +142,7 @@ function createTtyOutput() {
   return output;
 }
 
-async function launchShowcaseDashboard(directory) {
+async function launchShowcaseDashboard(directory, { executeOverride } = {}) {
   assertTermlessRuntime();
   const fixture = await seedShowcase(directory);
   const restoreEnvironment = setShowcaseEnvironment(fixture);
@@ -204,7 +204,7 @@ async function launchShowcaseDashboard(directory) {
     done = dashboard.runDashboard(rows, input, output, installed.errors, {
       catalogResources,
       userCatalogs,
-      execute,
+      execute: executeOverride || execute,
     });
     done.catch(() => {});
     const session = {

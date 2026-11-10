@@ -65,9 +65,13 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
     assert.deepEqual(colorOf("MANAGED"), { r: 180, g: 189, b: 105 });
     assert.deepEqual(colorOf("SKILL - ask-matt"), { r: 129, g: 162, b: 190 });
     assert.deepEqual(colorOf("Route repository questions"), { r: 102, g: 102, b: 102 });
-    assert.equal(session.terminal.cell(2, 1).char, "┌", "the xterm grid contains the panel corner");
-    assert.equal(session.terminal.cell(2, 2).char, "─", "the xterm grid contains the top border stroke");
-    assert.equal(session.terminal.cell(4, 1).char, "│", "the xterm grid contains the vertical border stroke");
+    const panelCorner = Array.from({ length: terminalSize.rows }, (_, row) =>
+      Array.from({ length: terminalSize.columns }, (_, col) => ({ row, col }))
+        .find(({ row: cellRow, col: cellCol }) => session.terminal.cell(cellRow, cellCol).char === "┌"))
+      .find(Boolean);
+    assert.ok(panelCorner, "the xterm grid contains a panel corner");
+    assert.equal(session.terminal.cell(panelCorner.row, panelCorner.col + 1).char, "─");
+    assert.equal(session.terminal.cell(panelCorner.row + 1, panelCorner.col).char, "│");
 
     const xtermScreen = session.terminal.screen.getText();
     const xtermLines = xtermScreen.split(/\r?\n/).map((line) => line.trim());
@@ -117,6 +121,91 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
 
     session.input.write("q");
     assert.equal(await session.done, true, "q exits the Ink dashboard cleanly");
+  } finally {
+    if (session) await closeShowcaseDashboard(session);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+test("Termless dashboard renders the selected source preview and audit report", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "kitia-termless-inspection-"));
+  let session;
+  const calls = [];
+  try {
+    session = await launchShowcaseDashboard(directory, {
+      executeOverride: async (action, resource) => {
+        calls.push({ action, resource: `${resource.kind}:${resource.id}` });
+        if (action === "install") {
+          return {
+            code: 1,
+            messages: [],
+            resources: [],
+            errors: [],
+            failure: { userMessage: "AUDIT_BLOCKED: findings detected; installation blocked." },
+          };
+        }
+        return {
+          code: 0,
+          messages: [action === "preview"
+            ? "# Pinned agent source\nReview every change before approval."
+            : "Audit coverage: 1/1 files analyzed; no files skipped.\nWARNING PROMPT_OVERRIDE agents/release-helper.agent.md:1"],
+          resources: [],
+          errors: [],
+        };
+      },
+    });
+    const catalogStart = session.rawBytes().length;
+    session.input.write("a");
+    await waitForInkOutput(session, "CATALOG RESOURCES", catalogStart);
+    await session.flushTerminal();
+
+    const previewStart = session.rawBytes().length;
+    session.input.write("p");
+    const preview = await waitForInkOutput(session, "SOURCE PREVIEW", previewStart);
+    await session.flushTerminal();
+    assert.ok(preview.includes("# Pinned agent source"));
+    assert.ok(session.terminal.screen.getText().includes("Review every change before approval."));
+
+    const closePreview = session.rawBytes().length;
+    session.input.write("\x1b");
+    await waitForInkOutput(session, "CATALOG RESOURCES", closePreview);
+    await session.flushTerminal();
+
+    const auditStart = session.rawBytes().length;
+    session.input.write("a");
+    const audit = await waitForInkOutput(session, "RESOURCE AUDIT", auditStart);
+    await session.flushTerminal();
+    assert.ok(audit.includes("Audit coverage: 1/1 files analyzed"));
+    assert.ok(session.terminal.screen.getText().includes("PROMPT_OVERRIDE"));
+    assert.deepEqual(calls, [
+      { action: "preview", resource: "skill:ask-matt" },
+      { action: "audit", resource: "skill:ask-matt" },
+    ]);
+
+    const closeAudit = session.rawBytes().length;
+    session.input.write("\x1b");
+    await waitForInkOutput(session, "CATALOG RESOURCES", closeAudit);
+    await session.flushTerminal();
+
+    session.input.write("\x1b[B");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    session.input.write("\x1b[B");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const optionsStart = session.rawBytes().length;
+    session.input.write("\r");
+    await waitForInkOutput(session, "INSTALL OPTIONS", optionsStart);
+    const confirmationStart = session.rawBytes().length;
+    session.input.write("\r");
+    await waitForInkOutput(session, "CONFIRM INSTALL", confirmationStart);
+    const blockedStart = session.rawBytes().length;
+    session.input.write("y");
+    const blocked = await waitForInkOutput(session, "INSTALL FAILED", blockedStart);
+    assert.ok(blocked.includes("AUDIT_BLOCKED"));
+    assert.deepEqual(calls.map(({ action }) => action), ["preview", "audit", "install"]);
+    const closeBlocked = session.rawBytes().length;
+    session.input.write("\x1b");
+    await waitForInkOutput(session, "CATALOG RESOURCES", closeBlocked);
+    session.input.write("q");
+    await session.done;
   } finally {
     if (session) await closeShowcaseDashboard(session);
     await rm(directory, { recursive: true, force: true });

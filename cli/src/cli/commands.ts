@@ -65,6 +65,23 @@ function copyTextToClipboard(text) {
   throw new Error("Clipboard access requires wl-copy or xclip on Linux.");
 }
 
+function resolveListedSkillRef(resource, ref) {
+  if (!ref || ref.length === 40) return ref;
+  try {
+    return sourceSkillsApi.resolveSkillVersionPrefix(
+      sourceSkillsApi.listSkillVersions(resource),
+      ref,
+    );
+  } catch (error) {
+    if (error.code === "RESOURCE_NOT_FOUND" || error.code === "AMBIGUOUS_RESOURCE") {
+      throw new CatalogError(
+        `${error.message.replace(/ in skill history\.$/, ` for ${resource.catalog}:${resource.id}.`)}`,
+        error.code,
+      );
+    }
+    throw error;
+  }
+}
 function selectedSourceResource(resources, options) {
   return resolveCatalogResource(
     resources,
@@ -160,6 +177,25 @@ async function executeCommand(options, report) {
     return 0;
   }
   if (options.command === "catalog") return manageCatalogCommand(options);
+  if (options.command === "versions") {
+    const { sourceResources } = loadCommandCatalogs({ ...options, command: "list" });
+    const candidates = sourceResources.filter((entry) =>
+      entry.kind === "skill" && entry.id === options.id &&
+      (!options.catalog || entry.catalog === options.catalog));
+    if (!candidates.length) throw new CatalogError(`GitHub source skill not found: ${options.id}`, "RESOURCE_NOT_FOUND");
+    if (candidates.length > 1) {
+      throw new CatalogError(
+        `Skill '${options.id}' is ambiguous: ${candidates.map((entry) => entry.catalog).join(", ")}. Specify --catalog.`,
+        "AMBIGUOUS_RESOURCE",
+      );
+    }
+    const [resource] = candidates;
+    const versions = sourceSkillsApi.listSkillVersions(resource);
+    output.log(`Commit history for ${resource.catalog}:${resource.id} (up to 500 newest commits; date is commit committer date):`);
+    for (const row of sourceSkillsApi.formatSkillVersionTable(versions)) output.log(row);
+    if (!versions.length) output.log("No commits found for this skill path.");
+    return 0;
+  }
   if (options.command === "doctor") {
     const result = diagnose(options);
     if (report) {
@@ -278,6 +314,11 @@ async function executeCommand(options, report) {
           { sourceResources, warnings: catalogWarnings },
           installOptions,
         ),
+        listSkillVersions: async (resource) => {
+          const versions = await sourceSkillsApi.listSkillVersionsAsync(resource);
+          const prefixes = sourceSkillsApi.uniqueSkillVersionPrefixes(versions);
+          return versions.map((version, index) => ({ ...version, prefix: prefixes[index] }));
+        },
       });
       return unavailable.length || result.errors.length || !completed ? 1 : 0;
     }
@@ -320,6 +361,15 @@ async function executeCommand(options, report) {
         ? `No tracked source installation for ${options.kind ? `${options.kind}:` : ""}${options.id}`
         : "No tracked source resources to update.", "RESOURCE_NOT_FOUND");
     }
+    if (options.ref) {
+      sourceToUpdate = sourceToUpdate.map((entry) => ({
+        ...entry,
+        resource: {
+          ...entry.resource,
+          source_ref: resolveListedSkillRef(entry.resource, options.ref),
+        },
+      }));
+    }
     const sourceToUpdateResources = sourceToUpdate.map(({ resource }) => resource);
     validateSourceUpdates(sourceToUpdate, { ...options, target });
     if (options.offline && !options.dryRun) {
@@ -350,6 +400,15 @@ async function executeCommand(options, report) {
     }
     if (options.scope === "user" && !USER_INSTALLABLE_KINDS.has(resource.kind)) {
       throw new CatalogError("--scope user supports source skills and agents; instructions are project-only", "INVALID_ARGUMENT");
+    }
+    if (options.ref) {
+      if (resource.kind !== "skill" || resource.bundle_id || options.offline) {
+        throw new CatalogError("--ref supports only online, unbundled GitHub source skills.", "INVALID_ARGUMENT");
+      }
+      return runSourceCommand({
+        ...options, action: "install", id: resource.id,
+        resource: { ...resource, source_ref: resolveListedSkillRef(resource, options.ref) },
+      });
     }
     return runSourceCommand({ ...options, action: "install", id: resource.id, resource });
   }

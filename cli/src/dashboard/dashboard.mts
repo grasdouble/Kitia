@@ -12,11 +12,11 @@ import {
   type CatalogFreshnessStatus,
 } from "./screens.mjs";
 import {
-  ModalOverlay, actionFailureModal, addCatalogModal, confirmationModal, inventoryMigrationModal,
-  onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal,
+  ModalOverlay, actionFailureModal, addCatalogModal, confirmationModal, inspectionModal, inventoryMigrationModal,
+  loadingModal, onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal, skillVersionsModal,
   versionAvailableModal,
   catalogTransferModal, catalogPresetModal,
-  type PendingDashboardAction,
+  type PendingDashboardAction, type SkillVersionOption,
 } from "./modals.mjs";
 
 import type { DashboardActionResult } from "../cli/dashboard.js";
@@ -70,6 +70,9 @@ type CatalogRefreshState = {
   details?: string[];
   failed: boolean;
 };
+function yieldToRenderer(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 type CatalogTransferState = {
   action: "import" | "export";
   step: "paste" | "select" | "result";
@@ -104,8 +107,9 @@ export function Dashboard({
     execute?: (
       operation: string,
       resource: CatalogResource,
-      options: { scope?: string; tool?: string; force?: boolean },
+      options: { scope?: string; tool?: string; force?: boolean; ref?: string },
     ) => Promise<DashboardActionResult>;
+    listSkillVersions?: (resource: CatalogResource) => SkillVersionOption[] | Promise<SkillVersionOption[]>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     userCatalogs?: UserCatalog[];
@@ -182,6 +186,9 @@ export function Dashboard({
   const [inventoryKindFilter, setInventoryKindFilter] = useState("all");
   const [catalogSourceFilter, setCatalogSourceFilter] = useState("all");
   const [catalogKindFilter, setCatalogKindFilter] = useState("all");
+  const [catalogTagFilter, setCatalogTagFilter] = useState("all");
+  const [catalogStatusFilter, setCatalogStatusFilter] = useState("all");
+  const [catalogLicenseFilter, setCatalogLicenseFilter] = useState("all");
   const [installResource, setInstallResource] = useState<CatalogResource | null>(null);
   const [installScope, setInstallScope] = useState("project");
   const [installTool, setInstallTool] = useState("copilot");
@@ -191,7 +198,28 @@ export function Dashboard({
   const [confirmationStage, setConfirmationStage] = useState(1);
   const [actionMessage, setActionMessage] = useState("");
   const [actionFailure, setActionFailure] = useState<{ action: string; message: string } | null>(null);
+  const [inspection, setInspection] = useState<{
+    action: "preview" | "audit";
+    resource: CatalogResource;
+    content: string;
+  } | null>(null);
+  const [skillVersionPicker, setSkillVersionPicker] = useState<{
+    resource: CatalogResource;
+    versions: SkillVersionOption[];
+    selectedIndex: number;
+    action: "install" | "update";
+  } | null>(null);
+  const [installRef, setInstallRef] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [loadingFrame, setLoadingFrame] = useState(0);
+  const [versionLoading, setVersionLoading] = useState(false);
+  const loadingFrames = ["|", "/", "-", "\\"];
+  const loading = actionPending || versionLoading || versionLabel === "Checking version update";
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setInterval(() => setLoadingFrame((frame) => (frame + 1) % loadingFrames.length), 100);
+    return () => clearInterval(timer);
+  }, [loading]);
   const [lastActionFailed, setLastActionFailed] = useState(false);
   const [catalogWizard, setCatalogWizard] = useState<null | {
     step: string;
@@ -258,13 +286,22 @@ export function Dashboard({
   const selectedResource = visibleInventory[activeInventoryIndex];
   const candidates = catalogCandidates;
   const visibleCatalog = filterCatalogResources(
-    candidates, catalogQuery, catalogSourceFilter, catalogKindFilter, userCatalogs,
+    candidates, catalogQuery, catalogSourceFilter, catalogKindFilter, userCatalogs, {
+      tag: catalogTagFilter === "all" ? undefined : catalogTagFilter,
+      status: catalogStatusFilter === "all" ? undefined : catalogStatusFilter,
+      license: catalogLicenseFilter === "all" ? undefined : catalogLicenseFilter,
+    },
   );
   const activeCatalogIndex = Math.min(catalogIndex, Math.max(0, visibleCatalog.length - 1));
+  const headerVersionLabel = loading
+    ? `${loadingFrames[loadingFrame]} ${actionPending ? actionMessage || "Loading" : versionLabel}`
+    : versionLabel;
 
   const submitCatalog = async (wizard: NonNullable<typeof catalogWizard>) => {
     setCatalogWizard({ ...wizard, step: "submitting", message: "" });
+    setActionMessage(`${wizard.intent === "edit" ? "Updating" : "Adding"} catalog ${wizard.name.trim()}...`);
     setActionPending(true);
+    await yieldToRenderer();
     try {
       const request = {
         name: wizard.name.trim(),
@@ -305,7 +342,9 @@ export function Dashboard({
 
   const runCatalogRemoval = async (name: string) => {
     setCatalogRemoval({ step: "working", index: 0, name, message: `Removing catalog ${name}...`, failed: false });
+    setActionMessage(`Removing catalog ${name}...`);
     setActionPending(true);
+    await yieldToRenderer();
     try {
       if (!actions.removeCatalog) throw new Error("Dashboard catalog removal handler is unavailable.");
       const result = await actions.removeCatalog(name);
@@ -335,7 +374,9 @@ export function Dashboard({
       step: "working", scope: name ? "one" : "all", index: 0, name: target,
       message: `Refreshing ${target}...`, failed: false,
     });
+    setActionMessage(`Refreshing ${target}...`);
     setActionPending(true);
+    await yieldToRenderer();
     try {
       if (!actions.refreshCatalog) throw new Error("Dashboard catalog refresh handler is unavailable.");
       const result = await actions.refreshCatalog(name);
@@ -383,23 +424,101 @@ export function Dashboard({
     }
   };
 
+  const queueForceRetry = (
+    requested: PendingDashboardAction,
+    failure: {
+      code?: string;
+      category?: string;
+      paths?: string[];
+      recoverable?: boolean;
+      userMessage?: string;
+      agent?: string;
+    },
+  ): boolean => {
+    const ghForceRetry = failure.code === "GH_FORCE_REQUIRED" &&
+      typeof failure.agent === "string" && failure.agent.length > 0;
+    const alreadyForceRetriedAgent = ghForceRetry && requested.ghForceAgents?.includes(failure.agent as string);
+    if (requested.action !== "update" || failure.recoverable !== true ||
+        (ghForceRetry
+          ? alreadyForceRetriedAgent
+          : requested.forceRetry || failure.code !== "LOCAL_CONFLICT")) return false;
+    setConfirmation({
+      action: "update",
+      resource: requested.resource,
+      ...(requested.ref ? { ref: requested.ref } : {}),
+      forceRetry: true,
+      ...(ghForceRetry ? {
+        ghForceRetry: true,
+        ghForceAgent: failure.agent,
+        ghForceAgents: [...(requested.ghForceAgents || []), failure.agent as string],
+      } : {}),
+      conflict: {
+        category: failure.category || (ghForceRetry ? "github-force-required" : "local-conflict"),
+        paths: failure.paths || [],
+        ...(failure.userMessage ? { message: failure.userMessage } : {}),
+      },
+    });
+    setConfirmationChoice(0);
+    setActionMessage(ghForceRetry
+      ? "GitHub CLI requested overwrite; confirm whether to retry with --force."
+      : "Update blocked by a local conflict; choose whether to force and retry.");
+    return true;
+  };
+
+  const openSkillVersions = async (
+    resource: CatalogResource,
+    action: "install" | "update" = "install",
+  ) => {
+    if (!actions.listSkillVersions || versionLoading) return;
+    setVersionLoading(true);
+    setActionPending(true);
+    setActionMessage(`Loading commit history for ${resource.id}...`);
+    setActionFailure(null);
+    try {
+      const versions = await actions.listSkillVersions(resource);
+      if (!versions.length) {
+        setActionFailure({ action: "versions", message: `No commits found for ${resource.catalog}:${resource.id}.` });
+        return;
+      }
+      setSkillVersionPicker({ resource, versions, selectedIndex: 0, action });
+    } catch (error) {
+      setActionFailure({
+        action: "versions",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setVersionLoading(false);
+      setActionPending(false);
+      setActionMessage("");
+    }
+  };
   const runConfirmedAction = async (requested: PendingDashboardAction) => {
     setActionPending(true);
     setLastActionFailed(false);
     setActionFailure(null);
+    const inspectionAction = requested.action === "preview" || requested.action === "audit";
     const progressLabel = requested.action === "install" ? "Installing"
       : requested.action === "update" ? "Updating"
-        : requested.action === "remove-unmanaged" ? "Removing" : "Uninstalling";
+        : requested.action === "remove-unmanaged" ? "Removing"
+          : requested.action === "uninstall" ? "Uninstalling"
+            : requested.action === "preview" ? "Previewing" : "Auditing";
     const completedLabel = requested.action === "install" ? "Installed"
       : requested.action === "update" ? "Updated"
-        : requested.action === "remove-unmanaged" ? "Removed" : "Uninstalled";
+        : requested.action === "remove-unmanaged" ? "Removed"
+          : requested.action === "uninstall" ? "Uninstalled"
+            : requested.action === "preview" ? "Previewed" : "Audited";
     setActionMessage(`${progressLabel} ${requested.resource.kind}:${requested.resource.id}...`);
+    await yieldToRenderer();
     try {
       if (!actions.execute) throw new Error("Dashboard action handler is unavailable.");
       const result = await actions.execute(requested.action, requested.resource, {
         scope: requested.scope,
         tool: requested.tool,
-        ...(requested.forceRetry ? { force: true } : {}),
+        ...(requested.ref ? { ref: requested.ref } : {}),
+        ...(requested.forceRetry && !requested.ghForceRetry ? { force: true } : {}),
+        ...(requested.ghForceRetry
+          ? { ghForce: true, ghForceAgent: requested.ghForceAgent }
+          : {}),
       });
       if (Array.isArray(result.resources)) setInstalledResources([...result.resources]);
       if (Array.isArray(result.errors)) setScanErrors([...result.errors]);
@@ -408,19 +527,7 @@ export function Dashboard({
       setLastActionFailed(failed);
       if (failed) {
         const failure = result.failure;
-        if (requested.action === "update" && failure?.code === "LOCAL_CONFLICT" && failure.recoverable) {
-          setConfirmation({
-            action: "update",
-            resource: requested.resource,
-            forceRetry: true,
-            conflict: {
-              category: failure.category || "local-conflict",
-              paths: failure.paths || [],
-            },
-          });
-          setConfirmationChoice(0);
-          setActionMessage("Update blocked by a local conflict; choose whether to force and retry.");
-        } else {
+        if (!failure || !queueForceRetry(requested, failure)) {
           const errorText = failure?.userMessage ||
             (requested.action === "update"
               ? `Update failed (exit ${result.code}); no safe cause details were provided by the action handler.`
@@ -428,6 +535,12 @@ export function Dashboard({
           setActionFailure({ action: requested.action, message: errorText });
           setActionMessage(`Action failed${result.code ? ` (exit ${result.code})` : ""}: ${errorText}`);
         }
+      } else if (inspectionAction) {
+        setInspection({
+          action: requested.action as "preview" | "audit",
+          resource: requested.resource,
+          content: outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`,
+        });
       } else {
         setActionMessage(outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
       }
@@ -438,21 +551,10 @@ export function Dashboard({
         paths?: string[];
         recoverable?: boolean;
         userMessage?: string;
+        agent?: string;
       };
       setLastActionFailed(true);
-      if (requested.action === "update" && typed.code === "LOCAL_CONFLICT" && typed.recoverable === true) {
-        setConfirmation({
-          action: "update",
-          resource: requested.resource,
-          forceRetry: true,
-          conflict: {
-            category: typed.category || "local-conflict",
-            paths: typed.paths || [],
-          },
-        });
-        setConfirmationChoice(0);
-        setActionMessage("Update blocked by a local conflict; choose whether to force and retry.");
-      } else {
+      if (!queueForceRetry(requested, typed)) {
         const message = typed.userMessage || (error instanceof Error ? error.message : String(error));
         setActionFailure({ action: requested.action, message });
         setActionMessage(`Action failed: ${message}`);
@@ -464,6 +566,39 @@ export function Dashboard({
 
   useInput((input, key) => {
     const character = input.toLocaleLowerCase();
+    if (actionPending || versionLoading) return;
+    if (skillVersionPicker) {
+      if (key.escape) setSkillVersionPicker(null);
+      else if (key.upArrow || key.downArrow) {
+        setSkillVersionPicker((current) => current ? {
+          ...current,
+          selectedIndex: cycleIndex(current.versions.length, current.selectedIndex, key.upArrow ? -1 : 1),
+        } : current);
+      } else if (key.return) {
+        const { resource, versions, selectedIndex, action } = skillVersionPicker;
+        const ref = versions[selectedIndex].sha;
+        setSkillVersionPicker(null);
+        if (action === "update") {
+          setConfirmation({ action, resource, ref });
+          setConfirmationChoice(1);
+          setConfirmationStage(1);
+          setActionMessage("");
+        } else {
+          setInstallResource(resource);
+          setInstallRef(ref);
+          setInstallScope("project");
+          setInstallTool("copilot");
+          setInstallFocus(0);
+          setScreenMode("install-options");
+          setActionMessage("");
+        }
+      }
+      return;
+    }
+    if (inspection) {
+      if (key.return || key.escape || input === " ") setInspection(null);
+      return;
+    }
     if (actionFailure) {
       if (key.return || key.escape || input === " ") setActionFailure(null);
       return;
@@ -798,12 +933,15 @@ export function Dashboard({
         const current = { ...catalogTransfer, working: true };
         setCatalogTransfer(current);
         setActionPending(true);
-        void actions.transferCatalogs?.("export", "").then((result) => {
-          if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
-          setCatalogTransfer({ ...current, step: "result", working: false, message: "Configuration copied to clipboard." });
-        }).catch((error) => {
-          setCatalogTransfer({ ...current, step: "result", working: false, message: error instanceof Error ? error.message : String(error) });
-        }).finally(() => setActionPending(false));
+        setActionMessage("Exporting catalog configuration...");
+        void yieldToRenderer()
+          .then(() => actions.transferCatalogs!("export", ""))
+          .then((result) => {
+            if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+            setCatalogTransfer({ ...current, step: "result", working: false, message: "Configuration copied to clipboard." });
+          }).catch((error) => {
+            setCatalogTransfer({ ...current, step: "result", working: false, message: error instanceof Error ? error.message : String(error) });
+          }).finally(() => setActionPending(false));
       } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && key.ctrl && character === "s") {
         try {
           const parsed = JSON.parse(catalogTransfer.content) as { catalog_version?: unknown; sources?: unknown };
@@ -857,20 +995,23 @@ export function Dashboard({
         const current = { ...catalogTransfer, step: "select" as const, working: true };
         setCatalogTransfer(current);
         setActionPending(true);
-        void actions.transferCatalogs?.("import", content).then((result) => {
-          if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
-          if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
-          setCatalogTransfer({
-            ...current,
-            step: "result",
-            working: false,
-            message: `Imported ${result.importSummary?.added.length || 0}, ignored ${result.importSummary?.ignored.length || 0}, refreshed ${result.importSummary?.refreshed.length || 0}, refresh failed ${result.importSummary?.refreshFailures.length || 0}.`,
-            summary: result.importSummary,
-          });
-          if (Array.isArray(result.catalogs)) void checkCatalogFreshness(result.catalogs);
-        }).catch((error) => {
-          setCatalogTransfer({ ...current, working: false, message: error instanceof Error ? error.message : String(error) });
-        }).finally(() => setActionPending(false));
+        setActionMessage("Importing catalog configuration...");
+        void yieldToRenderer()
+          .then(() => actions.transferCatalogs!("import", content))
+          .then((result) => {
+            if (Array.isArray(result.catalogs)) setUserCatalogs([...result.catalogs]);
+            if (Array.isArray(result.resources)) setCatalogCandidates([...result.resources]);
+            setCatalogTransfer({
+              ...current,
+              step: "result",
+              working: false,
+              message: `Imported ${result.importSummary?.added.length || 0}, ignored ${result.importSummary?.ignored.length || 0}, refreshed ${result.importSummary?.refreshed.length || 0}, refresh failed ${result.importSummary?.refreshFailures.length || 0}.`,
+              summary: result.importSummary,
+            });
+            if (Array.isArray(result.catalogs)) void checkCatalogFreshness(result.catalogs);
+          }).catch((error) => {
+            setCatalogTransfer({ ...current, working: false, message: error instanceof Error ? error.message : String(error) });
+          }).finally(() => setActionPending(false));
       } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && key.return) {
         setCatalogTransfer({ ...catalogTransfer, content: `${catalogTransfer.content}\n`, message: "" });
       } else if (catalogTransfer.action === "import" && catalogTransfer.step === "paste" && (key.backspace || key.delete)) {
@@ -955,11 +1096,30 @@ export function Dashboard({
           catalogKindFilter, candidates, "kind", "catalog", catalogSourceFilter, userCatalogs,
         ));
         setCatalogIndex(0);
+      } else if (character === "t") {
+        setCatalogTagFilter(cycleFilter(catalogTagFilter, candidates, "tag", "kind", "all"));
+        setCatalogIndex(0);
+      } else if (character === "s") {
+        setCatalogStatusFilter(cycleFilter(catalogStatusFilter, candidates, "status", "kind", "all"));
+        setCatalogIndex(0);
+      } else if (character === "l") {
+        setCatalogLicenseFilter(cycleFilter(catalogLicenseFilter, candidates, "license", "kind", "all"));
+        setCatalogIndex(0);
+      } else if (character === "v") {
+        const resource = visibleCatalog[activeCatalogIndex];
+        if (resource?.kind === "skill") openSkillVersions(resource);
+      } else if (character === "p" || character === "a") {
+        const resource = visibleCatalog[activeCatalogIndex];
+        if (resource) void runConfirmedAction({
+          action: character === "p" ? "preview" : "audit",
+          resource,
+        });
       } else if (key.upArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, -1));
       else if (key.downArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, 1));
       else if (key.return && visibleCatalog[activeCatalogIndex]) {
         const resource = visibleCatalog[activeCatalogIndex];
         setInstallResource(resource);
+        setInstallRef(null);
         setInstallScope("project");
         setInstallTool("copilot");
         setInstallFocus(resource.kind === "instruction" ? 1 : 0);
@@ -994,6 +1154,7 @@ export function Dashboard({
             resource: { ...installResource, scope: installScope },
             scope: installScope,
             tool: installTool,
+            ...(installRef ? { ref: installRef } : {}),
           });
           setConfirmationChoice(0);
         }
@@ -1048,6 +1209,10 @@ export function Dashboard({
         inventoryKindFilter, installedResources, "kind", "catalog", inventoryCatalogFilter, userCatalogs,
       ));
       setSelectedIndex(0);
+    } else if (character === "v" && selectedResource?.kind === "skill" &&
+        selectedResource.managed !== false && selectedResource.source_repository &&
+        !selectedResource.bundle_id && typeof actions.listSkillVersions === "function") {
+      openSkillVersions(selectedResource, "update");
     } else if (character === "a" && candidates.length) {
       setScreenMode("catalog");
       setCatalogQuery("");
@@ -1113,6 +1278,10 @@ export function Dashboard({
     });
   } else if (catalogTransfer) {
     modal = catalogTransferModal({ ...catalogTransfer, columns });
+  } else if (skillVersionPicker) {
+    modal = skillVersionsModal({ ...skillVersionPicker, columns });
+  } else if (inspection) {
+    modal = inspectionModal({ ...inspection, columns, rows });
   } else if (actionFailure) {
     modal = actionFailureModal({ ...actionFailure, columns });
   } else if (confirmation) {
@@ -1127,6 +1296,7 @@ export function Dashboard({
       resource: installResource,
       scope: installScope,
       tool: installTool,
+      ref: installRef,
       focus: installFocus,
       resources: installedResources,
       errors: scanErrors,
@@ -1145,7 +1315,7 @@ export function Dashboard({
       canEdit: typeof actions.updateCatalog === "function" && userCatalogs.length > 0,
       canRefresh: typeof actions.refreshCatalog === "function" && userCatalogs.length > 0,
       canTransfer: typeof actions.transferCatalogs === "function",
-      versionLabel,
+      versionLabel: headerVersionLabel,
       showDetails,
       columns,
       rows,
@@ -1161,8 +1331,11 @@ export function Dashboard({
       filterMode: catalogFilterMode,
       catalogFilter: catalogSourceFilter,
       kindFilter: catalogKindFilter,
+      tagFilter: catalogTagFilter,
+      statusFilter: catalogStatusFilter,
+      licenseFilter: catalogLicenseFilter,
       selectedIndex: activeCatalogIndex,
-      versionLabel,
+      versionLabel: headerVersionLabel,
       screenName: screenMode === "install-options" ? "INSTALL OPTIONS" : "INSTALL FROM CATALOG",
       showDetails,
       columns,
@@ -1179,7 +1352,7 @@ export function Dashboard({
       catalogFilter: inventoryCatalogFilter,
       kindFilter: inventoryKindFilter,
       selectedIndex: activeInventoryIndex,
-      versionLabel,
+      versionLabel: headerVersionLabel,
       actionMessage,
       catalogAvailable: candidates.length > 0,
       showDetails,
@@ -1192,7 +1365,13 @@ export function Dashboard({
       inventoryLabels,
     });
   }
-  if (versionNotice && !migrationScopes.length && !actionFailure) {
+  if (actionPending) {
+    modal = loadingModal({
+      message: actionMessage || "Loading...",
+      frame: loadingFrames[loadingFrame],
+      columns,
+    });
+  } else if (versionNotice && !migrationScopes.length && !actionFailure) {
     modal = versionAvailableModal(
       versionNotice.installed,
       versionNotice.available,
@@ -1216,8 +1395,9 @@ export async function runDashboard(
     execute?: (
       operation: string,
       resource: CatalogResource,
-      options: { scope?: string; tool?: string },
+      options: { scope?: string; tool?: string; force?: boolean; ref?: string },
     ) => Promise<DashboardActionResult>;
+    listSkillVersions?: (resource: CatalogResource) => SkillVersionOption[] | Promise<SkillVersionOption[]>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     userCatalogs?: UserCatalog[];

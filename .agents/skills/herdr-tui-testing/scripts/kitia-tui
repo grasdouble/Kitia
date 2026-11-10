@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  kitia-tui run -- <program> [argument ...]
+  kitia-tui read <terminal-id>
+  kitia-tui kill <terminal-id>
+  kitia-tui --help
+
+Run a command in an unlabelled, background Herdr Core terminal. This does not
+select a Herdr space or tab and preserves the visible app focus. It requires
+HERDR_ENV=1; it never sets that variable. Keep the returned terminal ID for
+reading or stopping only this terminal.
+
+Examples (from the Kitia repository):
+  kitia-tui run -- node cli/bin/kitia.js dashboard
+  kitia-tui run -- node --test web/test/termless-dashboard.test.mjs
+  kitia-tui read t7
+  kitia-tui kill t7
+
+Build first when relevant source changed. If pnpm or the build is unavailable,
+stop and report that error; do not fall back to stale cli/dist.
+EOF
+}
+
+require_herdr_env() {
+  if [[ ${HERDR_ENV:-} != 1 ]]; then
+    printf '%s\n' 'Not running inside a Herdr-managed pane (HERDR_ENV must already be 1); no Herdr command was run.' >&2
+    exit 2
+  fi
+}
+
+case ${1:-} in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  run)
+    shift
+    if [[ ${1:-} != -- ]]; then
+      printf '%s\n' 'Usage: kitia-tui run -- <program> [argument ...]' >&2
+      exit 2
+    fi
+    shift
+    if (($# == 0)); then
+      printf '%s\n' 'run requires a program after --.' >&2
+      exit 2
+    fi
+    require_herdr_env
+    # --json has a documented RunResult.address field. Passing argv directly
+    # avoids shell evaluation; deliberately omit labels so the app won't adopt it.
+    result=$(hc run --bg --json --cwd "$PWD" -- "$@") || exit $?
+    address=$(printf '%s' "$result" | node -e '
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", chunk => input += chunk);
+      process.stdin.on("end", () => {
+        try {
+          const value = JSON.parse(input);
+          if (typeof value.address !== "string" || value.address.length === 0) process.exit(2);
+          process.stdout.write(value.address + "\n");
+        } catch { process.exit(2); }
+      });
+    ') || {
+      printf '%s\n' 'Could not parse hc run JSON response; raw response follows:' >&2
+      printf '%s\n' "$result" >&2
+      exit 1
+    }
+    printf 'Started background terminal %s\n' "$address"
+    ;;
+  read|kill)
+    command=$1
+    shift
+    if (($# != 1)) || [[ -z $1 ]]; then
+      printf 'Usage: kitia-tui %s <terminal-id>\n' "$command" >&2
+      exit 2
+    fi
+    terminal_id=$1
+    require_herdr_env
+    if [[ $command == read ]]; then
+      hc read --lines 80 "$terminal_id"
+    else
+      hc kill "$terminal_id"
+    fi
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
