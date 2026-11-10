@@ -32,7 +32,6 @@ export interface CatalogResource {
   license_status?: string;
   license_spdx?: string;
   scope?: string;
-  bundle_id?: string;
   managed?: boolean;
   issues?: ResourceIssue[];
   paths?: string[];

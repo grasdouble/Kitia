@@ -12,8 +12,7 @@ const {
 } = require("../dist/catalog/sources/manage.js");
 const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
 const {
-  installSourceFileResource, runGhSkill, listSkillVersions, listSkillVersionsAsync, latestSourceVersionAtRef, uniqueSkillVersionPrefixes,
-  formatSkillVersionTable, resolveSkillVersionPrefix, buildSourceSkillArgs,
+  installSourceFileResource, runGhSkill, latestSourceVersionAtRef, buildSourceSkillArgs,
 } = require("../dist/catalog/sources/skills.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
@@ -21,7 +20,7 @@ const { recordSourceInstallation } = require("../dist/catalog/sources/installed.
 const { loadCommandCatalogs } = require("../dist/catalog/loading.js");
 const { findUnmanagedArtifacts, installedFingerprint, readInstallState } = require("../dist/catalog/inventory/index.js");
 const { collectInstalledScopes } = require("../dist/catalog/lifecycle.js");
-const { formatDashboardRows, listCatalogResources } = require("../dist/cli/catalog.js");
+const { formatDashboardRows } = require("../dist/cli/catalog.js");
 const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel, dashboardStatus } =
   require("../dist/dashboard/helpers.mjs");
 const { renderInstalledResources } = require("../dist/dashboard/terminal.js");
@@ -30,56 +29,8 @@ const {
   uninstallSourceResource, updateSourceResources,
 } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
-const { executeCommand } = require("../dist/cli/commands.js");
+const { executeCommand, runDashboardWorker } = require("../dist/cli/commands.js");
 const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
-test("catalog discovery ranks exact identifiers and preserves existing filters", () => {
-  const resources = [
-    { id: "release-helper", kind: "skill", catalog: "main", description: "Helps with release notes", tags: ["release"] },
-    { id: "release", kind: "agent", catalog: "main", description: "Prepares software releases", tags: ["automation"] },
-    { id: "release-guide", kind: "instruction", catalog: "other", description: "Release process", tags: ["release"] },
-  ];
-  const ranked = listCatalogResources(resources, { query: "release" });
-  assert.deepEqual(ranked.map(({ id }) => id), ["release", "release-helper", "release-guide"]);
-  assert.deepEqual(listCatalogResources(resources, {
-    query: "release", kind: "skill", tag: "release",
-  }).map(({ id }) => id), ["release-helper"]);
-  assert.deepEqual(filterCatalogResources(resources, "release", "main", "all")
-    .map(({ id }) => id), ["release", "release-helper"]);
-});
-
-test("catalog browser search covers discovery metadata fields", () => {
-  const resource = {
-    id: "deploy-helper", kind: "skill", catalog: "main",
-    category: "deployment", owner: "platform", tags: ["release"],
-    status: "stable", license_status: "MIT", license_spdx: "MIT",
-    use_when: "shipping software", example: "deploy release",
-    expected_output: "deployment plan", source_repository: "org/tools",
-    source_path: "skills/deploy-helper",
-  };
-  for (const query of [
-    "deployment", "platform", "release", "stable", "MIT", "shipping",
-    "deploy", "plan", "org/tools", "skills/deploy-helper",
-  ]) {
-    assert.deepEqual(filterCatalogResources([resource], query, "all", "all"), [resource], query);
-  }
-});
-test("catalog browser filters compose tag, status, and SPDX license constraints", () => {
-  const resources = [
-    { id: "release-helper", kind: "skill", catalog: "main", tags: ["release"], status: "stable", license_status: "MIT", license_spdx: "MIT" },
-    { id: "release-agent", kind: "agent", catalog: "main", tags: ["review"], status: "experimental", license_status: "Apache-2.0", license_spdx: "Apache-2.0" },
-    { id: "release-guide", kind: "instruction", catalog: "other", tags: ["review"], status: "stable", license_status: "Proprietary" },
-  ];
-  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { tag: "review" })
-    .map(({ id }) => id), ["release-agent", "release-guide"]);
-  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { status: "stable" })
-    .map(({ id }) => id), ["release-helper", "release-guide"]);
-  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { license: "Apache-2.0" })
-    .map(({ id }) => id), ["release-agent"]);
-  assert.deepEqual(filterCatalogResources(resources, "release", "main", "skill", [], {
-    tag: "release", status: "stable", license: "MIT",
-  }).map(({ id }) => id), ["release-helper"]);
-  assert.equal(cycleFilter("all", resources, "tag", "kind", "all"), "release");
-});
 test("dashboard preview, audit, and install dispatch use source audit and capture semantics", async () => {
   const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-inspection-"));
@@ -155,7 +106,7 @@ test("dashboard installs the selected full skill revision from the revision pick
       source_repository: "org/repo", source_path: "skills/revision-skill",
       source_ref: "a".repeat(40), license_status: "MIT",
     }],
-    listSkillVersions: async () => {
+    listSourceVersions: async () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
       return [
         { sha: "a".repeat(40), prefix: "aaaaaaa", date: "2026-11-09T00:00:00Z", subject: "Current pin" },
@@ -252,7 +203,7 @@ test("dashboard shows the loading popup for consecutive actions", async () => {
   input.destroy();
   output.destroy();
 });
-test("dashboard revision picker applies a selected full SHA to a confirmed skill update", async () => {
+test("dashboard revision picker applies a selected full SHA to a confirmed instruction update", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const input = new PassThrough();
@@ -267,26 +218,26 @@ test("dashboard revision picker applies a selected full SHA to a confirmed skill
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const selectedSha = "c".repeat(40);
-  const installedSkill = {
-    catalog: "Test", kind: "skill", id: "revision-skill", managed: true,
+  const installedInstruction = {
+    catalog: "Test", kind: "instruction", id: "review", managed: true,
     scope: "project", status: "current", source_repository: "org/repo",
-    source_path: "skills/revision-skill/SKILL.md", source_ref: "a".repeat(40),
+    source_path: ".github/instructions/review.instructions.md", source_ref: "a".repeat(40),
   };
   const actions = [];
-  const done = runDashboard([installedSkill], input, output, [], {
-    listSkillVersions: () => [
+  const done = runDashboard([installedInstruction], input, output, [], {
+    listSourceVersions: () => [
       { sha: "a".repeat(40), prefix: "aaaaaaa", date: "2026-11-09T00:00:00Z", subject: "Current pin" },
       { sha: selectedSha, prefix: "ccccccc", date: "2026-11-08T00:00:00Z", subject: "Previous revision" },
     ],
     execute: async (action, resource, options) => {
       actions.push({ action, resource: resource.id, ref: options.ref });
-      return { code: 0, messages: ["Updated selected revision."], resources: [installedSkill], errors: [] };
+      return { code: 0, messages: ["Updated selected revision."], resources: [installedInstruction], errors: [] };
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 80));
   input.write("v");
   await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /SKILL REVISIONS/);
+  assert.match(rendered, /RESOURCE REVISIONS/);
   input.write("\x1b[B");
   await new Promise((resolve) => setTimeout(resolve, 50));
   input.write("\r");
@@ -295,7 +246,7 @@ test("dashboard revision picker applies a selected full SHA to a confirmed skill
   assert.ok(rendered.includes(selectedSha));
   input.write("y");
   await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.deepEqual(actions, [{ action: "update", resource: "revision-skill", ref: selectedSha }]);
+  assert.deepEqual(actions, [{ action: "update", resource: "review", ref: selectedSha }]);
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -2591,30 +2542,37 @@ test("unmanaged dashboard artifacts can be removed only after confirmation", asy
 
 test("removing an unmanaged skill deletes its entire detected folder", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-unmanaged-remove-"));
+  const configDirectory = path.join(temporary, "config");
   const target = path.join(temporary, "project");
   const userTarget = path.join(temporary, "user");
   const skillDirectory = path.join(target, ".agents/skills/manual-skill");
+  const previousConfigDirectory = process.env.KITIA_CONFIG_DIR;
+  fs.mkdirSync(configDirectory, { recursive: true });
   fs.mkdirSync(skillDirectory, { recursive: true });
   fs.mkdirSync(userTarget, { recursive: true });
   const entryFile = path.join(skillDirectory, "SKILL.md");
   const extraFile = path.join(skillDirectory, "reference.txt");
   fs.writeFileSync(entryFile, "Unmanaged skill entry point.");
   fs.writeFileSync(extraFile, "User-owned supporting file.");
-
-  const execute = createDashboardActionHandler(async () => {
-    throw new Error("Unmanaged removal must not invoke the tracked-resource CLI.");
-  });
-  const result = await execute(
-    "remove-unmanaged",
-    { catalog: "-", kind: "skill", id: "manual-skill", scope: "project", managed: false },
-    { target, userTarget },
-    { sourceResources: [] },
-  );
-  assert.equal(result.code, 0);
-  assert.equal(fs.existsSync(skillDirectory), false);
-  assert.equal(fs.existsSync(entryFile), false);
-  assert.equal(fs.existsSync(extraFile), false);
-  assert.ok(!result.resources.some((resource) => resource.id === "manual-skill"));
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  try {
+    const result = await runDashboardWorker({
+      task: "resource-action",
+      action: "remove-unmanaged",
+      resource: { catalog: "-", kind: "skill", id: "manual-skill", scope: "project", managed: false },
+      dashboardOptions: { target, userTarget },
+      catalogs: { sourceResources: [] },
+      installOptions: {},
+    });
+    assert.equal(result.code, 0);
+    assert.equal(fs.existsSync(skillDirectory), false);
+    assert.equal(fs.existsSync(entryFile), false);
+    assert.equal(fs.existsSync(extraFile), false);
+    assert.ok(!result.resources.some((resource) => resource.id === "manual-skill"));
+  } finally {
+    if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
+  }
 });
 
 test("dashboard update dispatch reaches the CLI update command for the selected catalog resource", async () => {
@@ -2862,20 +2820,63 @@ test("catalog browser renders ordered columns without list descriptions at wide 
     output.destroy();
   }
 });
-test("inspection modal bounds wrapped preview content to the terminal height", async () => {
-  const { inspectionModal } = await import("../dist/dashboard/modals.mjs");
-  const rows = 30;
-  const modal = inspectionModal({
-    action: "preview",
-    resource: { catalog: "AI-Kit", kind: "skill", id: "conventional-commits" },
-    content: Array.from({ length: 24 }, (_, index) =>
-      `Preview paragraph ${index}: ${"conventional commit guidance ".repeat(5)}`).join("\n"),
-    columns: 100,
-    rows,
+test("preview starts with a tree page, then advances through each complete file", async () => {
+  const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+  const resource = { catalog: "AI-Kit", kind: "skill", id: "sample" };
+  const content = [
+    "sample/",
+    "├── first.md",
+    "└── second.md",
+    "",
+    "── first.md ──",
+    "",
+    ...Array.from({ length: 8 }, (_, index) => `First file line ${index}`),
+    "",
+    "── second.md ──",
+    "",
+    "Second file line 0",
+    "Second file line 1",
+  ].join("\n");
+  const options = { action: "preview", resource, content, columns: 100, rows: 32 };
+  assert.equal(inspectionPageCount(options), 4);
+  assert.deepEqual(inspectionPageView({ ...options, page: 0 }), {
+    title: "SOURCE TREE",
+    lines: ["sample/", "├── first.md", "└── second.md"],
+    page: 0,
+    pageCount: 4,
   });
-  const modalHeight = modal.lines.length + modal.shortcuts.length + 1;
-  assert.ok(modalHeight <= rows - 2, `modal height ${modalHeight} must fit inside ${rows} terminal rows`);
-  assert.ok(modal.lines.some(({ text }) => text.includes("output truncated in dashboard")));
+  assert.deepEqual(inspectionPageView({ ...options, page: 1 }), {
+    title: "FILE first.md · PART 1/2",
+    lines: Array.from({ length: 6 }, (_, index) => `First file line ${index}`),
+    page: 1,
+    pageCount: 4,
+  });
+  assert.deepEqual(inspectionPageView({ ...options, page: 2 }), {
+    title: "FILE first.md · PART 2/2",
+    lines: ["First file line 6", "First file line 7"],
+    page: 2,
+    pageCount: 4,
+  });
+  assert.deepEqual(inspectionPageView({ ...options, page: 3 }), {
+    title: "FILE second.md",
+    lines: ["Second file line 0", "Second file line 1"],
+    page: 3,
+    pageCount: 4,
+  });
+});
+test("preview page count adapts to terminal height", async () => {
+  const { inspectionPageCount } = await import("../dist/dashboard/screens.mjs");
+  const resource = { catalog: "AI-Kit", kind: "skill", id: "sample" };
+  const content = [
+    "sample/",
+    "└── SKILL.md",
+    "",
+    "── SKILL.md ──",
+    "",
+    ...Array.from({ length: 40 }, (_, index) => `Preview line ${index}`),
+  ].join("\n");
+  assert.equal(inspectionPageCount({ action: "preview", resource, content, columns: 100, rows: 30 }), 11);
+  assert.equal(inspectionPageCount({ action: "preview", resource, content, columns: 100, rows: 40 }), 4);
 });
 test("catalog browser previews source text and reports audits from keyboard actions", async () => {
   const { PassThrough } = require("node:stream");
@@ -2893,10 +2894,31 @@ test("catalog browser previews source text and reports audits from keyboard acti
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const calls = [];
   const done = runDashboard([], input, output, [], {
-    catalogResources: [{ catalog: "sample", kind: "agent", id: "reviewer", source_repository: "org/repo" }],
+    catalogResources: [{
+      catalog: "sample",
+      kind: "agent",
+      id: "reviewer",
+      source_repository: "org/repo",
+      description: `${"A long description that must remain complete. ".repeat(12)}Final description sentence.`,
+    }],
     execute: async (action) => {
       calls.push(action);
-      return { code: 0, messages: [action === "preview" ? "# Source body" : "Audit coverage: 1/1 files analyzed."], resources: [], errors: [] };
+      const message = action === "preview"
+        ? [
+          "reviewer/",
+          "├── AGENTS.md",
+          "└── references.md",
+          "",
+          "── AGENTS.md ──",
+          "",
+          ...Array.from({ length: 70 }, (_, index) => `# Source line ${index}`),
+          "",
+          "── references.md ──",
+          "",
+          "Reference content.",
+        ].join("\n")
+        : "Audit coverage: 1/1 files analyzed.";
+      return { code: 0, messages: [message], resources: [], errors: [] };
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 80));
@@ -2905,7 +2927,17 @@ test("catalog browser previews source text and reports audits from keyboard acti
   input.write("p");
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.match(rendered, /SOURCE PREVIEW/);
-  assert.match(rendered, /# Source body/);
+  assert.match(rendered, /PAGE 1\/12 · SOURCE TREE/);
+  assert.match(rendered, /REVIEWER\//i);
+  assert.match(rendered, /├── AGENTS\.md/);
+  assert.doesNotMatch(rendered, /# Source line 0/);
+  assert.match(rendered, /DESCRIPTION/);
+  assert.match(rendered, /description sentence\./);
+  const secondPageStart = rendered.length;
+  input.write("\x1b[C");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.match(rendered.slice(secondPageStart), /PAGE 2\/12 · FILE AGENTS\.md · PART 1\/10/);
+  assert.match(rendered.slice(secondPageStart), /# Source line 0/);
   input.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 50));
   input.write("a");
@@ -3077,121 +3109,39 @@ test("dashboard uses a shared list/details split at wide terminal widths", async
 });
 
 
-test("versions parser selects a skill and installs accept full SHAs or strict hexadecimal prefixes", () => {
+test("versions parser selects every source kind and install/update accept full SHAs or strict hexadecimal prefixes", () => {
   const sha = "c".repeat(40);
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-versions-args-"));
   const previous = process.env.KITIA_CONFIG_DIR;
   process.env.KITIA_CONFIG_DIR = temporary;
   writeJson(path.join(temporary, "catalogSources.json"), {
-    catalog_version: 1, sources: [{ name: "Test", repository: "https://github.com/example/skills" }],
+    catalog_version: 1, sources: [{ name: "Test", repository: "https://github.com/example/resources" }],
   });
   try {
-    assert.deepEqual(parseArguments(["versions", "skill", "demo-skill", "--catalog", "Test"]), {
-      command: "versions", kind: "skill", id: "demo-skill", catalog: "Test",
-    });
+    for (const kind of ["skill", "agent", "instruction"]) {
+      assert.deepEqual(parseArguments(["versions", kind, "demo-resource", "--catalog", "Test"]), {
+        command: "versions", kind, id: "demo-resource", catalog: "Test",
+      });
+      assert.equal(parseArguments(["install", kind, "demo-resource", "--ref", sha]).ref, sha);
+      assert.equal(parseArguments(["update", kind, "demo-resource", "--ref", sha.slice(0, 7)]).ref, sha.slice(0, 7));
+    }
   } finally {
     if (previous === undefined) delete process.env.KITIA_CONFIG_DIR;
     else process.env.KITIA_CONFIG_DIR = previous;
   }
-  assert.equal(parseArguments(["install", "skill", "demo-skill", "--ref", sha]).ref, sha);
-  assert.equal(parseArguments(["update", "skill", "demo-skill", "--ref", sha.slice(0, 7)]).ref, sha.slice(0, 7));
   assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--ref", "abc"]), /7- to 40-character hexadecimal/);
   assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--ref", "g".repeat(7)]), /7- to 40-character hexadecimal/);
-  assert.throws(() => parseArguments(["update", "--ref", sha]), /specific skill install or update/);
+  assert.throws(() => parseArguments(["update", "--ref", sha]), /specific skill, agent, or instruction install or update/);
+});
+test("bundle commands and offline installs are no longer accepted", () => {
+  assert.throws(() => parseArguments([
+    "bundle", "export", "bundle.json", "Team:skill:demo-skill", "--signing-key", "private.pem",
+  ]), /Unknown command: bundle/);
+  assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--offline"]), /Unknown option: --offline/);
 });
 
-test("skill history displays unique, aligned prefixes when seven-character SHAs collide", () => {
-  const versions = [
-    { sha: `abcdef0${"0".repeat(33)}`, date: "2025-04-03T12:13:14Z", subject: "first" },
-    { sha: `abcdef0${"1".repeat(33)}`, date: "2025-04-03T12:13:14Z", subject: "second" },
-  ];
-  const prefixes = uniqueSkillVersionPrefixes(versions);
-  assert.deepEqual(prefixes, ["abcdef00", "abcdef01"]);
-  for (const [index, prefix] of prefixes.entries()) {
-    assert.equal(resolveSkillVersionPrefix(versions, prefix), versions[index].sha);
-  }
-  const [header, , ...rows] = formatSkillVersionTable(versions);
-  const dateColumn = header.indexOf("DATE");
-  assert.equal(rows[0].indexOf(versions[0].date), dateColumn);
-  assert.equal(rows[1].indexOf(versions[1].date), dateColumn);
-});
 
-test("skill history resolves only unique listed SHA prefixes", () => {
-  const versions = [{ sha: "abcdef0".padEnd(40, "0") }, { sha: "abcdef1".padEnd(40, "1") }];
-  assert.equal(resolveSkillVersionPrefix(versions, "ABCDEF0"), versions[0].sha);
-  assert.throws(() => resolveSkillVersionPrefix(versions, "abcdef"), /ambiguous/);
-  assert.throws(() => resolveSkillVersionPrefix(versions, "1234567"), /not found/);
-});
 
-test("skill versions query GitHub API pages and expose SHA, committer date and commit subject", () => {
-  const resource = {
-    kind: "skill", id: "demo-skill", source_repository: "example/skills",
-    source_path: "skills/demo-skill",
-  };
-  const calls = [];
-  const versions = listSkillVersions(resource, (program, args) => {
-    calls.push([program, args]);
-    return JSON.stringify([{
-      sha: "d".repeat(40),
-      commit: {
-        committer: { date: "2025-04-03T12:13:14Z" },
-        message: "Improve demo skill\n\nDetails",
-      },
-    }]);
-  });
-  assert.deepEqual(versions, [{
-    sha: "d".repeat(40), date: "2025-04-03T12:13:14Z", subject: "Improve demo skill",
-  }]);
-  assert.deepEqual(calls, [[
-    "gh",
-    [
-      "api", "-X", "GET", "repos/example/skills/commits", "-f", "path=skills/demo-skill/SKILL.md",
-      "-F", "per_page=100", "-F", "page=1",
-    ],
-  ]]);
-});
-test("async skill history keeps GitHub queries off the dashboard event loop", async () => {
-  const resource = {
-    kind: "skill", id: "demo-skill", source_repository: "example/skills",
-    source_path: "skills/demo-skill",
-  };
-  const calls = [];
-  const versions = await listSkillVersionsAsync(resource, async (program, args) => {
-    calls.push([program, args]);
-    await new Promise((resolve) => setImmediate(resolve));
-    return JSON.stringify([{
-      sha: "e".repeat(40),
-      commit: { committer: { date: "2025-04-03T12:13:14Z" }, message: "Async history" },
-    }]);
-  });
-  assert.equal(versions[0].subject, "Async history");
-  assert.equal(calls[0][0], "gh");
-  assert.ok(calls[0][1].includes("-F") && calls[0][1].includes("page=1"));
-});
-
-test("skill version history caps API pagination and reports authentication/network failures", () => {
-  const resource = {
-    kind: "skill", id: "demo-skill", source_repository: "example/skills",
-    source_path: "skills/demo-skill",
-  };
-  let pages = 0;
-  assert.equal(listSkillVersions(resource, (_program, args) => {
-    pages += 1;
-    assert.equal(args[args.indexOf("-F") + 1], "per_page=100");
-    return JSON.stringify(Array.from({ length: 100 }, (_, index) => ({
-      sha: index.toString(16).padStart(40, "0"),
-      commit: { committer: { date: "2025-04-03T12:13:14Z" }, message: `change ${index}` },
-    })));
-  }).length, 500);
-  assert.equal(pages, 5);
-  assert.throws(() => listSkillVersions(resource, () => {
-    const error = new Error("gh failed");
-    error.stderr = Buffer.from("HTTP 401: authentication required");
-    throw error;
-  }), /HTTP 401: authentication required/);
-  assert.throws(() => listSkillVersions(resource, () => { throw new Error("network unavailable"); }), /network unavailable/);
-  assert.throws(() => listSkillVersions({ ...resource, kind: "agent" }, () => assert.fail()), /GitHub source skills/);
-});
 
 test("an explicit skill ref is installed and recorded without changing the catalog resource pin", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-explicit-ref-"));

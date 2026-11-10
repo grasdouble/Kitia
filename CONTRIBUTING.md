@@ -16,10 +16,9 @@ pnpm run cli:test:package-smoke
 
 `pnpm test` runs documentation and CLI tests. For CLI or machine-readable output changes, preserve the [CLI compatibility contract](docs/cli-contract.md) and run `pnpm run cli:test:contract`.
 
+Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; source-history behavior and prefix handling lives in `cli/test/source-history.test.js`. Catalog discovery and dashboard filtering has focused coverage in `cli/test/dashboard-filters.test.js`. Inventory migration behavior is covered by `cli/test/migrations.test.js`; when changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts. `pnpm test` also runs the strict TypeScript boundary configured in `tsconfig.strict.json`.
 
-Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; inventory migration behavior is covered by `cli/test/migrations.test.js`. When changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts.
-
-The optional Termless dashboard test and screenshot generator require Node.js 23.6 or newer:
+The Termless dashboard test runs in CI on Ubuntu with Node.js 24. Run it locally with Node.js 23.6 or newer; the test remains separate from `pnpm test` because the package supports Node.js 22:
 
 ```sh
 pnpm run web:test:termless
@@ -30,15 +29,29 @@ The CLI lives in `cli/`, the website in `web/`, and shared documentation in `doc
 
 ## Versioning and releases
 
-Use [Changesets](https://github.com/changesets/changesets) for user-facing changes. Run:
+Use [Changesets](https://github.com/changesets/changesets) for user-facing package changes:
 
 ```sh
 pnpm run changeset
 ```
 
-Select `@grasdouble/kitia` and the appropriate `patch`, `minor`, or `major` bump, then commit the generated Markdown file under `.changeset/`. Do not edit package versions or the changelog manually for routine releases. On pushes to `main`, the pinned Changesets release action opens or updates a version PR; merging that PR updates the version and changelog, then publishes the package to npm with provenance, pushes the matching version tag, and creates a GitHub Release. Use pnpm for repository dependencies and scripts; publishing remains through npm.
+Select `@grasdouble/kitia` and the smallest appropriate `patch`, `minor`, or `major` bump. Do not edit package versions or `CHANGELOG.md` manually for routine releases.
 
-For repository-only changes such as CI, documentation, or tests that do not need a package release, run `pnpm exec changeset add --empty` (optionally with `--message "..."`). The PR check uses Lufa's `check-changesets` action in `simple` mode for Kitia's root package: a non-empty Changeset must name the package, while an empty Changeset explicitly marks the PR as no-bump and covers its changed package files. The job fails when package changes have no covering Changeset.
+Write each non-empty Changeset as one short description followed by detail bullets indented by exactly two spaces:
+
+```md
+---
+"@grasdouble/kitia": minor
+---
+
+Short description
+  - Detail 1
+  - Detail 2
+```
+
+CI checks this writing format, validates Changesets metadata and package references with `pnpm changeset status`, and uses Lufa's `check-changesets` action in `simple` mode to verify pull-request coverage for Kitia's root package. A non-empty Changeset must name the package. For repository-only changes such as CI, tests, or documentation that do not need a package release, create an empty no-bump Changeset with `pnpm exec changeset add --empty`; an optional `--message "..."` is allowed and exempt from the body format. The empty Changeset explicitly covers the changed package files without requesting a release.
+
+On pushes to `main`, the pinned Changesets release workflow opens or updates a version pull request. Merging it updates the package version and changelog, publishes to npm with provenance, pushes the matching version tag, and creates a GitHub Release. Use pnpm for repository dependencies and scripts; publishing remains through npm.
 
 ### First npm publication
 

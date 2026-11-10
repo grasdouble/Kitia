@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { Worker } = require("node:worker_threads");
 const { execFileSync } = require("node:child_process");
 const os = require("node:os");
 const { CatalogError, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
@@ -15,17 +16,11 @@ const { loadCommandCatalogs } = require("../catalog/loading.js");
 const { diagnose } = require("../catalog/doctor.js");
 const { userCatalogDirectory } = require("../catalog/sources/config.js");
 const {
-  manageCatalogCommand, addCatalog, updateCatalog, refreshCatalogs, checkCatalogFreshness, removeCatalog,
-  exportCatalogConfigurationData, importCatalogConfigurationText,
+  manageCatalogCommand, checkCatalogFreshness,
 } = require("../catalog/sources/manage.js");
 const { loadUserSourceConfiguration } = require("../catalog/sources/config.js");
 const { collectionData, importCollectionText, signCollectionManifest } = require("../catalog/collections.js");
-const {
-  MAX_BUNDLE_BYTES, bundleData, signResourceBundle, importResourceBundleText,
-  readCachedResourceFiles,
-} = require("../catalog/bundles.js");
 const { catalogEntries, listCatalogResources, formatDashboardRows } = require("./catalog.js");
-const { createDashboardActionHandler } = require("./dashboard.js");
 const { parseArguments, printHelp } = require("./arguments.js");
 const { readInstalledSourceSkills, readInstalledSourceResources } = sourceInventoryApi;
 const {
@@ -36,12 +31,33 @@ const {
   formatCatalogHeader, formatCatalogRow, resolveCatalogResource, selectCatalogResource,
   renderInstalledResources, browseInstalledResources, colorize,
 } = terminalApi;
-const { executeDashboardAction } = (() => {
-  const handler = createDashboardActionHandler(
-    (options, report) => executeCommand(options, report),
-  );
-  return { executeDashboardAction: handler };
-})();
+
+function runDashboardWorker(data) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, "dashboard-worker.js"), { workerData: data });
+    let settled = false;
+    worker.once("message", (message) => {
+      settled = true;
+      if (message.ok) {
+        resolve(message.result);
+        return;
+      }
+      const error = Object.assign(new Error(message.error.message), message.error);
+      error.name = message.error.name;
+      reject(error);
+    });
+    worker.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    worker.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Dashboard worker exited before returning a result (exit ${code}).`));
+    });
+  });
+}
 
 
 function copyTextToClipboard(text) {
@@ -65,17 +81,20 @@ function copyTextToClipboard(text) {
   throw new Error("Clipboard access requires wl-copy or xclip on Linux.");
 }
 
-function resolveListedSkillRef(resource, ref) {
-  if (!ref || ref.length === 40) return ref;
+function resolveListedSourceRef(resource, ref) {
+  if (!resource.source_repository || !resource.source_path) {
+    throw new CatalogError("--ref supports only GitHub source resources.");
+  }
+  if (ref.length === 40) return ref;
   try {
-    return sourceSkillsApi.resolveSkillVersionPrefix(
-      sourceSkillsApi.listSkillVersions(resource),
+    return sourceSkillsApi.resolveSourceVersionPrefix(
+      sourceSkillsApi.listSourceVersions(resource),
       ref,
     );
   } catch (error) {
     if (error.code === "RESOURCE_NOT_FOUND" || error.code === "AMBIGUOUS_RESOURCE") {
       throw new CatalogError(
-        `${error.message.replace(/ in skill history\.$/, ` for ${resource.catalog}:${resource.id}.`)}`,
+        `${error.message.replace(/ in source history\.$/, ` for ${resource.catalog}:${resource.kind}:${resource.id}.`)}`,
         error.code,
       );
     }
@@ -124,37 +143,7 @@ async function executeCommand(options, report) {
     printHelp();
     return 0;
   }
-  if (options.command === "bundle") {
-    if (options.action === "export") {
-      const privateKey = fs.readFileSync(path.resolve(options.signingKey));
-      const { sourceResources } = loadCommandCatalogs({ command: "list" });
-      const bundle = bundleData(
-        sourceResources,
-        loadUserSourceConfiguration(),
-        options.resourceSelectors,
-        sourceSkillsApi.readPinnedSourceFiles,
-      );
-      const signed = signResourceBundle(bundle, privateKey);
-      fs.writeFileSync(path.resolve(options.file), `${JSON.stringify(signed, null, 2)}\n`, { flag: "w" });
-      output.log(`Exported signed resource bundle to ${options.file}.`);
-      output.log(`Signature key fingerprint: ${signed.signature.key_id}`);
-      return 0;
-    }
-    const bundlePath = path.resolve(options.file);
-    const bundleStat = fs.lstatSync(bundlePath);
-    if (!bundleStat.isFile() || bundleStat.isSymbolicLink() || bundleStat.size > MAX_BUNDLE_BYTES) {
-      throw new CatalogError(`Resource bundle must be a regular JSON file no larger than ${MAX_BUNDLE_BYTES} bytes`);
-    }
-    const contents = fs.readFileSync(bundlePath, "utf8");
-    const trustedKey = fs.readFileSync(path.resolve(options.trustedKey));
-    const result = importResourceBundleText(contents, undefined, {
-      trustedKey, replace: Boolean(options.replace),
-    });
-    output.log(`Imported signed resource bundle ${result.bundle_id}: ${result.catalogs.length} catalog${result.catalogs.length === 1 ? "" : "s"} cached locally.`);
-    for (const name of result.added) output.log(`Added pinned offline catalog: ${name}`);
-    for (const name of result.replaced) output.log(`Replaced pinned offline catalog: ${name}`);
-    return 0;
-  }
+
   if (options.command === "collection") {
     if (options.action === "export") {
       const { sourceResources } = loadCommandCatalogs({ command: "list" });
@@ -180,20 +169,23 @@ async function executeCommand(options, report) {
   if (options.command === "versions") {
     const { sourceResources } = loadCommandCatalogs({ ...options, command: "list" });
     const candidates = sourceResources.filter((entry) =>
-      entry.kind === "skill" && entry.id === options.id &&
+      entry.kind === options.kind && entry.id === options.id &&
+      entry.source_repository && entry.source_path &&
       (!options.catalog || entry.catalog === options.catalog));
-    if (!candidates.length) throw new CatalogError(`GitHub source skill not found: ${options.id}`, "RESOURCE_NOT_FOUND");
+    if (!candidates.length) {
+      throw new CatalogError(`GitHub source ${options.kind} not found: ${options.id}`, "RESOURCE_NOT_FOUND");
+    }
     if (candidates.length > 1) {
       throw new CatalogError(
-        `Skill '${options.id}' is ambiguous: ${candidates.map((entry) => entry.catalog).join(", ")}. Specify --catalog.`,
+        `${options.kind} '${options.id}' is ambiguous: ${candidates.map((entry) => entry.catalog).join(", ")}. Specify --catalog.`,
         "AMBIGUOUS_RESOURCE",
       );
     }
     const [resource] = candidates;
-    const versions = sourceSkillsApi.listSkillVersions(resource);
-    output.log(`Commit history for ${resource.catalog}:${resource.id} (up to 500 newest commits; date is commit committer date):`);
-    for (const row of sourceSkillsApi.formatSkillVersionTable(versions)) output.log(row);
-    if (!versions.length) output.log("No commits found for this skill path.");
+    const versions = sourceSkillsApi.listSourceVersions(resource);
+    output.log(`Commit history for ${resource.catalog}:${resource.kind}:${resource.id} (up to 500 newest commits; date is commit committer date):`);
+    for (const row of sourceSkillsApi.formatSourceVersionTable(versions)) output.log(row);
+    if (!versions.length) output.log("No commits found for this resource path.");
     return 0;
   }
   if (options.command === "doctor") {
@@ -257,66 +249,30 @@ async function executeCommand(options, report) {
       const completed = await browseInstalledResources(rows, process.stdin, process.stdout, result.errors, {
         showOnboarding: options.showOnboarding,
         catalogResources: sourceResources,
-        addCatalog: async (request) => {
-          const catalog = addCatalog(request.name, request.repository, {
-            mode: request.mode,
-            entries: request.entries,
-          });
-          const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
-          return {
-            catalog: request.name,
-            count: catalog.resources.length,
-            catalogs: userCatalogState(),
-            resources: catalogEntries(refreshed.sourceResources),
-          };
-        },
-        updateCatalog: async (originalName, request) => {
-          const catalog = updateCatalog(originalName, request.name, request.repository, {
-            mode: request.mode,
-            entries: request.entries,
-          });
-          const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
-          return {
-            catalog: request.name,
-            count: catalog.resources.length,
-            catalogs: userCatalogState(),
-            resources: catalogEntries(refreshed.sourceResources),
-          };
-        },
+        addCatalog: (request) => runDashboardWorker({ task: "catalog-add", request }),
+        updateCatalog: (originalName, request) =>
+          runDashboardWorker({ task: "catalog-update", originalName, request }),
         userCatalogs: userCatalogState(),
         checkCatalogFreshness: (names) => checkCatalogFreshness(undefined, names),
-        removeCatalog: async (name) => {
-          removeCatalog(name);
-          const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
-          return { catalogs: userCatalogState(), resources: catalogEntries(refreshed.sourceResources) };
-        },
-        refreshCatalog: async (name) => {
-          const result = refreshCatalogs(name ? [name] : undefined);
-          const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
-          return { ...result, catalogs: userCatalogState(), resources: catalogEntries(refreshed.sourceResources) };
-        },
-        transferCatalogs: async (action, content) => {
-          const importSummary = action === "export"
-            ? undefined
-            : importCatalogConfigurationText(content);
-          if (action === "export") {
-            const configuration = JSON.stringify(exportCatalogConfigurationData(), null, 2);
-            copyTextToClipboard(configuration);
-          }
-          const catalogs = userCatalogState();
-          const refreshed = loadCommandCatalogs({ command: "list" }, () => {});
-          return { catalogs, resources: catalogEntries(refreshed.sourceResources), importSummary };
-        },
-        execute: (operation, resource, installOptions) => executeDashboardAction(
-          operation,
+        removeCatalog: (name) => runDashboardWorker({ task: "catalog-remove", name }),
+        refreshCatalog: (name) => runDashboardWorker({ task: "catalog-refresh", name }),
+        transferCatalogs: (action, content) =>
+          runDashboardWorker({ task: "catalog-transfer", action, content }),
+        execute: (operation, resource, installOptions) => runDashboardWorker({
+          task: "resource-action",
+          action: operation,
           resource,
-          { ...options, userTarget: os.homedir() },
-          { sourceResources, warnings: catalogWarnings },
+          dashboardOptions: {
+            target: options.target,
+            userTarget: os.homedir(),
+
+          },
+          catalogs: { sourceResources, warnings: catalogWarnings },
           installOptions,
-        ),
-        listSkillVersions: async (resource) => {
-          const versions = await sourceSkillsApi.listSkillVersionsAsync(resource);
-          const prefixes = sourceSkillsApi.uniqueSkillVersionPrefixes(versions);
+        }),
+        listSourceVersions: async (resource) => {
+          const versions = await sourceSkillsApi.listSourceVersionsAsync(resource);
+          const prefixes = sourceSkillsApi.uniqueSourceVersionPrefixes(versions);
           return versions.map((version, index) => ({ ...version, prefix: prefixes[index] }));
         },
       });
@@ -362,26 +318,20 @@ async function executeCommand(options, report) {
         : "No tracked source resources to update.", "RESOURCE_NOT_FOUND");
     }
     if (options.ref) {
+      if (sourceToUpdate.some(({ resource }) => !resource.source_repository || !resource.source_path)) {
+        throw new CatalogError("--ref supports only GitHub source resources.");
+      }
       sourceToUpdate = sourceToUpdate.map((entry) => ({
         ...entry,
         resource: {
           ...entry.resource,
-          source_ref: resolveListedSkillRef(entry.resource, options.ref),
+          source_ref: resolveListedSourceRef(entry.resource, options.ref),
         },
       }));
     }
     const sourceToUpdateResources = sourceToUpdate.map(({ resource }) => resource);
     validateSourceUpdates(sourceToUpdate, { ...options, target });
-    if (options.offline && !options.dryRun) {
-      const stale = sourceToUpdate.filter(({ resource, installations }) => installations.some((installation) =>
-        installation.missing || installation.modified ||
-        installation.ref?.toLowerCase() !== String(resource.source_ref || "").toLowerCase()));
-      const uncached = stale.filter(({ resource }) => !resource.bundle_id);
-      if (uncached.length) {
-        throw new CatalogError("Offline updates require an imported signed bundle for each stale source resource.", "INVALID_ARGUMENT");
-      }
-      for (const { resource } of stale) readCachedResourceFiles(resource);
-    }
+
     for (const resource of sourceToUpdateResources) {
       options.onResource?.({ catalog: resource.catalog || "source", kind: resource.kind, id: resource.id, status: "planned", source: true });
     }
@@ -402,12 +352,12 @@ async function executeCommand(options, report) {
       throw new CatalogError("--scope user supports source skills and agents; instructions are project-only", "INVALID_ARGUMENT");
     }
     if (options.ref) {
-      if (resource.kind !== "skill" || resource.bundle_id || options.offline) {
-        throw new CatalogError("--ref supports only online, unbundled GitHub source skills.", "INVALID_ARGUMENT");
+      if (!resource.source_repository || !resource.source_path) {
+        throw new CatalogError("--ref supports only GitHub source resources.");
       }
       return runSourceCommand({
         ...options, action: "install", id: resource.id,
-        resource: { ...resource, source_ref: resolveListedSkillRef(resource, options.ref) },
+        resource: { ...resource, source_ref: resolveListedSourceRef(resource, options.ref) },
       });
     }
     return runSourceCommand({ ...options, action: "install", id: resource.id, resource });
@@ -426,5 +376,6 @@ module.exports = {
   catalogEntries,
   listCatalogResources,
   executeCommand,
+  runDashboardWorker,
   copyTextToClipboard,
 };

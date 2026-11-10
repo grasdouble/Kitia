@@ -263,7 +263,7 @@ test("inventory detail keeps update paths complete within narrow and short layou
   }
 });
 
-test("update confirmation distinguishes GH-backed skills from offline bundles and other resources", async () => {
+test("update confirmation distinguishes GH-backed skills and other resources", async () => {
   const { confirmationModal } = await import("../dist/dashboard/modals.mjs");
   const base = {
     catalog: "Test", id: "update-me", scope: "user", status: "update", managed: true,
@@ -301,15 +301,6 @@ test("update confirmation distinguishes GH-backed skills from offline bundles an
   assert.ok(ghRetryText.includes("Kitia's local-modification and untracked-content checks still apply"));
   assert.ok(ghRetryText.includes("NO / CANCEL"));
   assert.ok(ghRetryText.includes("YES, RETRY WITH --FORCE"));
-  assert.ok(!ghText.includes("signed offline bundle"));
-
-  const bundleText = confirmationText({
-    ...base, kind: "skill", bundle_id: "b".repeat(64),
-  });
-  assert.ok(bundleText.includes("imported signed offline bundle"));
-  assert.ok(bundleText.includes("no gh command or gh --force is used"));
-  assert.ok(!bundleText.includes("gh skill install --force"));
-
   const agentText = confirmationText({ ...base, kind: "agent" });
   assert.ok(agentText.includes("does not use gh --force"));
   assert.ok(!agentText.includes("gh skill install --force"));
@@ -1013,13 +1004,13 @@ test("all dashboard modes show a dedicated shortcut frame for active controls", 
 
   const catalog = await captureDashboardFrame([], actions, ["a"], compactDimensions);
   assert.ok(catalog.includes("SHORTCUTS"));
-  assert.ok(catalog.includes("ENTER select"));
+  assert.ok(catalog.includes("ENTER install"));
   assert.ok(catalog.includes("C catalog"));
   assert.ok(!catalog.includes("A install"));
 
   const installOptions = await captureDashboardFrame([], actions, ["a", "\r"], compactDimensions);
   assert.ok(installOptions.includes("SHORTCUTS"));
-  assert.ok(installOptions.includes("TAB FOCUS"));
+  assert.ok(installOptions.includes("FIELD"));
   assert.ok(installOptions.includes("ENTER REVIEW"));
   assert.ok(installOptions.includes("ESC BACK"));
   assert.ok(!installOptions.includes("ENTER select"));

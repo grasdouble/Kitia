@@ -80,10 +80,10 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
     assert.ok(xtermLines.some((line) => /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/.test(line)));
     assert.ok(xtermLines.some((line) => line.includes("INVENTORY") && line.includes("SKILL - ask-matt")));
     assert.ok(xtermScreen.includes("2 current") && xtermScreen.includes("1 unmanaged"));
-    assert.ok(xtermScreen.includes("U update - Delete uninstall"),
+    assert.ok(xtermScreen.includes("U update · Delete uninstall"),
       "the showcase exposes the production update and uninstall shortcuts");
-    assert.ok(xtermScreen.includes("↑↓ navigate - Q quit"),
-      "the compact footer keeps the navigation and quit shortcuts visible");
+    assert.ok(xtermScreen.includes("↑↓ navigate · ? guide · Q quit"),
+      "the inventory footer keeps the production navigation and quit shortcuts visible");
     const updateStart = session.rawBytes().length;
     session.input.write("u");
     const updatePrompt = await waitForInkOutput(session, "CONFIRM UPDATE", updateStart);
@@ -92,7 +92,7 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
       "the advertised update key opens the real confirmation flow");
     const cancelStart = session.rawBytes().length;
     session.input.write("\x1b");
-    await waitForInkOutput(session, "PROJECT WORKSPACE", cancelStart);
+    await waitForInkOutput(session, "INVENTORY", cancelStart);
     await session.flushTerminal();
 
     assert.ok(xtermScreen.includes("Route repository questions"),
@@ -113,7 +113,7 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
 
     const returnStart = session.rawBytes().length;
     session.input.write("\x1b");
-    const returned = await waitForInkOutput(session, "PROJECT WORKSPACE", returnStart);
+    const returned = await waitForInkOutput(session, "INVENTORY", returnStart);
     await session.flushTerminal();
     const xtermReturned = session.terminal.screen.getText();
     assert.ok(xtermReturned.includes("ask-matt") && xtermReturned.includes("INVENTORY"));
@@ -160,7 +160,12 @@ test("Termless dashboard renders the selected source preview and audit report", 
 
     const previewStart = session.rawBytes().length;
     session.input.write("p");
-    const preview = await waitForInkOutput(session, "SOURCE PREVIEW", previewStart);
+    const tree = await waitForInkOutput(session, "SOURCE PREVIEW", previewStart);
+    await session.flushTerminal();
+    assert.ok(tree.includes("SOURCE TREE"));
+    const sourceStart = session.rawBytes().length;
+    session.input.write("\x1b[C");
+    const preview = await waitForInkOutput(session, "# Pinned agent source", sourceStart);
     await session.flushTerminal();
     assert.ok(preview.includes("# Pinned agent source"));
     assert.ok(session.terminal.screen.getText().includes("Review every change before approval."));
@@ -203,7 +208,7 @@ test("Termless dashboard renders the selected source preview and audit report", 
     assert.deepEqual(calls.map(({ action }) => action), ["preview", "audit", "install"]);
     const closeBlocked = session.rawBytes().length;
     session.input.write("\x1b");
-    await waitForInkOutput(session, "CATALOG RESOURCES", closeBlocked);
+    await waitForInkOutput(session, "INVENTORY", closeBlocked);
     session.input.write("q");
     await session.done;
   } finally {

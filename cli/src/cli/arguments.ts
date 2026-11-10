@@ -15,7 +15,6 @@ export interface CliOptions {
   scope?: InventoryScope;
   tool?: InstallationTool | null;
   nonInteractive?: boolean;
-  offline?: boolean;
   json?: boolean;
   audit?: boolean;
   dryRun?: boolean;
@@ -32,7 +31,6 @@ export interface CliOptions {
   file?: string;
   signingKey?: string;
   trustedKey?: string;
-  replace?: boolean;
   resourceSelectors?: string[];
   sourceResources?: CatalogResource[];
   resource?: CatalogResource;
@@ -69,7 +67,6 @@ function parseArguments(args: string[]): CliOptions {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--non-interactive") extras.nonInteractive = true;
-    else if (argument === "--offline") extras.offline = true;
     else if (argument === "--audit") extras.audit = true;
     else if (argument === "--json" && !discovery) extras.json = true;
     else if (argument === "--scope") {
@@ -95,9 +92,6 @@ function parseArguments(args: string[]): CliOptions {
       ? { ...parseCommandArguments(["check", ...remaining.slice(1)]), command: "doctor" }
       : parseCommandArguments(remaining);
     const action = options.action || options.command;
-    if (options.ref && extras.offline) {
-      throw new CatalogError("--ref cannot be used with --offline", "INVALID_ARGUMENT");
-    }
     if (extras.audit && !["preview", "install"].includes(action)) {
       throw new CatalogError("--audit is only supported for source preview and install commands", "INVALID_ARGUMENT");
     }
@@ -134,55 +128,6 @@ function parseArguments(args: string[]): CliOptions {
 
 function parseCommandArguments(args: string[]): CliOptions {
   const [command, ...remaining] = args;
-  if (command === "bundle") {
-    const [action, file, ...arguments_] = remaining;
-    const usage = "Usage: kitia bundle export <file> <catalog:kind:id...> --signing-key <private-pem> | import <file> --trusted-key <public-pem> [--replace]";
-    if (action === "import" && file) {
-      let trustedKey;
-      let replace = false;
-      for (let index = 0; index < arguments_.length; index += 1) {
-        const argument = arguments_[index];
-        if (argument === "--trusted-key") {
-          if (trustedKey) throw new CatalogError("--trusted-key may only be specified once");
-          const value = arguments_[++index];
-          if (!value || value.startsWith("--")) throw new CatalogError("--trusted-key requires a PEM file path");
-          trustedKey = value;
-        } else if (argument === "--replace" && !replace) {
-          replace = true;
-        } else {
-          throw new CatalogError(usage);
-        }
-      }
-      if (!trustedKey) throw new CatalogError(usage);
-      return { command, action, file, trustedKey, ...(replace ? { replace } : {}) };
-    }
-    if (action === "export" && file) {
-      const selectors = [];
-      let signingKey;
-      for (let index = 0; index < arguments_.length; index += 1) {
-        const argument = arguments_[index];
-        if (argument === "--signing-key") {
-          if (signingKey) throw new CatalogError("--signing-key may only be specified once");
-          const value = arguments_[++index];
-          if (!value || value.startsWith("--")) throw new CatalogError("--signing-key requires a PEM file path");
-          signingKey = value;
-        } else if (argument.startsWith("--")) {
-          throw new CatalogError(`Unknown bundle option: ${argument}`);
-        } else selectors.push(argument);
-      }
-      if (!signingKey || !selectors.length) throw new CatalogError(usage);
-      for (const selector of selectors) {
-        const [catalog, kind, id, ...extra] = selector.split(":");
-        if (!catalog || !["skill", "agent", "instruction"].includes(kind) ||
-            !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id || "") || extra.length) {
-          throw new CatalogError(`Invalid resource selector '${selector}'. Use catalog:kind:id.`);
-        }
-      }
-      if (new Set(selectors).size !== selectors.length) throw new CatalogError("Bundle selectors must be unique");
-      return { command, action, file, signingKey, resourceSelectors: selectors };
-    }
-    throw new CatalogError(usage);
-  }
   if (command === "collection") {
     const [action, file, ...arguments_] = remaining;
     const usage = "Usage: kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>] | import <file> [--trusted-key <public-pem>]";
@@ -290,8 +235,8 @@ function parseCommandArguments(args: string[]): CliOptions {
   }
   if (command === "versions") {
     const [kind, id, ...extra] = remaining;
-    if (kind !== "skill" || !RESOURCE_ID.test(id || "") || extra.length) {
-      throw new CatalogError("Usage: Kitia versions skill <id>");
+    if (!KINDS.has(kind) || !RESOURCE_ID.test(id || "") || extra.length) {
+      throw new CatalogError("Usage: Kitia versions <kind> <id>");
     }
     return { command, kind, id };
   }
@@ -346,8 +291,8 @@ function parseCommandArguments(args: string[]): CliOptions {
       index += 1;
     } else throw new CatalogError(`Unknown option: ${option}`);
   }
-  if (result.ref && (result.kind !== "skill" || !result.id)) {
-    throw new CatalogError("--ref is supported only for a specific skill install or update");
+  if (result.ref && (!result.kind || !KINDS.has(result.kind) || !result.id)) {
+    throw new CatalogError("--ref requires a specific skill, agent, or instruction install or update");
   }
   return result;
 }
@@ -363,7 +308,7 @@ function printHelp() {
   Kitia validate [--catalog <catalog>]
   Kitia check [--target <dir>] [--catalog <catalog>] [--json]
   Kitia doctor [--target <dir>] [--network] [--json]
-  Kitia versions skill <id> [--catalog <catalog>]
+  Kitia versions <kind> <id> [--catalog <catalog>]
   Kitia install [<kind>] <id> [--ref <full-sha>] [--target <dir>] [options]
   Kitia update [<kind> <id>] [--ref <full-sha>] [--target <dir>] [--dry-run] [--force]
   Kitia uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force]
@@ -373,8 +318,6 @@ function printHelp() {
   Kitia catalog export <file>
   Kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>]
   Kitia collection import <file> [--trusted-key <public-pem>]
-  Kitia bundle export <file> <catalog:kind:id...> --signing-key <private-pem>
-  Kitia bundle import <file> --trusted-key <public-pem> [--replace]
   Kitia catalog refresh <name>
   Kitia catalog refresh --all
   Kitia catalog list
@@ -388,19 +331,18 @@ Options:
   --tag <tag>                   Filter by tag
   --status <status>             Filter by status
   --license <value>             Filter by SPDX ID/expression or exact upstream value
-  --signing-key <private-pem>   Collection/bundle export signing-key file
-  --trusted-key <public-pem>   Collection/bundle import verification-key file
-  Unbundled source skill installs/previews are delegated to GitHub CLI
+  --signing-key <private-pem>   Optional resource collection export signing key
+  --trusted-key <public-pem>   Resource collection import verification key
+  Source skill installs/previews are delegated to GitHub CLI
   --json                        Discovery arrays; check/doctor reports; lifecycle --dry-run plans
   --audit                       Audit pinned source bytes; block installs with findings or incomplete coverage
   --non-interactive             Never open interactive selectors, previews, or dashboard
-  --offline                     Source installs require an imported signed bundle; preview still requires GitHub
   --target <dir>                Installation target (default: current directory)
   --scope <project|user>        Skills/agents: project or user home; instructions are project-scoped
                                 User scope cannot be combined with --target
   --tool <claude|copilot|both>  Install only: desired runtimes (default: copilot)
   --dry-run                     Preview files without writing
-  --ref <full-sha>              Install/update a source skill at a specific commit (not bundles/offline)
+  --ref <sha-or-prefix>         Install/update a source skill, agent, or instruction at a specific commit
   --force                       Overwrite files or remove modified/untracked source skills
   F / A / U / Delete            Dashboard only: filter / browse / update / uninstall resources
   Omit <kind> when the resource ID is unique; ambiguous IDs open a selector.

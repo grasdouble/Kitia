@@ -44,7 +44,6 @@ function checkInstalledResources(
         issues: [],
         source_repository: resource.source_repository,
         source_path: resource.source_path,
-        ...(resource.bundle_id ? { bundle_id: resource.bundle_id } : {}),
       });
     }
     return results.get(key)!;

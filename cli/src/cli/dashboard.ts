@@ -54,7 +54,6 @@ function createDashboardActionHandler(
       ? {
         target: scope === "user" ? dashboardOptions.userTarget || os.homedir() : dashboardOptions.target,
         scope,
-        offline: dashboardOptions.offline,
         sourceResources: catalogs.sourceResources,
       }
       : (() => {
@@ -71,7 +70,6 @@ function createDashboardActionHandler(
         }
         parsed.nonInteractive = true;
         parsed.captureOutput = command === "preview";
-        parsed.offline = dashboardOptions.offline;
         parsed.sourceResources = catalogs.sourceResources;
         if (command === "preview") parsed.target = dashboardOptions.target;
         if (scope === "user" && dashboardOptions.userTarget) parsed.target = dashboardOptions.userTarget;

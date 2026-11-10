@@ -19,7 +19,7 @@ export interface PendingDashboardAction {
   conflict?: { category: string; paths: string[]; message?: string };
 }
 
-export type SkillVersionOption = { sha: string; prefix: string; date: string; subject: string };
+export type SourceVersionOption = { sha: string; prefix: string; date: string; subject: string };
 
 const h = React.createElement;
 const MODAL_BACKGROUND = "#111827";
@@ -212,12 +212,9 @@ export function confirmationModal({
     : confirmation.resource.kind === "skill"
       ? "Kitia will remove the entire detected skill folder and all of its contents."
       : "Kitia will remove the detected artifact file.";
-  const updateSafeguard = confirmation.resource.kind === "skill" &&
-      confirmation.resource.source_repository && !confirmation.resource.bundle_id
+  const updateSafeguard = confirmation.resource.kind === "skill" && confirmation.resource.source_repository
     ? "The first gh skill install runs without --force. If GH says overwrite requires --force, Kitia asks before retrying; local safety checks apply."
-    : confirmation.resource.kind === "skill" && confirmation.resource.bundle_id
-      ? "This skill is updated from an imported signed offline bundle; no gh command or gh --force is used. Kitia checks local conflicts and asks separately before Kitia force can overwrite them."
-      : "This resource update does not use gh --force. Kitia checks local conflicts and asks separately before Kitia force can overwrite them.";
+    : "This resource update does not use gh --force. Kitia checks local conflicts and asks separately before Kitia force can overwrite them.";
   return modalFrame(
     confirmation.ghForceRetry
       ? "GH REQUESTS OVERWRITE"
@@ -282,41 +279,6 @@ export function actionFailureModal({
     88,
   );
 }
-export function inspectionModal({ action, resource, content, columns, rows }: {
-  action: "preview" | "audit";
-  resource: CatalogResource;
-  content: string;
-  columns: number;
-  rows: number;
-}) {
-  const title = action === "preview" ? "SOURCE PREVIEW" : "RESOURCE AUDIT";
-  const width = Math.max(20, Math.min(96, columns - 4));
-  const innerWidth = width - 4;
-  const metadata = `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`;
-  const metadataRows = wrapText(metadata, innerWidth).length;
-  const maxBodyRows = Math.max(1, rows - metadataRows - 9);
-  const sourceLines = content.split(/\r?\n/);
-  const bodyLines: string[] = [];
-  let truncated = false;
-  for (const sourceLine of sourceLines) {
-    const wrapped = wrapText(sourceLine, innerWidth);
-    if (bodyLines.length + wrapped.length > maxBodyRows) {
-      truncated = true;
-      break;
-    }
-    bodyLines.push(...wrapped);
-  }
-  if (truncated) {
-    bodyLines.splice(Math.max(0, maxBodyRows - 1));
-    bodyLines.push("… output truncated in dashboard");
-  }
-  return modalFrame(title, [
-    metadata,
-    "",
-    ...(bodyLines.length ? bodyLines : ["No output was returned."]),
-    "ENTER / ESC CLOSE",
-  ], columns, action === "audit" ? "yellow" : "cyan", 96);
-}
 export function loadingModal({ message, frame, columns }: {
   message: string;
   frame: string;
@@ -328,24 +290,26 @@ export function loadingModal({ message, frame, columns }: {
     "Please wait while Kitia completes this operation.",
   ], columns, "cyan", 72);
 }
-export function skillVersionsModal({
+export function sourceVersionsModal({
   resource,
   versions,
   selectedIndex,
+  action,
   columns,
 }: {
   resource: CatalogResource;
-  versions: SkillVersionOption[];
+  versions: SourceVersionOption[];
   selectedIndex: number;
+  action: "install" | "update";
   columns: number;
 }) {
   const count = Math.min(14, versions.length);
   const first = Math.max(0, Math.min(selectedIndex - Math.floor(count / 2), versions.length - count));
   const visible = versions.slice(first, first + count);
   const lineWidth = Math.max(1, Math.min(84, columns - 12));
-  return modalFrame("SKILL REVISIONS", [
-    `${resource.catalog || "source"} / skill:${resource.id}`,
-    "Select a commit to install; the catalog pin remains unchanged.",
+  return modalFrame("RESOURCE REVISIONS", [
+    `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`,
+    `Select a commit to ${action}; the catalog pin remains unchanged.`,
     "",
     ...visible.map((version, offset) => ({
       text: fitText(
@@ -356,7 +320,7 @@ export function skillVersionsModal({
       bold: first + offset === selectedIndex,
     })),
     versions.length > count ? `Showing ${first + 1}-${first + count} of ${versions.length} commits.` : "",
-    "↑↓ SELECT · ENTER INSTALL · ESC BACK",
+    `↑↓ SELECT · ENTER ${action.toUpperCase()} · ESC BACK`,
   ], columns, "cyan", Math.min(96, lineWidth + 8));
 }
 

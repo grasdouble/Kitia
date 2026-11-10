@@ -3,7 +3,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const YAML = require("yaml");
 const { spawnSync, execFileSync, execFile } = require("node:child_process");
 const {
   CatalogError, SOURCE_SKILL_DIRECTORIES, LOCK_PATH, addPlanEntry,
@@ -27,11 +26,8 @@ import type { CliOptions } from "../../cli/arguments.js";
 import type { InstallState, PlanAction } from "../inventory/files.js";
 import type { InstalledSourceResource } from "./installed.js";
 
-const {
-  MAX_BUNDLE_FILES, MAX_BUNDLE_CONTENT_BYTES, readCachedResourceFiles,
-} = require("../bundles.js");
-const SKILL_VERSION_PAGE_SIZE = 100;
-const SKILL_VERSION_MAX = 500;
+const SOURCE_VERSION_PAGE_SIZE = 100;
+const SOURCE_VERSION_MAX = 500;
 function sourceHistoryPath(resource: CatalogResource): string | null {
   const { source_repository: repository, source_path: sourcePath } = resource;
   if (typeof repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ||
@@ -79,25 +75,27 @@ function latestSourceVersionAtRef(
   }
   return commits[0].sha.toLowerCase();
 }
-function validateSkillVersionResource(resource: CatalogResource): void {
-  if (resource.kind !== "skill" || !resource.source_repository || !resource.source_path) {
-    throw new CatalogError("Commit history is available only for configured GitHub source skills.", "INVALID_ARGUMENT");
+function validateSourceVersionResource(resource: CatalogResource): void {
+  if (!resource.source_repository || !sourceHistoryPath(resource)) {
+    throw new CatalogError("Commit history is available only for GitHub source resources with supported file paths.", "INVALID_ARGUMENT");
   }
 }
-function skillVersionArguments(resource: CatalogResource, page: number): string[] {
+function sourceVersionArguments(resource: CatalogResource, page: number): string[] {
+  const historyPath = sourceHistoryPath(resource);
+  if (!historyPath) throw new CatalogError("Source resource has no supported GitHub history path.");
   return [
     "api", "-X", "GET", `repos/${resource.source_repository}/commits`,
-    "-f", `path=${resource.source_path}/SKILL.md`,
-    "-F", `per_page=${SKILL_VERSION_PAGE_SIZE}`,
+    "-f", `path=${historyPath}`,
+    "-F", `per_page=${SOURCE_VERSION_PAGE_SIZE}`,
     "-F", `page=${page}`,
   ];
 }
-function parseSkillVersionPage(response: string) {
+function parseSourceVersionPage(response: string) {
   let commits;
   try {
     commits = JSON.parse(response);
   } catch {
-    throw new CatalogError("GitHub CLI returned invalid JSON while listing skill commit history.");
+    throw new CatalogError("GitHub CLI returned invalid JSON while listing source commit history.");
   }
   if (!Array.isArray(commits)) {
     throw new CatalogError("GitHub CLI returned an invalid commit-history response.");
@@ -110,16 +108,16 @@ function parseSkillVersionPage(response: string) {
     const message = commit?.message;
     if (!/^[a-f0-9]{40}$/i.test(sha || "") || typeof date !== "string" ||
         !Number.isFinite(Date.parse(date)) || typeof message !== "string" || !message.trim()) {
-      throw new CatalogError("GitHub CLI returned an invalid commit in skill history.");
+      throw new CatalogError("GitHub CLI returned an invalid commit in source history.");
     }
     versions.push({ sha: sha.toLowerCase(), date, subject: message.split(/\r?\n/, 1)[0] });
   }
   return { commits, versions };
 }
-function skillHistoryFailure(resource: CatalogResource, error) {
+function sourceHistoryFailure(resource: CatalogResource, error) {
   const detail = String(error.stderr || error.message || "unknown error").trim().slice(0, 500);
   return new CatalogError(
-    `Cannot list GitHub commit history for ${resource.source_repository}/${resource.source_path}/SKILL.md: ${detail}`,
+    `Cannot list GitHub commit history for ${resource.source_repository}/${sourceHistoryPath(resource) || resource.source_path}: ${detail}`,
   );
 }
 const runExecFile = (program, args, options) => {
@@ -140,49 +138,49 @@ const runExecFile = (program, args, options) => {
   });
   return promise;
 };
-function listSkillVersions(
+function listSourceVersions(
   resource: CatalogResource,
   run = execFileSync,
 ): Array<{ sha: string; date: string; subject: string }> {
-  validateSkillVersionResource(resource);
+  validateSourceVersionResource(resource);
   const versions = [];
-  for (let page = 1; page <= SKILL_VERSION_MAX / SKILL_VERSION_PAGE_SIZE; page += 1) {
+  for (let page = 1; page <= SOURCE_VERSION_MAX / SOURCE_VERSION_PAGE_SIZE; page += 1) {
     let response: string;
     try {
-      response = run("gh", skillVersionArguments(resource, page), {
+      response = run("gh", sourceVersionArguments(resource, page), {
         encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (error) {
-      throw skillHistoryFailure(resource, error);
+      throw sourceHistoryFailure(resource, error);
     }
-    const parsed = parseSkillVersionPage(response);
+    const parsed = parseSourceVersionPage(response);
     versions.push(...parsed.versions);
-    if (parsed.commits.length < SKILL_VERSION_PAGE_SIZE || versions.length >= SKILL_VERSION_MAX) break;
+    if (parsed.commits.length < SOURCE_VERSION_PAGE_SIZE || versions.length >= SOURCE_VERSION_MAX) break;
   }
   return versions;
 }
-async function listSkillVersionsAsync(
+async function listSourceVersionsAsync(
   resource: CatalogResource,
   run = runExecFile,
 ): Promise<Array<{ sha: string; date: string; subject: string }>> {
-  validateSkillVersionResource(resource);
+  validateSourceVersionResource(resource);
   const versions = [];
-  for (let page = 1; page <= SKILL_VERSION_MAX / SKILL_VERSION_PAGE_SIZE; page += 1) {
+  for (let page = 1; page <= SOURCE_VERSION_MAX / SOURCE_VERSION_PAGE_SIZE; page += 1) {
     let response: string;
     try {
-      response = await run("gh", skillVersionArguments(resource, page), {
+      response = await run("gh", sourceVersionArguments(resource, page), {
         encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (error) {
-      throw skillHistoryFailure(resource, error);
+      throw sourceHistoryFailure(resource, error);
     }
-    const parsed = parseSkillVersionPage(response);
+    const parsed = parseSourceVersionPage(response);
     versions.push(...parsed.versions);
-    if (parsed.commits.length < SKILL_VERSION_PAGE_SIZE || versions.length >= SKILL_VERSION_MAX) break;
+    if (parsed.commits.length < SOURCE_VERSION_PAGE_SIZE || versions.length >= SOURCE_VERSION_MAX) break;
   }
   return versions;
 }
-function uniqueSkillVersionPrefixes(versions): string[] {
+function uniqueSourceVersionPrefixes(versions): string[] {
   return versions.map(({ sha }) => {
     let length = 7;
     while (length < 40 && versions.some((version) =>
@@ -192,8 +190,8 @@ function uniqueSkillVersionPrefixes(versions): string[] {
     return sha.slice(0, length);
   });
 }
-function formatSkillVersionTable(versions): string[] {
-  const prefixes = uniqueSkillVersionPrefixes(versions);
+function formatSourceVersionTable(versions): string[] {
+  const prefixes = uniqueSourceVersionPrefixes(versions);
   const shaWidth = Math.max(3, ...prefixes.map((prefix) => prefix.length));
   const rows = [
     `${"SHA".padEnd(shaWidth)}  DATE                  SUBJECT`,
@@ -204,11 +202,11 @@ function formatSkillVersionTable(versions): string[] {
   }
   return rows;
 }
-function resolveSkillVersionPrefix(versions, prefix: string): string {
+function resolveSourceVersionPrefix(versions, prefix: string): string {
   const matches = versions.filter(({ sha }) => sha.startsWith(prefix.toLowerCase()));
   if (matches.length !== 1) {
     throw new CatalogError(
-      matches.length ? `Commit prefix '${prefix}' is ambiguous.` : `Commit prefix '${prefix}' was not found in skill history.`,
+      matches.length ? `Commit prefix '${prefix}' is ambiguous.` : `Commit prefix '${prefix}' was not found in source history.`,
       matches.length ? "AMBIGUOUS_RESOURCE" : "RESOURCE_NOT_FOUND",
     );
   }
@@ -275,90 +273,6 @@ function readPinnedSourceFile(resource) {
   }
 }
 
-function readPinnedSourceFiles(
-  resource: CatalogResource,
-  { maxFiles = MAX_BUNDLE_FILES, maxBytes = MAX_BUNDLE_CONTENT_BYTES } = {},
-) {
-  if (!/^[a-f0-9]{40}$/i.test(resource.source_ref || "")) {
-    throw new CatalogError("Source resource has no pinned commit SHA");
-  }
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-bundle-"));
-  try {
-    const checkout = path.join(temporaryRoot, "repository");
-    const environment = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1" };
-    execFileSync("git", ["clone", "--quiet", "--no-checkout", `https://github.com/${resource.source_repository}.git`, checkout], {
-      encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"], env: environment,
-    });
-    execFileSync("git", ["-C", checkout, "checkout", "--quiet", "--detach", resource.source_ref], {
-      encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"], env: environment,
-    });
-    const actualRef = execFileSync("git", ["-C", checkout, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-    if (actualRef.toLowerCase() !== resource.source_ref.toLowerCase()) {
-      throw new CatalogError("Retrieved source commit does not match the catalog pin");
-    }
-    if (!resource.source_path || !/^[a-f0-9]{40}$/i.test(resource.source_ref)) {
-      throw new CatalogError("Bundle resource has no safe pinned source path");
-    }
-    const tree = execFileSync("git", [
-      "-C", checkout, "ls-tree", "-r", "-z", "--full-tree", resource.source_ref, "--", resource.source_path,
-    ], { encoding: "buffer", timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
-    const decoder = new TextDecoder("utf-8", { fatal: true });
-    const treeEntries = [];
-    let totalBytes = 0;
-    for (const record of tree.toString("binary").split("\0")) {
-      if (!record) continue;
-      const tab = record.indexOf("\t");
-      if (tab < 0) throw new CatalogError("Pinned source tree contains a malformed Git tree entry");
-      const [mode, type, oid] = record.slice(0, tab).split(" ");
-      const filePath = decoder.decode(Buffer.from(record.slice(tab + 1), "binary"));
-      if (resource.kind === "skill") {
-        if (!filePath.startsWith(`${resource.source_path}/`)) continue;
-      } else if (filePath !== resource.source_path) {
-        continue;
-      }
-      const relativePath = resource.kind === "skill"
-        ? filePath.slice(resource.source_path.length + 1)
-        : path.posix.basename(filePath);
-      if (!relativePath || relativePath.startsWith("/") || relativePath.includes("\\") ||
-          relativePath.split("/").some((part) => !part || part === "." || part === "..")) {
-        throw new CatalogError(`Unsafe pinned source file path: ${filePath}`);
-      }
-      if (type !== "blob" || !["100644", "100755"].includes(mode)) {
-        throw new CatalogError(`Resource bundle cannot contain a symlink or submodule: ${filePath}`);
-      }
-      const sizeText = execFileSync("git", ["-C", checkout, "cat-file", "-s", oid], { encoding: "utf8" }).trim();
-      const size = Number(sizeText);
-      if (treeEntries.length >= maxFiles) throw new CatalogError(`Resource bundle exceeds ${MAX_BUNDLE_FILES} files`);
-      if (!Number.isSafeInteger(size) || size < 0 || size > 16 * 1024 * 1024) {
-        throw new CatalogError(`Pinned source file exceeds 16777216 byte bundle limit: ${filePath}`);
-      }
-      if (totalBytes + size > maxBytes) {
-        throw new CatalogError(`Resource bundle exceeds ${MAX_BUNDLE_CONTENT_BYTES} content bytes`);
-      }
-      totalBytes += size;
-      const content = execFileSync("git", ["-C", checkout, "cat-file", "blob", oid], {
-        encoding: "buffer", maxBuffer: 16 * 1024 * 1024 + 1,
-      });
-      if (content.length !== size) throw new CatalogError(`Pinned source blob size changed while reading: ${filePath}`);
-      if (content.toString("utf8").startsWith("version https://git-lfs.github.com/spec/v1\n")) {
-        throw new CatalogError(`Resource bundle cannot include external Git LFS content: ${filePath}`);
-      }
-      treeEntries.push({ path: relativePath, content, executable: mode === "100755" });
-    }
-    if (resource.kind === "skill" && !treeEntries.some(({ path: filePath }) => filePath === "SKILL.md")) {
-      throw new CatalogError(`Pinned skill tree has no SKILL.md: ${resource.source_path}`);
-    }
-    if (resource.kind !== "skill" && treeEntries.length !== 1) {
-      throw new CatalogError(`Pinned ${resource.kind} source must be one regular Git file: ${resource.source_path}`);
-    }
-    return treeEntries;
-  } catch (error) {
-    if (error instanceof CatalogError) throw error;
-    throw new CatalogError(`Cannot retrieve complete pinned source ${resource.source_repository}/${resource.source_path}@${resource.source_ref}: ${error.message}`);
-  } finally {
-    fs.rmSync(temporaryRoot, { recursive: true, force: true });
-  }
-}
 
 function installSourceFileResource(
   resource: CatalogResource,
@@ -366,27 +280,20 @@ function installSourceFileResource(
   tool: string,
   {
     scope = "project", force = false, dryRun = false, onAction = () => {},
-    destinations: requestedDestinations, bundleFiles,
+    destinations: requestedDestinations,
   }: {
     scope?: string;
     force?: boolean;
     dryRun?: boolean;
     onAction?: (action: PlanAction) => void;
     destinations?: string[];
-    bundleFiles?: Array<{ path: string; content: Buffer; executable: boolean }>;
   } = {},
 ): string[] {
   if (!["agent", "instruction"].includes(resource.kind)) throw new CatalogError(`Unsupported source resource kind: ${resource.kind}`);
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new CatalogError(`Target must be an existing directory: ${target}`);
   const targetRoot = fs.realpathSync(target);
   const destinations = requestedDestinations || sourceFileDestinations(resource, tool, scope);
-  const verifiedBundleFiles = bundleFiles ?? (!dryRun && resource.bundle_id
-    ? readCachedResourceFiles(resource)
-    : null);
-  const content = dryRun ? null : verifiedBundleFiles
-    ? verifiedBundleFiles[0]?.content
-    : readPinnedSourceFile(resource);
-  if (!dryRun && !content) throw new CatalogError(`Bundle contains no ${resource.kind} source file: ${resource.id}`);
+  const content = dryRun ? null : readPinnedSourceFile(resource);
   const plan = new Map<string, InstallPlanEntry>();
   const previous = readInstallState(targetRoot).sources?.[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id];
   const matchingPrevious = previous?.source_repository === resource.source_repository &&
@@ -434,136 +341,6 @@ function materializeSourceFile(resource, content, relativePath) {
   return Buffer.from(`---\n${runtimeField}\n---\n\n${text.slice(frontmatter[0].length)}`, "utf8");
 }
 
-function materializeBundledSkillEntry(resource: CatalogResource, content: Buffer): Buffer {
-  let text;
-  try { text = new TextDecoder("utf-8", { fatal: true }).decode(content); }
-  catch { throw new CatalogError(`Bundled skill entry point is not valid UTF-8: ${resource.source_path}`); }
-  const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!frontmatter) throw new CatalogError(`Bundled skill entry point must have YAML frontmatter: ${resource.source_path}`);
-  const document = YAML.parseDocument(frontmatter[1], { uniqueKeys: true, schema: "core" });
-  if (document.errors.length || document.warnings.length) {
-    throw new CatalogError(`Invalid bundled skill frontmatter: ${[...document.errors, ...document.warnings].map(({ message }) => message).join("; ")}`);
-  }
-  let metadata = document.get("metadata", true);
-  if (metadata !== undefined && !YAML.isMap(metadata)) {
-    throw new CatalogError(`Bundled skill metadata must be a YAML mapping: ${resource.source_path}`);
-  }
-  if (metadata === undefined) metadata = document.createNode({});
-  metadata.set("github-repo", `https://github.com/${resource.source_repository}`);
-  metadata.set("github-path", resource.source_path);
-  metadata.set("github-ref", resource.source_ref);
-  metadata.set("github-pinned", resource.source_ref);
-  document.set("metadata", metadata);
-  return Buffer.from(`---\n${document.toString().trimEnd()}\n---\n${text.slice(frontmatter[0].length)}`, "utf8");
-}
-
-function installBundledSourceSkill(
-  resource: CatalogResource,
-  target: string,
-  agents: string[],
-  bundleFiles: Array<{ path: string; content: Buffer; executable: boolean }>,
-  {
-    force = false, dryRun = false, onAction = () => {},
-  }: { force?: boolean; dryRun?: boolean; onAction?: (action: PlanAction) => void } = {},
-): string[] {
-  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
-    throw new CatalogError(`Target must be an existing directory: ${target}`);
-  }
-  if (resource.kind !== "skill" || !bundleFiles.some(({ path: filePath }) => filePath === "SKILL.md")) {
-    throw new CatalogError(`A signed skill bundle with SKILL.md is required for ${resource.id}`);
-  }
-  const targetRoot = fs.realpathSync(target);
-  const state = readInstallState(targetRoot);
-  const previous = sourceSkillRecord(state, sourceCatalogName(resource), resource.id);
-  if (previous && (previous.source_repository !== resource.source_repository ||
-      previous.source_path !== resource.source_path)) {
-    throw new CatalogError(`Refusing to replace tracked skill provenance for ${resource.id}`, "LOCAL_CONFLICT", {
-      category: "provenance-conflict", paths: [], recoverable: false,
-    });
-  }
-  const selectedPrefixes = agents.map((agent) => {
-    const directory = SOURCE_SKILL_DIRECTORIES[agent];
-    if (!directory) throw new CatalogError(`Unsupported source skill runtime: ${agent}`);
-    return `${directory}/${resource.id}/`;
-  });
-  const plan = new Map<string, InstallPlanEntry>();
-  const outputContents = new Map<string, { content: Buffer; executable: boolean }>();
-  for (const prefix of selectedPrefixes) {
-    for (const file of bundleFiles) {
-      const relativePath = `${prefix}${file.path}`;
-      targetPath(targetRoot, relativePath);
-      const content = file.path === "SKILL.md"
-        ? materializeBundledSkillEntry(resource, file.content)
-        : file.content;
-      outputContents.set(relativePath, { content, executable: file.executable });
-    }
-  }
-  const oldPaths = Object.keys(previous?.files || {}).filter((relativePath) =>
-    selectedPrefixes.some((prefix) => relativePath.startsWith(prefix)));
-  const removals: string[] = [];
-  const expectedRemovals = new Map<string, FileFingerprint | null>();
-  const files = previous ? { ...previous.files } : {};
-  for (const relativePath of oldPaths) {
-    const actual = installedFingerprint(targetRoot, relativePath);
-    const expected = previous.files[relativePath];
-    if (actual && !sameFingerprint(actual, expected) && !force) {
-      throw new CatalogError(`Refusing to replace locally modified source skill file ${relativePath}; pass --force.`, "LOCAL_CONFLICT", {
-        category: "tracked-modification", paths: [relativePath], recoverable: true,
-      });
-    }
-    if (!outputContents.has(relativePath)) {
-      delete files[relativePath];
-      if (actual) {
-        removals.push(relativePath);
-        expectedRemovals.set(relativePath, actual);
-      }
-    }
-  }
-  const destinations: string[] = [];
-  for (const [relativePath, entry] of outputContents) {
-    const actual = installedFingerprint(targetRoot, relativePath);
-    const expected = previous?.files[relativePath];
-    if (expected && actual && !sameFingerprint(actual, expected) && !force) {
-      throw new CatalogError(`Refusing to overwrite locally modified source skill file ${relativePath}; pass --force.`, "LOCAL_CONFLICT", {
-        category: "tracked-modification", paths: [relativePath], recoverable: true,
-      });
-    }
-    const planEntry: InstallPlanEntry = {
-      content: entry.content,
-      executable: entry.executable,
-      ...(expected ? { expected: actual } : {}),
-    };
-    plan.set(relativePath, planEntry);
-    files[relativePath] = fileFingerprint(entry.content, entry.executable);
-    destinations.push(relativePath);
-  }
-  state.sources ||= {};
-  state.sources[sourceCatalogName(resource)] ||= {};
-  state.sources[sourceCatalogName(resource)].skills ||= {};
-  state.sources[sourceCatalogName(resource)].skills[resource.id] = {
-    source_repository: resource.source_repository,
-    source_path: resource.source_path,
-    source_ref: resource.source_ref,
-    files,
-  };
-  addInventoryStateToPlan(plan, state);
-  const inventoryEntry = plan.get(LOCK_PATH);
-  if (inventoryEntry) inventoryEntry.expected = installedFingerprint(targetRoot, LOCK_PATH);
-  writeInstallPlan(plan, targetRoot, {
-    force,
-    dryRun,
-    remove: removals,
-    ...(force ? {} : { expectedRemovals }),
-    onAction: (action) => {
-      if (action.path === LOCK_PATH) return;
-      onAction({
-        ...action,
-        resource: { catalog: sourceCatalogName(resource), kind: "skill", id: resource.id },
-      });
-    },
-  });
-  return destinations;
-}
 function assertSourceFileCanBeInstalled(resource, target) {
   const state = readInstallState(target);
   for (const [catalog, collections] of Object.entries(state.sources || {})) {
@@ -652,27 +429,7 @@ function validateSourceUpdates(
     }
     const record = sourceSkillRecord(state, sourceCatalogName(resource), resource.id);
     const managedPaths = new Set(Object.keys(record?.files || {}));
-    if (resource.bundle_id) {
-      const bundleFiles = readCachedResourceFiles(resource);
-      const conflicts: string[] = [];
-      for (const installation of installations) {
-        const prefix = `${SOURCE_SKILL_DIRECTORIES[installation.agent]}/${resource.id}/`;
-        for (const file of bundleFiles) {
-          const relativePath = `${prefix}${file.path}`;
-          if (!managedPaths.has(relativePath) && installedFingerprint(targetRoot, relativePath)) {
-            conflicts.push(relativePath);
-          }
-        }
-      }
-      if (conflicts.length && !force) {
-        throw new CatalogError(
-          `Refusing to overwrite existing local skill files: ${conflicts.join(", ")}. Review them and pass --force.`,
-          "LOCAL_CONFLICT",
-          { category: "untracked-destination", paths: conflicts, recoverable: true },
-        );
-      }
-      continue;
-    }
+
     for (const installation of installations) {
       const directory = path.posix.dirname(installation.path);
       const absolute = targetPath(targetRoot, directory);
@@ -786,15 +543,7 @@ function updateSourceResources(
       continue;
     }
     hasUpdates = true;
-    const bundleFiles = resource.bundle_id ? readCachedResourceFiles(resource) : null;
-    if (bundleFiles) {
-      const paths = installBundledSourceSkill(
-        resource, targetRoot, stale.map(({ agent }) => agent), bundleFiles,
-        { force, dryRun, onAction },
-      );
-      messages.push(`${dryRun ? "Would update" : "Updated"} ${catalogLabel(resource)} skill: ${resource.id} (${paths.join(", ")})`);
-      continue;
-    }
+
     if (dryRun) {
       for (const installation of stale) {
         onAction({
@@ -1158,8 +907,6 @@ function formatSourceResource(resource: CatalogResource): string {
 function auditPinnedResource(
   resource: CatalogResource,
   output: { log(message: string): void },
-  bundleFiles?: Array<{ path: string; content: Buffer; executable: boolean }> | null,
-  { tool = "claude", scope = "project" }: { tool?: string; scope?: string } = {},
 ): {
   findings: Array<{ code: string; path: string; line: number; message: string }>;
   coverage: { discovered: number; analyzed: number; skipped: Array<{ path: string; reason: string }>; complete: boolean };
@@ -1171,28 +918,11 @@ function auditPinnedResource(
   const filePath = resource.kind === "skill"
     ? `${resource.source_path.replace(/\/$/, "")}/SKILL.md`
     : resource.source_path;
-  let files;
-  if (!bundleFiles) {
-    files = [{
-      path: filePath,
-      kind: resource.kind,
-      content: readPinnedSourceFile({ ...resource, source_path: filePath }),
-    }];
-  } else if (resource.kind === "instruction") {
-    files = sourceFileDestinations(resource, tool, scope).map((destination) => ({
-      path: destination,
-      kind: resource.kind,
-      content: materializeSourceFile(resource, bundleFiles[0].content, destination),
-    }));
-  } else {
-    files = bundleFiles.map((file) => ({
-      path: resource.kind === "skill" ? `${resource.source_path}/${file.path}` : filePath,
-      kind: resource.kind,
-      content: resource.kind === "skill" && file.path === "SKILL.md"
-        ? materializeBundledSkillEntry(resource, file.content)
-        : file.content,
-    }));
-  }
+  const files = [{
+    path: filePath,
+    kind: resource.kind,
+    content: readPinnedSourceFile({ ...resource, source_path: filePath }),
+  }];
   const result = auditTextResources(files);
   output.log(`Audit coverage: ${result.coverage.analyzed}/${result.coverage.discovered} files analyzed; ` +
     (result.coverage.complete ? "no files skipped." : "coverage incomplete."));
@@ -1229,13 +959,7 @@ function runSourceCommand(
   if (!resource) {
     throw new CatalogError(`${catalog} resource not found: ${options.id}`);
   }
-  const bundleFiles = resource.bundle_id ? readCachedResourceFiles(resource) : null;
-  if (options.offline && (options.action === "preview" || !bundleFiles)) {
-    throw new CatalogError(
-      "Source resource installation requires an imported signed bundle when offline; source preview still requires GitHub.",
-      "INVALID_ARGUMENT",
-    );
-  }
+
   options.onResource?.({ catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id, status: "planned", source: true });
 
   let target = process.cwd();
@@ -1255,10 +979,7 @@ function runSourceCommand(
     }
   }
   if (options.audit) {
-    const audit = auditPinnedResource(resource, output, bundleFiles, {
-      tool: options.tool || "claude",
-      scope: options.scope || "project",
-    });
+    const audit = auditPinnedResource(resource, output);
     if (options.action === "install" && (!audit.coverage.complete || audit.findings.length)) {
       throw new CatalogError(
         audit.findings.length
@@ -1270,7 +991,7 @@ function runSourceCommand(
   }
   if (resource.kind !== "skill") {
     if (options.action === "preview") {
-      const content = bundleFiles ? bundleFiles[0].content : readPinnedSourceFile(resource);
+      const content = readPinnedSourceFile(resource);
       let markdown;
       try {
         markdown = new TextDecoder("utf-8", { fatal: true }).decode(content);
@@ -1286,7 +1007,6 @@ function runSourceCommand(
       force: Boolean(options.force),
       dryRun: Boolean(options.dryRun),
       onAction: options.onAction,
-      bundleFiles,
     });
     output.log(`${options.dryRun ? "Would install" : "Installed"} ${catalogLabel(resource)} ${resource.kind}: ${resource.id}${options.dryRun ? ` at ${resource.source_ref}` : ""} (${paths.join(", ")})`);
     return 0;
@@ -1297,21 +1017,14 @@ function runSourceCommand(
   if (options.action === "install" && options.scope === "user") {
     for (const agent of agents) targetPath(target, `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`);
   }
-  if (options.action === "install" && options.dryRun && bundleFiles) {
-    const paths = installBundledSourceSkill(resource, target, agents, bundleFiles, {
-      force: Boolean(options.force), dryRun: true, onAction: options.onAction,
-    });
-    output.log(`Would install ${catalogLabel(resource)} skill: ${resource.id} (${paths.join(", ")})`);
-    return 0;
-  }
-  if ((options.json || options.offline) && options.dryRun) {
+
+  if (options.json && options.dryRun) {
     for (const agent of agents) {
       options.onAction?.({
         action: "delegate_install", path: `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`,
         resource: { catalog: sourceCatalogName(resource), kind: "skill", id: resource.id },
         command: { program: "gh", args: buildSourceSkillArgs("install", resource, agent, options) },
       });
-      if (!options.json) output.log(`Would install ${catalogLabel(resource)} skill: ${resource.id} for ${agent} at ${resource.source_ref}`);
     }
     output.error("Source skill installation is delegated to gh; auxiliary files and conflicts are resolved by gh at execution time.");
     return 0;
@@ -1325,13 +1038,7 @@ function runSourceCommand(
     }
     return typeof result === "number" ? result : result.status;
   }
-  if (bundleFiles) {
-    const paths = installBundledSourceSkill(resource, target, agents, bundleFiles, {
-      force: Boolean(options.force), onAction: options.onAction,
-    });
-    output.log(`Installed ${catalogLabel(resource)} skill: ${resource.id} (${paths.join(", ")})`);
-    return 0;
-  }
+
   const completed = [];
   for (const agent of agents) {
     const result = invokeGhSkill(buildSourceSkillArgs("install", resource, agent, options), target);
@@ -1347,7 +1054,9 @@ function runSourceCommand(
 }
 
 module.exports = {
-  buildSourceSkillArgs, listSkillVersions, listSkillVersionsAsync, latestSourceVersionAtRef, uniqueSkillVersionPrefixes, formatSkillVersionTable, resolveSkillVersionPrefix, readPinnedSourceFiles, readInstalledSourceSkills, readInstalledSourceResources,
-  installSourceFileResource, installBundledSourceSkill, validateSourceUpdates, updateSourceResources,
+  buildSourceSkillArgs, listSourceVersions, listSourceVersionsAsync, latestSourceVersionAtRef,
+  uniqueSourceVersionPrefixes, formatSourceVersionTable, resolveSourceVersionPrefix,
+  readInstalledSourceSkills, readInstalledSourceResources,
+  installSourceFileResource, validateSourceUpdates, updateSourceResources,
   uninstallSourceResource, runGhSkill, formatSourceResource, runSourceCommand,
 };

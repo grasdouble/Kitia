@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { checkInstalledVersion, type VersionNotice } from "./version-check.mjs";
+import { updateCatalogFreshness, type CatalogFreshnessStatus } from "./catalog-freshness.mjs";
+import { createForceRetryPrompt } from "./action-retry.mjs";
 import { render, useInput, useWindowSize } from "ink";
 import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
@@ -8,15 +11,15 @@ import {
   mergeRefreshedCatalogResources,
 } from "./helpers.mjs";
 import {
-  CatalogManagementScreen, CatalogScreen, InventoryScreen, ScreenFrame,
-  type CatalogFreshnessStatus,
+  CatalogManagementScreen, CatalogScreen, InspectionScreen, InventoryScreen, ScreenFrame,
+  inspectionPageCount,
 } from "./screens.mjs";
 import {
-  ModalOverlay, actionFailureModal, addCatalogModal, confirmationModal, inspectionModal, inventoryMigrationModal,
-  loadingModal, onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal, skillVersionsModal,
+  ModalOverlay, actionFailureModal, addCatalogModal, confirmationModal, inventoryMigrationModal,
+  loadingModal, onboardingModal, optionsModal, refreshCatalogModal, removeCatalogModal, sourceVersionsModal,
   versionAvailableModal,
   catalogTransferModal, catalogPresetModal,
-  type PendingDashboardAction, type SkillVersionOption,
+  type PendingDashboardAction, type SourceVersionOption,
 } from "./modals.mjs";
 
 import type { DashboardActionResult } from "../cli/dashboard.js";
@@ -109,7 +112,7 @@ export function Dashboard({
       resource: CatalogResource,
       options: { scope?: string; tool?: string; force?: boolean; ref?: string },
     ) => Promise<DashboardActionResult>;
-    listSkillVersions?: (resource: CatalogResource) => SkillVersionOption[] | Promise<SkillVersionOption[]>;
+    listSourceVersions?: (resource: CatalogResource) => SourceVersionOption[] | Promise<SourceVersionOption[]>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     userCatalogs?: UserCatalog[];
@@ -124,38 +127,13 @@ export function Dashboard({
   const { columns = 80, rows = 24 } = useWindowSize();
   const installedVersion = process.env.KITIA_INSTALLED_VERSION || "unknown";
   const [versionLabel, setVersionLabel] = useState("Checking version update");
-  const [versionNotice, setVersionNotice] = useState<{
-    installed: string;
-    available: string;
-    changelogUrl: string;
-  } | null>(null);
+  const [versionNotice, setVersionNotice] = useState<VersionNotice | null>(null);
   useEffect(() => {
     let active = true;
-    const compare = (left: string, right: string) => {
-      const a = left.split(".").map(Number);
-      const b = right.split(".").map(Number);
-      for (let index = 0; index < 3; index += 1) {
-        if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
-      }
-      return 0;
-    };
-    void fetch("https://registry.npmjs.org/@grasdouble%2Fkitia/latest", {
-      signal: AbortSignal.timeout(1500),
-      headers: { accept: "application/json" },
-    }).then(async (response) => {
-      if (!response.ok) throw new Error("npm registry unavailable");
-      const { version } = await response.json();
-      if (installedVersion !== "unknown" && compare(version, installedVersion) > 0) {
-        setVersionLabel(`${installedVersion} - New version available`);
-        const heading = version.toLowerCase().replace(/[^a-z0-9-]/g, "");
-        setVersionNotice({
-          installed: installedVersion,
-          available: version,
-          changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/CHANGELOG.md#${heading}`,
-        });
-      } else {
-        setVersionLabel(installedVersion);
-      }
+    void checkInstalledVersion(installedVersion).then(({ label, notice }) => {
+      if (!active) return;
+      setVersionLabel(label);
+      setVersionNotice(notice);
     }).catch(() => {
       if (active) setVersionLabel(installedVersion);
     });
@@ -202,10 +180,11 @@ export function Dashboard({
     action: "preview" | "audit";
     resource: CatalogResource;
     content: string;
+    page: number;
   } | null>(null);
-  const [skillVersionPicker, setSkillVersionPicker] = useState<{
+  const [sourceVersionPicker, setSourceVersionPicker] = useState<{
     resource: CatalogResource;
-    versions: SkillVersionOption[];
+    versions: SourceVersionOption[];
     selectedIndex: number;
     action: "install" | "update";
   } | null>(null);
@@ -238,45 +217,13 @@ export function Dashboard({
     .filter((error) => error.code === "INVENTORY_MIGRATION_REQUIRED")
     .map((error) => error.scope)
     .filter((scope) => ["project", "user"].includes(scope)))];
-
-  const checkCatalogFreshness = async (
+  const checkCatalogFreshness = (
     catalogs = userCatalogs,
     names = catalogs.map(({ name }) => name),
-  ) => {
-    const requests = new Map<string, number>();
-    for (const name of names) {
-      const key = name.toLowerCase();
-      const request = (freshnessRequest.current.get(key) || 0) + 1;
-      freshnessRequest.current.set(key, request);
-      requests.set(key, request);
-    }
-    const updateStatuses = (statusFor: (name: string) => CatalogFreshnessStatus) => {
-      const catalogNames = new Set(catalogs.map(({ name }) => name.toLowerCase()));
-      setCatalogFreshness((current) => {
-        const next = Object.fromEntries(Object.entries(current)
-          .filter(([name]) => catalogNames.has(name.toLowerCase())));
-        for (const name of names) {
-          const key = name.toLowerCase();
-          if (freshnessRequest.current.get(key) === requests.get(key)) {
-            next[name] = statusFor(name);
-          }
-        }
-        return next;
-      });
-    };
-    updateStatuses(() => "checking");
-    if (!actions.checkCatalogFreshness) {
-      updateStatuses(() => "unknown");
-      return;
-    }
-    try {
-      const results = await actions.checkCatalogFreshness(names);
-      const statusByName = new Map(results.map(({ name, status }) => [name.toLowerCase(), status]));
-      updateStatuses((name) => statusByName.get(name.toLowerCase()) || "unknown");
-    } catch {
-      updateStatuses(() => "unknown");
-    }
-  };
+  ) => updateCatalogFreshness(
+    catalogs, names, freshnessRequest.current, setCatalogFreshness, actions.checkCatalogFreshness,
+  );
+
 
   const inventoryLabels = inventoryCatalogLabels(installedResources, userCatalogs);
   const visibleInventory = filterInventory(
@@ -435,52 +382,33 @@ export function Dashboard({
       agent?: string;
     },
   ): boolean => {
-    const ghForceRetry = failure.code === "GH_FORCE_REQUIRED" &&
-      typeof failure.agent === "string" && failure.agent.length > 0;
-    const alreadyForceRetriedAgent = ghForceRetry && requested.ghForceAgents?.includes(failure.agent as string);
-    if (requested.action !== "update" || failure.recoverable !== true ||
-        (ghForceRetry
-          ? alreadyForceRetriedAgent
-          : requested.forceRetry || failure.code !== "LOCAL_CONFLICT")) return false;
-    setConfirmation({
-      action: "update",
-      resource: requested.resource,
-      ...(requested.ref ? { ref: requested.ref } : {}),
-      forceRetry: true,
-      ...(ghForceRetry ? {
-        ghForceRetry: true,
-        ghForceAgent: failure.agent,
-        ghForceAgents: [...(requested.ghForceAgents || []), failure.agent as string],
-      } : {}),
-      conflict: {
-        category: failure.category || (ghForceRetry ? "github-force-required" : "local-conflict"),
-        paths: failure.paths || [],
-        ...(failure.userMessage ? { message: failure.userMessage } : {}),
-      },
-    });
+    const prompt = createForceRetryPrompt(requested, failure);
+    if (!prompt) return false;
+    setConfirmation(prompt.confirmation);
     setConfirmationChoice(0);
-    setActionMessage(ghForceRetry
-      ? "GitHub CLI requested overwrite; confirm whether to retry with --force."
-      : "Update blocked by a local conflict; choose whether to force and retry.");
+    setActionMessage(prompt.message);
     return true;
   };
 
-  const openSkillVersions = async (
+  const openSourceVersions = async (
     resource: CatalogResource,
     action: "install" | "update" = "install",
   ) => {
-    if (!actions.listSkillVersions || versionLoading) return;
+    if (!actions.listSourceVersions || versionLoading) return;
     setVersionLoading(true);
     setActionPending(true);
     setActionMessage(`Loading commit history for ${resource.id}...`);
     setActionFailure(null);
     try {
-      const versions = await actions.listSkillVersions(resource);
+      const versions = await actions.listSourceVersions(resource);
       if (!versions.length) {
-        setActionFailure({ action: "versions", message: `No commits found for ${resource.catalog}:${resource.id}.` });
+        setActionFailure({
+          action: "versions",
+          message: `No commits found for ${resource.catalog}:${resource.kind}:${resource.id}.`,
+        });
         return;
       }
-      setSkillVersionPicker({ resource, versions, selectedIndex: 0, action });
+      setSourceVersionPicker({ resource, versions, selectedIndex: 0, action });
     } catch (error) {
       setActionFailure({
         action: "versions",
@@ -540,6 +468,7 @@ export function Dashboard({
           action: requested.action as "preview" | "audit",
           resource: requested.resource,
           content: outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`,
+          page: 0,
         });
       } else {
         setActionMessage(outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
@@ -567,17 +496,17 @@ export function Dashboard({
   useInput((input, key) => {
     const character = input.toLocaleLowerCase();
     if (actionPending || versionLoading) return;
-    if (skillVersionPicker) {
-      if (key.escape) setSkillVersionPicker(null);
+    if (sourceVersionPicker) {
+      if (key.escape) setSourceVersionPicker(null);
       else if (key.upArrow || key.downArrow) {
-        setSkillVersionPicker((current) => current ? {
+        setSourceVersionPicker((current) => current ? {
           ...current,
           selectedIndex: cycleIndex(current.versions.length, current.selectedIndex, key.upArrow ? -1 : 1),
         } : current);
       } else if (key.return) {
-        const { resource, versions, selectedIndex, action } = skillVersionPicker;
+        const { resource, versions, selectedIndex, action } = sourceVersionPicker;
         const ref = versions[selectedIndex].sha;
-        setSkillVersionPicker(null);
+        setSourceVersionPicker(null);
         if (action === "update") {
           setConfirmation({ action, resource, ref });
           setConfirmationChoice(1);
@@ -596,7 +525,19 @@ export function Dashboard({
       return;
     }
     if (inspection) {
-      if (key.return || key.escape || input === " ") setInspection(null);
+      if (key.leftArrow || key.pageUp) {
+        setInspection((current) => current
+          ? { ...current, page: Math.max(0, current.page - 1) }
+          : current);
+      } else if (key.rightArrow || key.pageDown) {
+        setInspection((current) => {
+          if (!current) return current;
+          const pageCount = inspectionPageCount({ ...current, columns, rows });
+          return { ...current, page: Math.min(pageCount - 1, current.page + 1) };
+        });
+      } else if (key.return || key.escape || input === " ") {
+        setInspection(null);
+      }
       return;
     }
     if (actionFailure) {
@@ -1107,7 +1048,9 @@ export function Dashboard({
         setCatalogIndex(0);
       } else if (character === "v") {
         const resource = visibleCatalog[activeCatalogIndex];
-        if (resource?.kind === "skill") openSkillVersions(resource);
+        if (resource?.source_repository && resource.source_path) {
+          openSourceVersions(resource);
+        }
       } else if (character === "p" || character === "a") {
         const resource = visibleCatalog[activeCatalogIndex];
         if (resource) void runConfirmedAction({
@@ -1209,10 +1152,11 @@ export function Dashboard({
         inventoryKindFilter, installedResources, "kind", "catalog", inventoryCatalogFilter, userCatalogs,
       ));
       setSelectedIndex(0);
-    } else if (character === "v" && selectedResource?.kind === "skill" &&
+    } else if (character === "v" && selectedResource &&
         selectedResource.managed !== false && selectedResource.source_repository &&
-        !selectedResource.bundle_id && typeof actions.listSkillVersions === "function") {
-      openSkillVersions(selectedResource, "update");
+        selectedResource.source_path &&
+        typeof actions.listSourceVersions === "function") {
+      openSourceVersions(selectedResource, "update");
     } else if (character === "a" && candidates.length) {
       setScreenMode("catalog");
       setCatalogQuery("");
@@ -1278,10 +1222,8 @@ export function Dashboard({
     });
   } else if (catalogTransfer) {
     modal = catalogTransferModal({ ...catalogTransfer, columns });
-  } else if (skillVersionPicker) {
-    modal = skillVersionsModal({ ...skillVersionPicker, columns });
-  } else if (inspection) {
-    modal = inspectionModal({ ...inspection, columns, rows });
+  } else if (sourceVersionPicker) {
+    modal = sourceVersionsModal({ ...sourceVersionPicker, columns });
   } else if (actionFailure) {
     modal = actionFailureModal({ ...actionFailure, columns });
   } else if (confirmation) {
@@ -1303,7 +1245,14 @@ export function Dashboard({
       columns,
     });
   }
-  if (screenMode === "catalog-management") {
+  if (inspection) {
+    baseScreen = h(InspectionScreen, {
+      ...inspection,
+      versionLabel: headerVersionLabel,
+      columns,
+      rows,
+    });
+  } else if (screenMode === "catalog-management") {
     baseScreen = h(CatalogManagementScreen, {
       catalogs: userCatalogs,
       catalogResources: candidates,
@@ -1397,7 +1346,7 @@ export async function runDashboard(
       resource: CatalogResource,
       options: { scope?: string; tool?: string; force?: boolean; ref?: string },
     ) => Promise<DashboardActionResult>;
-    listSkillVersions?: (resource: CatalogResource) => SkillVersionOption[] | Promise<SkillVersionOption[]>;
+    listSourceVersions?: (resource: CatalogResource) => SourceVersionOption[] | Promise<SourceVersionOption[]>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     updateCatalog?: (originalName: string, request: AddCatalogRequest) => Promise<CatalogMutationResult>;
     userCatalogs?: UserCatalog[];

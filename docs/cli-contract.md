@@ -39,19 +39,13 @@ check.
 | `list`, `search` | Discover resources; support `--catalog`, `--kind`, `--tag`, `--status`, and `--license`; `--json` retains its existing array format |
 | `show`, `preview` | Human-readable inspection; an omitted kind uses the normal ambiguity rules |
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
-| `versions skill <id>` | List up to 500 newest GitHub commits affecting the skill's `SKILL.md`, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
+| `versions <kind> <id>` | List up to 500 newest GitHub commits affecting a skill entrypoint or an agent/instruction Markdown file, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
 | `validate` | Strict validation of all catalog sources |
-| `collection export`, `collection import` | Share versioned pinned references to selected resources; does not bundle or install resource content |
-| `bundle export <file> <catalog:kind:id...>`, `bundle import <file> --trusted-key <public-pem> [--replace]` | Share signed selected resource content for managed local/offline installation; distinct from content-free `collection` references |
+| `collection export`, `collection import` | Share versioned pinned references to selected resources; collections contain no resource content and do not install resources |
 
-`bundle export <file> <catalog:kind:id...> --signing-key <private-pem>` captures Git files from each selected resource's full pinned commit and writes a signed version-1 bundle. Signatures are mandatory. Every file has a SHA-256 digest and executable-bit record; skills include their auxiliary files. `bundle import <file> --trusted-key <public-pem> [--replace]` requires an explicitly approved public PEM supplied out of band, verifies the signature and all file digests, then atomically publishes the indexes, registries and local cache. A manifest's own key never establishes trust; compare the reported SHA-256 key fingerprint through a trusted channel before approving it.
-
-To replace a catalog pin, run `kitia bundle import <file> --trusted-key <public-pem> --replace`. Without `--replace`, imports reject configured catalog name or repository conflicts. Replacement requires the same catalog name, repository identity, and Basic/Custom mode and path mappings; mismatches fail closed. The new pin/index/cache and registries publish in one rollback-capable transaction, preserving unrelated catalog configuration. Then `kitia update --offline` installs bytes from the replacement bundle.
-
-Imported bundle resources use the regular managed install/update/uninstall lifecycle for skills, agents and instructions. `--offline` requires an intact imported bundle and fails closed without network fallback. Audited installs analyze the same verified cached bytes that are installed, including auxiliary skill files; audit findings or incomplete coverage block publication. Bundle skills use Kitia's local installer, while skills without an imported bundle continue to delegate to `gh skill`. Git is required for export, but not for install from an imported bundle. Bundles exclude dependencies, repository state and Git LFS objects; reject symlinks, submodules, LFS pointers, case/Unicode-normalization aliases, and Windows-reserved or trailing-dot/space path components without renaming paths; and enforce manifest/file count and size limits. A signature proves signer/integrity only, not that content is safe or independently attested as upstream-authentic. See the [resource collections and bundles guide](resource-collections.md).
 
 Installation defaults to Copilot and the target defaults to the current
 directory. Updates preserve registered runtimes; they do not silently remove
@@ -59,21 +53,21 @@ resources absent from the current catalog. `--force` remains explicit and does
 not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
 
-`kitia versions skill <id> [--catalog <name>]` uses `gh api` against the
-GitHub commits endpoint filtered to `<source_path>/SKILL.md`. The history
-covers commits affecting that entrypoint only; changes to supporting files are
-not listed. Results are newest first and bounded to five pages of 100 commits;
-displayed dates are the commit committer dates. GitHub CLI authentication and
-network access are required.
-`kitia install skill <id> --ref <sha-or-prefix>` and the corresponding targeted
-`kitia update skill <id> --ref <sha-or-prefix>` use that commit for this
-operation without changing the catalog index pin. The installed inventory
+`kitia versions <kind> <id> [--catalog <name>]` supports skills, agents, and
+instructions. It uses `gh api` against the GitHub commits endpoint, filtered
+to `<source_path>/SKILL.md` for skills and the exact Markdown file path for
+agents and instructions. History covers commits affecting that file only;
+supporting files are not listed. Results are newest first and bounded to five
+pages of 100 commits; displayed dates are commit committer dates. GitHub CLI
+authentication and network access are required.
+`kitia install <kind> <id> --ref <sha-or-prefix>` and the corresponding
+targeted `kitia update <kind> <id> --ref <sha-or-prefix>` use that commit for
+this operation without changing the catalog index pin. The installed inventory
 records the chosen full SHA, so a later ordinary update returns the installation
 to the catalog pin. A hexadecimal prefix must be at least 7 characters and is
-resolved only against the selected source skill's listed history; ambiguous or
+resolved only against the selected resource's listed history; ambiguous or
 unknown prefixes are rejected. Full 40-character commit SHAs remain accepted.
-`--ref` is supported only for online, unbundled GitHub source skills, not
-bundles or `--offline`.
+`--ref` is supported only for GitHub source skills, agents, and instructions.
 When an installed GitHub source resource ref differs from its catalog pin,
 `check` and dashboard inventory compare the latest commit affecting its source
 file at each ref. For skills, `source_path` is a directory and the history path
@@ -113,17 +107,19 @@ Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
 Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
-Skill revision history requests run asynchronously so the spinner can animate
-while GitHub CLI queries are pending.
+Operations that can block run in a worker thread so rendering and animation
+continue during the work.
+Preview and audit use dedicated screens below the dashboard header. Resource
+metadata appears above a content panel that fills the remaining terminal space;
+terminal-sized pages navigate with Left/Right or PageUp/PageDown.
 The dashboard is the interactive resource-management interface. CLI-only
 `validate` and `doctor` provide strict catalog validation and environment/
 installation diagnostics for terminal automation; `--json` provides stable
 machine-readable discovery and maintenance reports. These automation and
 diagnostic commands intentionally have no dashboard equivalents.
-Collection and signed-bundle import/export remain CLI-only. Their filesystem
-paths, signing keys, and out-of-band trust decisions are explicit command
-arguments; the dashboard's catalog transfer is intentionally limited to catalog
-configuration, not resource collections or content bundles.
+Collection import/export remain CLI-only because they require explicit file
+paths and optional signing keys or trust decisions; dashboard catalog transfer
+is intentionally limited to catalog configuration, not resource collections.
 
 
 
@@ -278,9 +274,9 @@ signer and manifest integrity; it does not establish resource safety or
 independently prove upstream provenance. Import registers the referenced
 catalogs and stages minimal pinned indexes for selected resources; publication
 uses same-directory staging and rolls back published files on an I/O failure.
-Collections are not offline bundles: installation still retrieves the pinned
-commit from GitHub, the commit may become unavailable, and later refresh may
-advance the index. Import does not fetch or install resources. See the
+Collections contain references only, not offline content. Installation still
+retrieves the pinned commit from GitHub; the commit may become unavailable, and
+later refresh may advance the index. Import does not fetch or install resources.
 [resource collections guide](resource-collections.md).
 
 
@@ -291,17 +287,11 @@ current upstream commit and replaces that source's metadata index; configuration
 and already-installed artifacts remain unchanged. Bulk refresh continues after
 individual failures and exits nonzero if any source failed.
 
-Discovery reads user indexes locally. Resources without an imported bundle use
-the pinned upstream commit: skills delegate to `gh skill`, while agents and
-instructions are fetched and installed through Kitia's normal managed-file
-inventory. Imported bundles provide exact pinned Git content for all three
-kinds and are installed from Kitia's verified local cache; bundled skills use
-Kitia's managed local skill installer rather than assuming `gh skill` accepts a
-local repository. Multi-file installs and updates stage all replacements
-before publication and roll back on a write failure. Offline preview remains
-unsupported. `install --offline` and `update --offline` require an intact
-imported bundle for each resource being installed or updated; they never fall
-back to network access.
+Discovery reads user indexes locally. Source resources resolve to the pinned
+upstream commit: skills delegate to `gh skill`, while agents and instructions
+are fetched and installed through Kitia's managed-file inventory. Multi-file
+installs and updates stage all replacements before publication and roll back on
+a write failure.
 
 
 ## JSON formats
