@@ -5,6 +5,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
   id-token: write
@@ -30,6 +31,7 @@ jobs:
       - run: pnpm run cli:validate
       - run: pnpm run cli:test:package-smoke
       - name: Create version PR or publish
+        id: release
         uses: grasdouble/Lufa-CICD/actions/changesets-release@4d341814e051c0f528b4ffc5537dd7ec13e85963 # changesets-release-v2.0.0
         with:
           version-command: pnpm run changeset:version
@@ -38,3 +40,8 @@ jobs:
           commit-message: "chore: version packages"
           create-github-releases: "true"
           release-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Trigger GitHub Pages deployment
+        if: steps.release.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --ref main
