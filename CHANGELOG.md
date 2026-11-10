@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.1
+
+### Patch Changes
+
+- a87cce3: Track key interactions on the Kitia website.
+  - Measure site visits and navigation actions with Google Analytics.
+- d42f086: Publish a versioned changelog on the website.
+  - Show release details beneath a concise summary.
+  - Add a direct link to each release and its source commit.
+  - Parse release notes correctly with Windows-style line endings.
+  - Serve the changelog as a static HTML entry so GitHub Pages resolves `/changelog` directly.
+- 3e186c6: Add ready-to-use catalogs for Anthropic and GitHub Awesome Copilot.
+  - Discover skills, agents, and instructions from the dashboard or CLI.
+  - Support Copilot agent display names and filenames.
+  - Keep refreshes scoped to the selected catalog.
+
 ## 1.1.0
 
 ### Minor Changes
