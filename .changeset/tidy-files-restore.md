@@ -17,3 +17,7 @@ Improve source catalog safety and dashboard parity
   - Keep resource-collection import/export CLI-only because file paths and optional signing/trust inputs need explicit handling; dashboard transfer remains limited to catalog configuration.
   - Paginate source preview from a tree-only first page through each file in order, retain complete metadata, and color labels and values consistently.
   - Show a centered animated loader during blocking dashboard work and load revision history asynchronously while GitHub CLI requests run.
+  - Expand dashboard tables to available list width and prioritize catalog names, IDs, and repositories over padding in short status and count columns; terminal tables adapt while piped output retains complete values.
+  - Centralize dashboard row-color resolution: known kinds keep their palette, selection overrides with blue, and unknown kinds retain inventory-status or proprietary-license fallbacks.
+  - Mark the selected row with a consistent `›` across inventory, catalog browsing, and catalog management.
+  - Centralize dashboard semantic colors, modal RGB values, the title gradient, and terminal ANSI codes in one editable theme module.

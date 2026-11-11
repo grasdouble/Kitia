@@ -11,9 +11,9 @@ const {
   checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog, importCatalogConfigurationText,
 } = require("../dist/catalog/sources/manage.js");
 const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
-const {
-  installSourceFileResource, runGhSkill, latestSourceVersionAtRef, buildSourceSkillArgs,
-} = require("../dist/catalog/sources/skills.js");
+const { installSourceFileResource } = require("../dist/catalog/sources/resources.js");
+const { runGhSkill, buildSourceSkillArgs } = require("../dist/catalog/sources/gh-skill.js");
+const { latestSourceVersionAtRef } = require("../dist/catalog/sources/history.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
 const { recordSourceInstallation } = require("../dist/catalog/sources/installed.js");
@@ -24,10 +24,11 @@ const { formatDashboardRows } = require("../dist/cli/catalog.js");
 const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel, dashboardStatus } =
   require("../dist/dashboard/helpers.mjs");
 const { renderInstalledResources } = require("../dist/dashboard/terminal.js");
-const {
-  checkInstalledResources, readInstalledSourceSkills, runSourceCommand, main: runCliMain,
-  uninstallSourceResource, updateSourceResources,
-} = require("../dist/cli/main.js");
+const { readInstalledSourceSkills } = require("../dist/catalog/sources/installed.js");
+const { checkInstalledResources } = require("../dist/catalog/lifecycle.js");
+const { runSourceCommand } = require("../dist/cli/source-command.js");
+const { uninstallSourceResource, updateSourceResources } = require("../dist/catalog/sources/resources.js");
+const { main: runCliMain } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 const { executeCommand, runDashboardWorker } = require("../dist/cli/commands.js");
 const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
@@ -1776,6 +1777,11 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       removeCatalog: async () => ({ catalogs: [{ name: "Test", repository }], resources: [] }),
       ...extraActions,
     });
+    let dashboardFinished = false;
+    const dashboardCompletion = done.then(
+      () => { dashboardFinished = true; },
+      () => { dashboardFinished = true; },
+    );
     const waitForOutput = async (pattern) => {
       const deadline = Date.now() + 5_000;
       while (!pattern.test(renderedOutput)) {
@@ -1785,16 +1791,28 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
     };
-    for (const entry of keys) {
-      const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
-      input.write(key);
-      if (expectedOutput) await waitForOutput(expectedOutput);
-      else await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      for (const entry of keys) {
+        const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
+        input.write(key);
+        if (expectedOutput) await waitForOutput(expectedOutput);
+        else await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const result = await done;
+      return { result, renderedOutput };
+    } finally {
+      for (let attempt = 0; attempt < 3 && !dashboardFinished; attempt += 1) {
+        if (!input.destroyed) input.write("\x1b");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (!dashboardFinished && !input.destroyed) input.write("q");
+        await Promise.race([
+          dashboardCompletion,
+          new Promise((resolve) => setTimeout(resolve, 100)),
+        ]);
+      }
+      input.destroy();
+      output.destroy();
     }
-    const result = await done;
-    input.destroy();
-    output.destroy();
-    return { result, renderedOutput };
   };
   const removed = [];
   assert.equal(await drive(
@@ -1976,7 +1994,10 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const submittedDirectoryCatalogs = [];
   const directoryWizard = await driveRefresh([
     "m", "a", "DirectoryCatalog", "\r", repository, "\r", "\x1b[C", "\r", "\r",
-    "custom/skills/", "\r", "\r", "\r", "q",
+    "custom/skills/", "\r",
+    ["\r", /Catalog added: DirectoryCatalog · 2 resources indexed/],
+    "\r",
+    "q",
   ], refresh, {
     addCatalog: async (request) => {
       submittedDirectoryCatalogs.push(request);
@@ -3086,16 +3107,17 @@ test("dashboard toggles catalog management details with D", async () => {
 
 test("inventory columns reserve usable ID space and expose custom Catalog suffixes at 120 columns", async () => {
   const { detailPanelLayout, tableColumns } = await import("../dist/dashboard/helpers.mjs");
-  const listWidth = detailPanelLayout(120).listWidth;
-  const columns = tableColumns(listWidth);
-  const wide = tableColumns(160);
-  const narrower = tableColumns(100);
-  assert.equal(columns.id >= 12, true);
-  assert.equal(columns.catalog >= "MattPucock[productivity]".length, true);
+  const listWidth = detailPanelLayout(120).listWidth - 4;
+  const catalogWidth = "MattPucock[productivity]".length;
+  const columns = tableColumns(listWidth, 21, catalogWidth);
+  const wide = tableColumns(160 - 6, 40, catalogWidth);
+  const narrower = tableColumns(100 - 6, 40, catalogWidth);
+  assert.ok(columns.id >= 20);
+  assert.equal(columns.catalog, catalogWidth);
   assert.equal(wide.id >= 12, true);
   assert.equal(narrower.id >= 12, true);
   assert.equal(wide.catalog > narrower.catalog, true);
-  assert.equal(tableColumns(60).catalog, 0);
+  assert.equal(tableColumns(60 - 6).catalog, 0);
 });
 
 test("dashboard uses a shared list/details split at wide terminal widths", async () => {

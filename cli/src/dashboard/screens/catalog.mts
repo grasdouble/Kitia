@@ -3,6 +3,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
+import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";
 import {
   catalogTableColumns, detailPanelLayout, filterCatalogResources, fitText, inventoryCatalogLabels, tableLine,
@@ -69,7 +70,15 @@ export function CatalogScreen({
   const detailsWidth = detailsSideBySide ? panelLayout.detailsWidth! : columns;
   const contentWidth = Math.max(1, detailsSideBySide ? listWidth - 4 : columns - 6);
   const detailsContentWidth = Math.max(1, detailsSideBySide ? detailsWidth - 4 : columns - 6);
-  const columnsByField = catalogTableColumns(listWidth);
+  const longestSource = visible.reduce((width, resource) =>
+    Math.max(width, candidateLabel(resource).length), "SOURCE".length);
+  const longestId = visible.reduce((width, resource) =>
+    Math.max(width, resource.id.length), "ID".length);
+  const longestKind = visible.reduce((width, resource) =>
+    Math.max(width, resource.kind.length), "KIND".length);
+  const columnsByField = catalogTableColumns(
+    contentWidth, longestSource, longestId, longestKind,
+  );
   const installedScopes = selected
     ? resources.filter((entry) =>
       entry.catalog === selected.catalog && entry.kind === selected.kind && entry.id === selected.id,
@@ -119,7 +128,7 @@ export function CatalogScreen({
   const filterSummary = activeFilters.join(" · ") || "No tag/status/license filters";
   const tableHeader = tableLine([
     ["", columnsByField.marker],
-    ["INSTALLED", columnsByField.installed],
+    [columnsByField.compact ? "INST" : "INSTALLED", columnsByField.installed],
     ["SOURCE", columnsByField.source],
     ["KIND", columnsByField.kind],
     ["ID", columnsByField.id],
@@ -134,6 +143,7 @@ export function CatalogScreen({
         ? "both"
         : scopes[0] || "no";
       const row = tableLine([
+        [selectedRow ? "›" : "", columnsByField.marker],
         [installed, columnsByField.installed],
         [candidateLabel(resource), columnsByField.source],
         [resource.kind, columnsByField.kind],
@@ -141,7 +151,9 @@ export function CatalogScreen({
       ]);
       return h(Text, {
         key: `${resource.catalog}:${resource.kind}:${resource.id}`,
-        color: selectedRow ? "cyan" : resource.license_status === "Proprietary" ? "yellow" : undefined,
+        color: resolveRowColor(
+          resource.kind, selectedRow, resource.license_status === "Proprietary" ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined,
+        ),
         bold: selectedRow,
       }, row);
     })
@@ -153,12 +165,12 @@ export function CatalogScreen({
   const resourcePanel = h(Panel, {
     title: "CATALOG RESOURCES",
     width: detailsSideBySide ? listWidth : undefined,
-    color: tourStep === 1 ? "yellow" : "cyan",
+    color: tourStep === 1 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
     marginTop: 1,
   },
-  h(Text, { color: "gray" },
+  h(Text, { color: DASHBOARD_THEME.semantic.accents.muted },
     fitText(`Filter ${filterMode ? `${query}▏` : query || "(F to filter)"}`, contentWidth)),
-  h(Text, { color: "gray" }, fitText(filterSummary, contentWidth)),
+  h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, fitText(filterSummary, contentWidth)),
   h(Text, { bold: true }, tableHeader),
   ...tableRows);
   const entryPanel = showDetails ? h(DetailsPanel, {

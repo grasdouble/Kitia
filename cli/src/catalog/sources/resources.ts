@@ -3,215 +3,29 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { spawnSync, execFileSync, execFile } = require("node:child_process");
+const { execFileSync } = require("node:child_process");
 const {
-  CatalogError, SOURCE_SKILL_DIRECTORIES, LOCK_PATH, addPlanEntry,
+  CatalogError, LOCK_PATH, addPlanEntry,
 } = require("../resources/index.js");
 const {
   targetPath, readInstallState, installedFingerprint, sameFingerprint, fileFingerprint, writeInstallPlan,
   addInventoryStateToPlan,
 } = require("../inventory/index.js");
-const { loadSourceCatalogsFromDirectory } = require("./loader.js");
-const { loadUserSourceConfiguration, userCatalogIndexDirectory } = require("./config.js");
 const {
   sourceCatalogName, sourceSkillKey, sourceSkillRecords, sourceSkillRecord,
   removeSourceSkillRecord, readInstalledSourceSkills, recordSourceInstallation,
   removeSourceResourceRecord, readInstalledSourceResources,
   recordSourceResourceInstallation,
 } = require("./installed.js");
+const {
+  buildSourceSkillArgs, runGhSkill, formatGhDiagnostics, describeGhFailure,
+} = require("./gh-skill.js");
+import type { GhSkillResult } from "./gh-skill.js";
 import type { CatalogResource } from "../entries.js";
-const { auditTextResources } = require("../audit.js");
 import type { FileFingerprint, InstallPlanEntry } from "../plan.js";
-import type { CliOptions } from "../../cli/arguments.js";
-import type { InstallState, PlanAction } from "../inventory/files.js";
 import type { InstalledSourceResource } from "./installed.js";
+import type { InstallState, PlanAction } from "../inventory/files.js";
 
-const SOURCE_VERSION_PAGE_SIZE = 100;
-const SOURCE_VERSION_MAX = 500;
-function sourceHistoryPath(resource: CatalogResource): string | null {
-  const { source_repository: repository, source_path: sourcePath } = resource;
-  if (typeof repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ||
-      typeof sourcePath !== "string" || !sourcePath || sourcePath.startsWith("/") ||
-      sourcePath.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(sourcePath) ||
-      sourcePath.split("/").some((part) => !part || part === "." || part === "..")) {
-    return null;
-  }
-  if (resource.kind === "skill") return `${sourcePath}/SKILL.md`;
-  if ((resource.kind === "agent" || resource.kind === "instruction") && /\.md$/i.test(sourcePath)) {
-    return sourcePath;
-  }
-  return null;
-}
-function latestSourceVersionAtRef(
-  resource: CatalogResource,
-  ref: string,
-  run = execFileSync,
-): string | null {
-  const historyPath = sourceHistoryPath(resource);
-  if (!historyPath) return null;
-  let response: string;
-  try {
-    response = run("gh", [
-      "api", "-X", "GET", `repos/${resource.source_repository}/commits`,
-      "-f", `path=${historyPath}`,
-      "-f", `sha=${ref}`,
-      "-F", "per_page=1",
-    ], {
-      encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    const detail = String(error.stderr || error.message || "unknown error").trim().slice(0, 500);
-    throw new CatalogError(`Cannot check GitHub source history for ${resource.source_repository}/${historyPath}: ${detail}`);
-  }
-  let commits;
-  try {
-    commits = JSON.parse(response);
-  } catch {
-    throw new CatalogError("GitHub CLI returned invalid JSON while checking source history.");
-  }
-  if (!Array.isArray(commits) || commits.length !== 1 ||
-      !/^[a-f0-9]{40}$/i.test(commits[0]?.sha || "")) {
-    throw new CatalogError("GitHub CLI returned an invalid source-history response.");
-  }
-  return commits[0].sha.toLowerCase();
-}
-function validateSourceVersionResource(resource: CatalogResource): void {
-  if (!resource.source_repository || !sourceHistoryPath(resource)) {
-    throw new CatalogError("Commit history is available only for GitHub source resources with supported file paths.", "INVALID_ARGUMENT");
-  }
-}
-function sourceVersionArguments(resource: CatalogResource, page: number): string[] {
-  const historyPath = sourceHistoryPath(resource);
-  if (!historyPath) throw new CatalogError("Source resource has no supported GitHub history path.");
-  return [
-    "api", "-X", "GET", `repos/${resource.source_repository}/commits`,
-    "-f", `path=${historyPath}`,
-    "-F", `per_page=${SOURCE_VERSION_PAGE_SIZE}`,
-    "-F", `page=${page}`,
-  ];
-}
-function parseSourceVersionPage(response: string) {
-  let commits;
-  try {
-    commits = JSON.parse(response);
-  } catch {
-    throw new CatalogError("GitHub CLI returned invalid JSON while listing source commit history.");
-  }
-  if (!Array.isArray(commits)) {
-    throw new CatalogError("GitHub CLI returned an invalid commit-history response.");
-  }
-  const versions = [];
-  for (const entry of commits) {
-    const sha = entry?.sha;
-    const commit = entry?.commit;
-    const date = commit?.committer?.date;
-    const message = commit?.message;
-    if (!/^[a-f0-9]{40}$/i.test(sha || "") || typeof date !== "string" ||
-        !Number.isFinite(Date.parse(date)) || typeof message !== "string" || !message.trim()) {
-      throw new CatalogError("GitHub CLI returned an invalid commit in source history.");
-    }
-    versions.push({ sha: sha.toLowerCase(), date, subject: message.split(/\r?\n/, 1)[0] });
-  }
-  return { commits, versions };
-}
-function sourceHistoryFailure(resource: CatalogResource, error) {
-  const detail = String(error.stderr || error.message || "unknown error").trim().slice(0, 500);
-  return new CatalogError(
-    `Cannot list GitHub commit history for ${resource.source_repository}/${sourceHistoryPath(resource) || resource.source_path}: ${detail}`,
-  );
-}
-const runExecFile = (program, args, options) => {
-  const { promise, resolve, reject } = (Promise as PromiseConstructor & {
-    withResolvers<T>(): {
-      promise: Promise<T>;
-      resolve(value: T): void;
-      reject(reason?: unknown): void;
-    };
-  }).withResolvers<string>();
-  execFile(program, args, options, (error, stdout, stderr) => {
-    if (error) {
-      error.stderr = stderr;
-      reject(error);
-    } else {
-      resolve(stdout);
-    }
-  });
-  return promise;
-};
-function listSourceVersions(
-  resource: CatalogResource,
-  run = execFileSync,
-): Array<{ sha: string; date: string; subject: string }> {
-  validateSourceVersionResource(resource);
-  const versions = [];
-  for (let page = 1; page <= SOURCE_VERSION_MAX / SOURCE_VERSION_PAGE_SIZE; page += 1) {
-    let response: string;
-    try {
-      response = run("gh", sourceVersionArguments(resource, page), {
-        encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (error) {
-      throw sourceHistoryFailure(resource, error);
-    }
-    const parsed = parseSourceVersionPage(response);
-    versions.push(...parsed.versions);
-    if (parsed.commits.length < SOURCE_VERSION_PAGE_SIZE || versions.length >= SOURCE_VERSION_MAX) break;
-  }
-  return versions;
-}
-async function listSourceVersionsAsync(
-  resource: CatalogResource,
-  run = runExecFile,
-): Promise<Array<{ sha: string; date: string; subject: string }>> {
-  validateSourceVersionResource(resource);
-  const versions = [];
-  for (let page = 1; page <= SOURCE_VERSION_MAX / SOURCE_VERSION_PAGE_SIZE; page += 1) {
-    let response: string;
-    try {
-      response = await run("gh", sourceVersionArguments(resource, page), {
-        encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (error) {
-      throw sourceHistoryFailure(resource, error);
-    }
-    const parsed = parseSourceVersionPage(response);
-    versions.push(...parsed.versions);
-    if (parsed.commits.length < SOURCE_VERSION_PAGE_SIZE || versions.length >= SOURCE_VERSION_MAX) break;
-  }
-  return versions;
-}
-function uniqueSourceVersionPrefixes(versions): string[] {
-  return versions.map(({ sha }) => {
-    let length = 7;
-    while (length < 40 && versions.some((version) =>
-      version.sha !== sha && version.sha.startsWith(sha.slice(0, length)))) {
-      length += 1;
-    }
-    return sha.slice(0, length);
-  });
-}
-function formatSourceVersionTable(versions): string[] {
-  const prefixes = uniqueSourceVersionPrefixes(versions);
-  const shaWidth = Math.max(3, ...prefixes.map((prefix) => prefix.length));
-  const rows = [
-    `${"SHA".padEnd(shaWidth)}  DATE                  SUBJECT`,
-    `${"-".repeat(shaWidth)}  --------------------- -------`,
-  ];
-  for (const [index, version] of versions.entries()) {
-    rows.push(`${prefixes[index].padEnd(shaWidth)}  ${version.date.padEnd(21)} ${version.subject}`);
-  }
-  return rows;
-}
-function resolveSourceVersionPrefix(versions, prefix: string): string {
-  const matches = versions.filter(({ sha }) => sha.startsWith(prefix.toLowerCase()));
-  if (matches.length !== 1) {
-    throw new CatalogError(
-      matches.length ? `Commit prefix '${prefix}' is ambiguous.` : `Commit prefix '${prefix}' was not found in source history.`,
-      matches.length ? "AMBIGUOUS_RESOURCE" : "RESOURCE_NOT_FOUND",
-    );
-  }
-  return matches[0].sha;
-}
 function catalogLabel(resource: CatalogResource): string {
   return `${resource.catalog || "source"} catalog`;
 }
@@ -366,31 +180,11 @@ function assertSourceSkillCanBeInstalled(resource: CatalogResource, target: stri
 }
   }
 
-function buildSourceSkillArgs(
-  action: string,
-  resource: CatalogResource,
-  agent?: string,
-  { force = false, scope = "project", target }: { force?: boolean; scope?: string; target?: string } = {},
-): string[] {
-  if (action === "preview") {
-    return [
-      "skill", "preview", resource.source_repository,
-      `${resource.source_path}@${resource.source_ref}`,
-    ];
-  }
-  if (action === "install" && ["claude-code", "github-copilot"].includes(agent)) {
-    if (scope === "user" && (!target || !path.isAbsolute(target))) {
-      throw new CatalogError("User-scope source installation requires an absolute home directory");
-    }
-    return [
-      "skill", "install", resource.source_repository, resource.source_path,
-      "--agent", agent, "--scope", scope, "--pin", resource.source_ref,
-      ...(scope === "user" ? ["--dir", path.join(target, SOURCE_SKILL_DIRECTORIES[agent])] : []),
-      ...(force ? ["--force"] : []),
-    ];
-  }
-  throw new CatalogError(`Unsupported source skill action: ${action}`);
+function assertSourceResourceCanBeInstalled(resource: CatalogResource, target: string): void {
+  if (resource.kind === "skill") assertSourceSkillCanBeInstalled(resource, target);
+  else assertSourceFileCanBeInstalled(resource, target);
 }
+
 
 function validateSourceUpdates(
   installed: InstalledSourceResource[],
@@ -491,7 +285,6 @@ function updateSourceFileResources(
   return messages;
 }
 
-type GhSkillResult = { status: number; stdout?: string | Buffer | null; stderr?: string | Buffer | null };
 
 function updateSourceResources(
   installed: InstalledSourceResource[],
@@ -515,7 +308,7 @@ function updateSourceResources(
   } = {},
   invokeGhSkill?: (args: string[], cwd: string) => number | GhSkillResult,
 ): string[] {
-  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, {
+  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, undefined, {
     nonInteractive, captureOutput: nonInteractive,
   });
   const targetRoot = fs.realpathSync(target);
@@ -824,239 +617,9 @@ function uninstallSourceResource(
   return messages;
 }
 
-function runGhSkill(
-  args: string[],
-  cwd = process.cwd(),
-  spawn: typeof spawnSync = spawnSync,
-  { nonInteractive = false, captureOutput = false }: { nonInteractive?: boolean; captureOutput?: boolean } = {},
-): number | GhSkillResult {
-  let result;
-  try {
-    result = spawn("gh", args, {
-      cwd,
-      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : nonInteractive ? ["ignore", "inherit", "inherit"] : "inherit",
-      ...(captureOutput ? { encoding: "utf8" } : {}),
-      ...(nonInteractive ? { env: { ...process.env, GH_PROMPT_DISABLED: "1" } } : {}),
-    });
-  } catch (error) {
-    const code = (error as Error & { code?: string }).code || "process launch failed";
-    throw new CatalogError(
-      `Could not start GitHub CLI for source skill update: ${code}. Check that gh is installed and available on PATH.`,
-      "GH_SPAWN_FAILED",
-      {
-        category: "github-cli",
-        userMessage: "Could not start GitHub CLI for the source skill update. Check that gh is installed and available on PATH.",
-      },
-    );
-  }
-  if (result.error) {
-    throw new CatalogError(
-      `Could not start GitHub CLI for source skill update: ${result.error.code || "process launch failed"}. Check that gh is installed and available on PATH.`,
-      "GH_SPAWN_FAILED",
-      {
-        category: "github-cli",
-        userMessage: "Could not start GitHub CLI for the source skill update. Check that gh is installed and available on PATH.",
-      },
-    );
-  }
-  const status = result.status ?? 1;
-  return captureOutput ? { status, stdout: result.stdout, stderr: result.stderr } : status;
-}
-
-function formatGhDiagnostics(result: GhSkillResult): string {
-  const raw = result.stderr || result.stdout;
-  if (raw == null) return "";
-  const text = raw.toString()
-    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g, "")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
-    .replace(/\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}\b/gi, "[REDACTED]")
-    .replace(/\b(Bearer|token)\s+[A-Za-z0-9._~+/-]{12,}={0,2}\b/gi, "$1 [REDACTED]")
-    .replace(/\b(gh[_-]?)?(token|authorization|password)\b["']?\s*[:=]\s*["']?([^\s"',;}&]+)/gi, "$1$2=[REDACTED]")
-    .trim();
-  if (!text) return "";
-  const limit = 400;
-  return text.length > limit ? `${text.slice(0, limit)}… [diagnostic truncated]` : text;
-}
-
-
-function describeGhFailure(diagnostic: string): string {
-  const text = diagnostic.toLowerCase();
-  if (/rate.?limit|api rate limit/.test(text)) return "GitHub reports an API rate limit; wait for the limit to reset, then retry.";
-  if (/not logged in|authentication|bad credentials|unauthorized|http 401|status 401/.test(text)) {
-    return "GitHub CLI authentication failed; run `gh auth login` and verify repository access.";
-  }
-  if (/repository not found|could not read from remote|not found|http 404/.test(text)) {
-    return "The repository or pinned resource was not found; verify the catalog repository, pin, and your access.";
-  }
-  if (/could not resolve host|connection refused|network is unreachable|timed? out|temporary failure|tls handshake|no such host/.test(text)) {
-    return "GitHub could not be reached; check the network connection and retry.";
-  }
-  return "gh did not provide a recognized cause. Check GitHub CLI authentication, repository access, network connectivity, and the pinned resource, then retry.";
-}
-
-function formatSourceResource(resource: CatalogResource): string {
-  return [
-    `id: ${resource.id}`,
-    `description: ${resource.description}`,
-    `catalog: ${sourceCatalogName(resource)}`,
-    `source: ${resource.source_repository}/${resource.source_path}@${resource.source_ref}`,
-    `license: ${resource.license_status}`,
-    `upstream: https://github.com/${resource.source_repository}/tree/${resource.source_ref}/${resource.source_path}`,
-  ].join("\n");
-}
-function auditPinnedResource(
-  resource: CatalogResource,
-  output: { log(message: string): void },
-): {
-  findings: Array<{ code: string; path: string; line: number; message: string }>;
-  coverage: { discovered: number; analyzed: number; skipped: Array<{ path: string; reason: string }>; complete: boolean };
-} {
-  if (!resource.source_repository || !resource.source_ref) {
-    throw new CatalogError("--audit only supports pinned source-catalog resources", "INVALID_ARGUMENT");
-  }
-  if (!resource.source_path) throw new CatalogError("Source resource has no pinned path to audit", "INVALID_ARGUMENT");
-  const filePath = resource.kind === "skill"
-    ? `${resource.source_path.replace(/\/$/, "")}/SKILL.md`
-    : resource.source_path;
-  const files = [{
-    path: filePath,
-    kind: resource.kind,
-    content: readPinnedSourceFile({ ...resource, source_path: filePath }),
-  }];
-  const result = auditTextResources(files);
-  output.log(`Audit coverage: ${result.coverage.analyzed}/${result.coverage.discovered} files analyzed; ` +
-    (result.coverage.complete ? "no files skipped." : "coverage incomplete."));
-  for (const skipped of result.coverage.skipped) output.log(`  Skipped ${skipped.path}: ${skipped.reason}.`);
-  for (const finding of result.findings) {
-    output.log(`  ${finding.severity.toUpperCase()} ${finding.path}:${finding.line} [${finding.code}] ${finding.message}`);
-  }
-  if (!result.findings.length) output.log("  No configured audit rules matched. This is not a safety guarantee.");
-  return result;
-}
-
-
-function runSourceCommand(
-  options: CliOptions,
-  invokeGhSkill?: (args: string[], cwd: string) => number | GhSkillResult,
-): number {
-  invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, spawnSync, {
-    nonInteractive: options.nonInteractive,
-    captureOutput: options.captureOutput,
-  });
-  const output = options.output || console;
-  const catalog = options.catalog || "source";
-  let sourceResources: CatalogResource[] = options.sourceResources || [];
-  if (!options.resource && !sourceResources.length) {
-    const sources = loadUserSourceConfiguration();
-    sourceResources = sources.length
-      ? loadSourceCatalogsFromDirectory(userCatalogIndexDirectory(), sources)
-      : [];
-  }
-  const resource = options.resource
-    ? { ...options.resource, catalog: options.resource.catalog || catalog }
-    : sourceResources.find((entry) => entry.catalog === catalog && entry.id === options.id &&
-      (!options.kind || entry.kind === options.kind));
-  if (!resource) {
-    throw new CatalogError(`${catalog} resource not found: ${options.id}`);
-  }
-
-  options.onResource?.({ catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id, status: "planned", source: true });
-
-  let target = process.cwd();
-  if (options.action === "install") {
-    if (!fs.existsSync(options.target) || !fs.statSync(options.target).isDirectory()) {
-      throw new CatalogError(`Target must be an existing directory: ${options.target}`);
-    }
-    target = fs.realpathSync(options.target);
-    if (resource.kind === "skill") assertSourceSkillCanBeInstalled(resource, target);
-    else assertSourceFileCanBeInstalled(resource, target);
-  }
-  if (options.action === "install") {
-    if (resource.license_status.toLocaleLowerCase() === "proprietary") {
-      output.error(`Warning: ${resource.id} is marked Proprietary; confirm you are authorized before installing.`);
-    } else if (resource.license_status === "not-declared") {
-      output.error(`Warning: ${resource.id} has no declared license; verify usage rights before installing.`);
-    }
-  }
-  if (options.audit) {
-    const audit = auditPinnedResource(resource, output);
-    if (options.action === "install" && (!audit.coverage.complete || audit.findings.length)) {
-      throw new CatalogError(
-        audit.findings.length
-          ? `Audit found ${audit.findings.length} finding(s); installation blocked. Inspect the reported files and lines before installing.`
-          : "Audit coverage is incomplete; installation blocked because not all resource text was analyzed.",
-        "AUDIT_BLOCKED",
-      );
-    }
-  }
-  if (resource.kind !== "skill") {
-    if (options.action === "preview") {
-      const content = readPinnedSourceFile(resource);
-      let markdown;
-      try {
-        markdown = new TextDecoder("utf-8", { fatal: true }).decode(content);
-      } catch {
-        throw new CatalogError(`Source ${resource.kind} is not valid UTF-8: ${resource.source_path}`);
-      }
-      output.log(`${formatSourceResource(resource)}\n\n${markdown}`);
-      return 0;
-    }
-    if (options.action !== "install") throw new CatalogError(`Unsupported source resource action: ${options.action}`);
-    const paths = installSourceFileResource(resource, target, options.tool || "claude", {
-      scope: options.scope || "project",
-      force: Boolean(options.force),
-      dryRun: Boolean(options.dryRun),
-      onAction: options.onAction,
-    });
-    output.log(`${options.dryRun ? "Would install" : "Installed"} ${catalogLabel(resource)} ${resource.kind}: ${resource.id}${options.dryRun ? ` at ${resource.source_ref}` : ""} (${paths.join(", ")})`);
-    return 0;
-  }
-  const agents = options.tool === "both"
-    ? ["github-copilot", "claude-code"]
-    : [options.tool === "claude" ? "claude-code" : "github-copilot"];
-  if (options.action === "install" && options.scope === "user") {
-    for (const agent of agents) targetPath(target, `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`);
-  }
-
-  if (options.json && options.dryRun) {
-    for (const agent of agents) {
-      options.onAction?.({
-        action: "delegate_install", path: `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`,
-        resource: { catalog: sourceCatalogName(resource), kind: "skill", id: resource.id },
-        command: { program: "gh", args: buildSourceSkillArgs("install", resource, agent, options) },
-      });
-    }
-    output.error("Source skill installation is delegated to gh; auxiliary files and conflicts are resolved by gh at execution time.");
-    return 0;
-  }
-  if (options.action === "preview" || options.dryRun) {
-    if (options.dryRun) output.error(`Dry run: previewing the ${catalogLabel(resource)} skill; no files will be installed.`);
-    const result = invokeGhSkill(buildSourceSkillArgs("preview", resource), target);
-    if (typeof result !== "number" && options.captureOutput) {
-      if (result.stdout) output.log(String(result.stdout));
-      if (result.stderr) output.error(String(result.stderr));
-    }
-    return typeof result === "number" ? result : result.status;
-  }
-
-  const completed = [];
-  for (const agent of agents) {
-    const result = invokeGhSkill(buildSourceSkillArgs("install", resource, agent, options), target);
-    const status = typeof result === "number" ? result : result.status;
-    if (status !== 0) {
-      if (completed.length) output.error(`The skill was already installed for ${completed.join(", ")}, but installation for ${agent} failed.`);
-      return status;
-    }
-    recordSourceInstallation(resource, target, agent);
-    completed.push(agent);
-  }
-  return 0;
-}
 
 module.exports = {
-  buildSourceSkillArgs, listSourceVersions, listSourceVersionsAsync, latestSourceVersionAtRef,
-  uniqueSourceVersionPrefixes, formatSourceVersionTable, resolveSourceVersionPrefix,
-  readInstalledSourceSkills, readInstalledSourceResources,
+  assertSourceResourceCanBeInstalled, readPinnedSourceFile, catalogLabel,
   installSourceFileResource, validateSourceUpdates, updateSourceResources,
-  uninstallSourceResource, runGhSkill, formatSourceResource, runSourceCommand,
+  uninstallSourceResource,
 };

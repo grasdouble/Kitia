@@ -3,6 +3,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
+import { DASHBOARD_THEME } from "../colors.js";
 import { fitColumn, fitText, wrapText } from "../helpers.mjs";
 import { DASHBOARD_HEADER_ROWS, DashboardHeader, Panel, ShortcutsPanel, wrappedShortcutLines } from "./shared.mjs";
 
@@ -165,8 +166,8 @@ export function InspectionScreen({
         key: `inspection-metadata-${index}`,
         wrap: "truncate-end",
       },
-      h(Text, { color: "white", bold: true }, `${label}  `),
-      h(Text, { color: "gray" }, fitText(value, valueWidth))))),
+      h(Text, { color: DASHBOARD_THEME.semantic.accents.label, bold: true }, `${label}  `),
+      h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, fitText(value, valueWidth))))),
     h(Panel, {
       title: fitText(`PAGE ${currentPage + 1}/${pages.length} · ${pages[currentPage].title}`, contentWidth),
       marginTop: 1,

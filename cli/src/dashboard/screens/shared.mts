@@ -2,6 +2,7 @@
 
 import React, { type ReactNode, useEffect, useState } from "react";
 import { Box, Text } from "ink";
+import { DASHBOARD_THEME } from "../colors.js";
 import { fitColumn, fitText, wrapText } from "../helpers.mjs";
 
 const h = React.createElement;
@@ -14,7 +15,7 @@ const kitiaWordmark = [
   "▀   ▀  ▀▀▀    ▀    ▀▀▀  ▀   ▀",
 ];
 
-const titleColorStops = [[34, 211, 238], [167, 139, 250], [244, 114, 182]];
+const titleColorStops = DASHBOARD_THEME.titleGradientStops;
 const titleColors = Array.from({ length: 96 }, (_, index) => {
   const segment = Math.floor(index / 32);
   const start = titleColorStops[segment];
@@ -39,8 +40,8 @@ function AnimatedTitle({ width, versionLabel, screenName, metadata, phase }: {
           key: column,
           color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
         }, character))))
-      : [h(Text, { key: "compact", color: "cyan", bold: true }, fitText(`KITIA  ${versionLabel}`, width))]),
-    h(Text, { color: "cyan", bold: pixelTitle }, fitText(
+      : [h(Text, { key: "compact", color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText(`KITIA  ${versionLabel}`, width))]),
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: pixelTitle }, fitText(
       pixelTitle ? `${versionLabel} · ${screenName}` : screenName, width,
     )),
     h(Text, { dimColor: true }, fitText(metadata, width)),
@@ -78,14 +79,14 @@ function shortcutHint(value: string, width: number) {
   const parts = visible.split(/(Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])/g);
   return h(Text, { dimColor: true }, ...parts.map((part, index) =>
     shortcutKey.test(part)
-      ? h(Text, { key: `shortcut-${index}`, bold: true, color: "cyan" }, part)
+      ? h(Text, { key: `shortcut-${index}`, bold: true, color: DASHBOARD_THEME.semantic.accents.primary }, part)
       : part));
 }
 
 export function Panel({
   title,
   children,
-  color = "cyan",
+  color = DASHBOARD_THEME.semantic.accents.primary,
   width,
   marginTop = 0,
   marginLeft = 0,
@@ -132,7 +133,7 @@ export function DetailsPanel({
   flexShrink?: number;
 }) {
   return h(Panel, {
-    title, children, color: "blue", width, marginTop, marginLeft, flexGrow, flexShrink,
+    title, children, color: DASHBOARD_THEME.semantic.accents.detailPanel, width, marginTop, marginLeft, flexGrow, flexShrink,
   });
 
 }
@@ -164,7 +165,13 @@ export function ShortcutsPanel({ lines, width, marginTop = 0 }: {
     ...wrappedShortcutLines(lines, width).map((line) => shortcutHint(line, Math.max(1, (width || 80) - 4))));
 }
 
-export function detailValue(key: string, value: unknown, width: number, maxLines = 1, color = "gray") {
+export function detailValue(
+  key: string,
+  value: unknown,
+  width: number,
+  maxLines = 1,
+  color: string = DASHBOARD_THEME.semantic.accents.muted,
+ ) {
   return wrapText(value, width, maxLines).map((line, index) =>
     h(Text, { key: `${key}-value-${index}`, color }, fitText(line, width)));
 }
@@ -174,7 +181,7 @@ export function detailLocations(key: string, locations: { text: string; href?: s
   for (const [locationIndex, location] of locations.entries()) {
     if (location.href) {
       for (const [lineIndex, line] of wrapText(location.text, width).entries()) {
-        lines.push(h(Text, { key: `${key}-${locationIndex}-${lineIndex}`, color: "gray" },
+        lines.push(h(Text, { key: `${key}-${locationIndex}-${lineIndex}`, color: DASHBOARD_THEME.semantic.accents.muted },
           `${OSC8_OPEN}${location.href}\u001b\\${line}${OSC8_CLOSE}`));
       }
     } else {
@@ -190,10 +197,10 @@ export function detailField(
   value: unknown,
   width: number,
   maxLines = 1,
-  color = "gray",
-) {
+  color: string = DASHBOARD_THEME.semantic.accents.muted,
+ ) {
   return [
-    h(Text, { key: `${key}-label`, color: "white", bold: true }, fitText(label, width)),
+    h(Text, { key: `${key}-label`, color: DASHBOARD_THEME.semantic.accents.label, bold: true }, fitText(label, width)),
     ...detailValue(key, value, width, maxLines, color),
   ];
 }

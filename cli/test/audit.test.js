@@ -65,7 +65,7 @@ test("audit does not label unflagged text safe", () => {
   assert.deepEqual(result.coverage, { discovered: 1, analyzed: 1, skipped: [], complete: true });
 });
 test("audit rejects resources without pinned source metadata instead of claiming to audit them", () => {
-  const { runSourceCommand } = require("../dist/catalog/sources/skills.js");
+  const { runSourceCommand } = require("../dist/cli/source-command.js");
   assert.throws(() => runSourceCommand({
     action: "preview",
     audit: true,
@@ -79,7 +79,7 @@ test("audited source install blocks a matching pinned skill before writing files
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
-  const { runSourceCommand } = require("../dist/catalog/sources/skills.js");
+  const { runSourceCommand } = require("../dist/cli/source-command.js");
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-audit-install-"));
   const fixture = path.join(temporary, "repository");
   const target = path.join(temporary, "target");

@@ -112,6 +112,20 @@ continue during the work.
 Preview and audit use dedicated screens below the dashboard header. Resource
 metadata appears above a content panel that fills the remaining terminal space;
 terminal-sized pages navigate with Left/Right or PageUp/PageDown.
+Inventory, catalog browser, and catalog management distribute available list
+width across their columns. Catalog tables limit padding for short status and
+count fields, leaving more room for source names, IDs, and repository URLs.
+The dashboard colors each inventory and catalog row by resource kind: yellow for
+skills, cyan for agents, and green for instructions. Statuses remain labeled in
+text. Selecting a row overrides its kind color with blue highlighting and
+marks it with `›` in the fixed-width leading marker column on inventory, catalog
+browser, and catalog management screens. Unknown kinds retain the
+existing status-based inventory color or proprietary-license catalog
+highlighting, when applicable. CLI tables retain their existing presentation.
+On wide terminals, an open details panel shares the viewport; hiding it lets
+the table expand. This presentation applies to skills, agents, and instructions
+alike. Human-readable CLI tables also adapt to terminal width; piped output
+retains complete values.
 The dashboard is the interactive resource-management interface. CLI-only
 `validate` and `doctor` provide strict catalog validation and environment/
 installation diagnostics for terminal automation; `--json` provides stable

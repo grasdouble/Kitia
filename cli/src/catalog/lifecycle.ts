@@ -1,7 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
-const { latestSourceVersionAtRef } = require("./sources/skills.js");
+const { latestSourceVersionAtRef } = require("./sources/history.js");
 const { CatalogError } = require("./resources/index.js");
 const { readInstallState, trackedPaths, findUnmanagedArtifacts } = require("./inventory/index.js");
 const { readInstalledSourceSkills, readInstalledSourceResources } = require("./sources/installed.js");

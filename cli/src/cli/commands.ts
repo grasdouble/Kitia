@@ -8,7 +8,9 @@ const os = require("node:os");
 const { CatalogError, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
 const inventoryApi = require("../catalog/inventory/index.js");
 const terminalApi = require("../dashboard/terminal.js");
-const sourceSkillsApi = require("../catalog/sources/skills.js");
+const sourceResourcesApi = require("../catalog/sources/resources.js");
+const sourceCommandApi = require("./source-command.js");
+const sourceHistoryApi = require("../catalog/sources/history.js");
 const sourceInventoryApi = require("../catalog/sources/installed.js");
 const lifecycleApi = require("../catalog/lifecycle.js");
 const { acquireOperationLock } = require("../catalog/operation.js");
@@ -23,12 +25,11 @@ const { collectionData, importCollectionText, signCollectionManifest } = require
 const { catalogEntries, listCatalogResources, formatDashboardRows } = require("./catalog.js");
 const { parseArguments, printHelp } = require("./arguments.js");
 const { readInstalledSourceSkills, readInstalledSourceResources } = sourceInventoryApi;
-const {
-  runSourceCommand, formatSourceResource, validateSourceUpdates, updateSourceResources, uninstallSourceResource,
-} = sourceSkillsApi;
+const { runSourceCommand, formatSourceResource } = sourceCommandApi;
+const { validateSourceUpdates, updateSourceResources, uninstallSourceResource } = sourceResourcesApi;
 const { checkInstalledResources, collectInstalledScopes } = lifecycleApi;
 const {
-  formatCatalogHeader, formatCatalogRow, resolveCatalogResource, selectCatalogResource,
+  formatCatalogTable, resolveCatalogResource, selectCatalogResource,
   renderInstalledResources, browseInstalledResources, colorize,
 } = terminalApi;
 
@@ -87,8 +88,8 @@ function resolveListedSourceRef(resource, ref) {
   }
   if (ref.length === 40) return ref;
   try {
-    return sourceSkillsApi.resolveSourceVersionPrefix(
-      sourceSkillsApi.listSourceVersions(resource),
+    return sourceHistoryApi.resolveSourceVersionPrefix(
+      sourceHistoryApi.listSourceVersions(resource),
       ref,
     );
   } catch (error) {
@@ -182,9 +183,11 @@ async function executeCommand(options, report) {
       );
     }
     const [resource] = candidates;
-    const versions = sourceSkillsApi.listSourceVersions(resource);
+    const versions = sourceHistoryApi.listSourceVersions(resource);
     output.log(`Commit history for ${resource.catalog}:${resource.kind}:${resource.id} (up to 500 newest commits; date is commit committer date):`);
-    for (const row of sourceSkillsApi.formatSourceVersionTable(versions)) output.log(row);
+    for (const row of sourceHistoryApi.formatSourceVersionTable(
+      versions, process.stdout.isTTY ? process.stdout.columns : undefined,
+    )) output.log(row);
     if (!versions.length) output.log("No commits found for this resource path.");
     return 0;
   }
@@ -217,8 +220,7 @@ async function executeCommand(options, report) {
     if (options.json) {
       console.log(JSON.stringify(matches.map(({ source, applyTo, ...entry }) => entry), null, 2));
     } else {
-      console.log(formatCatalogHeader());
-      for (const resource of matches) console.log(formatCatalogRow(resource));
+      console.log(formatCatalogTable(matches, process.stdout));
       if (!matches.length) console.log("No matching resources.");
     }
     return unavailable.length ? 1 : 0;
@@ -271,8 +273,8 @@ async function executeCommand(options, report) {
           installOptions,
         }),
         listSourceVersions: async (resource) => {
-          const versions = await sourceSkillsApi.listSourceVersionsAsync(resource);
-          const prefixes = sourceSkillsApi.uniqueSourceVersionPrefixes(versions);
+          const versions = await sourceHistoryApi.listSourceVersionsAsync(resource);
+          const prefixes = sourceHistoryApi.uniqueSourceVersionPrefixes(versions);
           return versions.map((version, index) => ({ ...version, prefix: prefixes[index] }));
         },
       });
@@ -368,8 +370,6 @@ async function executeCommand(options, report) {
 module.exports = {
   ...inventoryApi,
   ...terminalApi,
-  ...sourceSkillsApi,
-  ...sourceInventoryApi,
   ...lifecycleApi,
   parseArguments,
   printHelp,

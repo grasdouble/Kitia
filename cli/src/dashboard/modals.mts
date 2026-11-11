@@ -4,7 +4,9 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
+import { adaptiveColumnWidths } from "../table-layout.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
+import { DASHBOARD_THEME } from "./colors.js";
 
 export interface PendingDashboardAction {
   action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview" | "audit";
@@ -22,9 +24,10 @@ export interface PendingDashboardAction {
 export type SourceVersionOption = { sha: string; prefix: string; date: string; subject: string };
 
 const h = React.createElement;
-const MODAL_BACKGROUND = "#111827";
-const MODAL_FOREGROUND = "#f9fafb";
+const MODAL_BACKGROUND = DASHBOARD_THEME.semantic.modal.background;
+const MODAL_FOREGROUND = DASHBOARD_THEME.semantic.modal.foreground;
 
+const { semantic } = DASHBOARD_THEME;
 function choiceLabel(choice, selected) {
   return selected ? `‹ ${choice.toUpperCase()} ›` : `[ ${choice.toUpperCase()} ]`;
 }
@@ -138,9 +141,9 @@ export function optionsModal({
     ...wrapText(resource.description || "No description available.", contentWidth, 3),
     { text: `License: ${resource.license_status || "not declared"}`, dimColor: true },
     ...(scopeError
-      ? [{ text: `${scope.toUpperCase()} unavailable: ${scopeError.code}`, color: "redBright" }]
+      ? [{ text: `${scope.toUpperCase()} unavailable: ${scopeError.code}`, color: semantic.accents.error }]
       : alreadyInstalled
-        ? [{ text: `Already installed in ${scope} scope.`, color: "yellow" }]
+        ? [{ text: `Already installed in ${scope} scope.`, color: semantic.inventoryStatus.attention }]
         : []),
     ...(resource.kind === "instruction"
       ? [{ text: "Instructions are project-scoped.", dimColor: true }]
@@ -149,12 +152,12 @@ export function optionsModal({
     { text: "DESTINATION", bold: true },
     choiceGroup("SCOPE", scopeChoices, scopeChoices.indexOf(scope), focus === 0),
     choiceGroup("CLIENT", toolChoices, toolChoices.indexOf(tool), focus === 1),
-    ...(ref ? [{ text: `Selected commit: ${ref}. The catalog pin remains unchanged.`, color: "cyan" }] : []),
-    { text: "Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.", color: "yellow" },
+    ...(ref ? [{ text: `Selected commit: ${ref}. The catalog pin remains unchanged.`, color: semantic.selected }] : []),
+    { text: "Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.", color: semantic.accents.warning },
     scopeError || alreadyInstalled
       ? "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ESC BACK"
       : "↑↓ FIELD · ←→ CHOOSE · ENTER REVIEW · ESC BACK",
-  ], columns, "cyan");
+  ], columns, semantic.selected);
 }
 
 export function confirmationModal({
@@ -249,12 +252,12 @@ export function confirmationModal({
       "",
       choiceGroup("", [
         { label: confirmation.forceRetry ? "NO / CANCEL" : "CANCEL" },
-        { label: confirmation.forceRetry ? "YES, RETRY WITH --FORCE" : actionLabel, color: confirmation.action !== "install" ? "redBright" : "cyan" },
+        { label: confirmation.forceRetry ? "YES, RETRY WITH --FORCE" : actionLabel, color: confirmation.action !== "install" ? semantic.accents.danger : semantic.selected },
       ], selectedButton),
       "←/→ CHOOSE · ENTER CONFIRM · Y/N SHORTCUTS",
     ],
     columns,
-    "yellow",
+    semantic.accents.warning,
   );
 }
 export function actionFailureModal({
@@ -270,12 +273,12 @@ export function actionFailureModal({
   return modalFrame(
     `${action.toUpperCase()} FAILED`,
     [
-      { text: "Kitia could not complete this action.", color: "redBright", bold: true },
+      { text: "Kitia could not complete this action.", color: semantic.accents.error, bold: true },
       ...(outputLines.length ? outputLines : ["No error details were provided."]),
       "ENTER / ESC CLOSE",
     ],
     columns,
-    "redBright",
+    semantic.accents.error,
     88,
   );
 }
@@ -285,10 +288,10 @@ export function loadingModal({ message, frame, columns }: {
   columns: number;
 }) {
   return modalFrame("LOADING", [
-    { text: `${frame} ${message}`, color: "cyan", bold: true },
+    { text: `${frame} ${message}`, color: semantic.selected, bold: true },
     "",
     "Please wait while Kitia completes this operation.",
-  ], columns, "cyan", 72);
+  ], columns, semantic.selected, 72);
 }
 export function sourceVersionsModal({
   resource,
@@ -306,22 +309,30 @@ export function sourceVersionsModal({
   const count = Math.min(14, versions.length);
   const first = Math.max(0, Math.min(selectedIndex - Math.floor(count / 2), versions.length - count));
   const visible = versions.slice(first, first + count);
-  const lineWidth = Math.max(1, Math.min(84, columns - 12));
+  const lineWidth = Math.max(1, columns - 8);
+  const prefixContentWidth = Math.max(9, ...visible.map(({ prefix }) => prefix.length + 2));
+  const subjectContentWidth = Math.max(8, ...visible.map(({ subject }) => subject.length));
+  const [prefixWidth, dateWidth, subjectWidth] = adaptiveColumnWidths(lineWidth, [
+    { contentWidth: prefixContentWidth, minWidth: 9, maxWidth: prefixContentWidth + 6, growWeight: 1 },
+    { contentWidth: 10, minWidth: 8, maxWidth: 10, shrinkWeight: 1 },
+    { contentWidth: subjectContentWidth, minWidth: 8, growWeight: 2, shrinkWeight: 3 },
+  ], 2);
   return modalFrame("RESOURCE REVISIONS", [
     `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`,
     `Select a commit to ${action}; the catalog pin remains unchanged.`,
     "",
     ...visible.map((version, offset) => ({
-      text: fitText(
-        `${first + offset === selectedIndex ? "›" : " "} ${version.prefix}  ${version.date.slice(0, 10)}  ${version.subject}`,
-        lineWidth,
-      ),
-      color: first + offset === selectedIndex ? "cyan" : undefined,
+      text: [
+        fitColumn(`${first + offset === selectedIndex ? "›" : " "} ${version.prefix}`, prefixWidth),
+        fitColumn(version.date.slice(0, 10), dateWidth),
+        fitText(version.subject, subjectWidth),
+      ].join("  "),
+      color: first + offset === selectedIndex ? semantic.selected : undefined,
       bold: first + offset === selectedIndex,
     })),
     versions.length > count ? `Showing ${first + 1}-${first + count} of ${versions.length} commits.` : "",
     `↑↓ SELECT · ENTER ${action.toUpperCase()} · ESC BACK`,
-  ], columns, "cyan", Math.min(96, lineWidth + 8));
+  ], columns, semantic.selected, columns - 4);
 }
 
 
@@ -334,25 +345,25 @@ export function inventoryMigrationModal({ scopes, columns }: { scopes: string[];
     ? "project and user inventories"
     : `${affectedScopes[0]} inventory`;
   return modalFrame("INVENTORY MIGRATION REQUIRED", [
-    { text: `Migration is required for the ${scopeLabel}.`, color: "yellow", bold: true },
+    { text: `Migration is required for the ${scopeLabel}.`, color: semantic.accents.warning, bold: true },
     ...affectedScopes.map((scope) => ({
       text: `${scope.toUpperCase()} inventory needs migration.`,
-      color: scope === "user" ? "cyan" : MODAL_FOREGROUND,
+      color: scope === "user" ? semantic.selected : MODAL_FOREGROUND,
       bold: true,
     })),
     "",
     "Run this from the current project directory:",
     {
       text: "npx --yes @grasdouble/kitia migrate --apply",
-      color: "cyan",
+      color: semantic.selected,
       bold: true,
     },
     "It checks project and home inventories, skipping ones already current.",
     "Restart the dashboard after migration.",
     "",
-    { text: "[ EXIT DASHBOARD ]", color: "cyan", bold: true },
+    { text: "[ EXIT DASHBOARD ]", color: semantic.selected, bold: true },
     "ENTER / ESC TO EXIT",
-  ], columns, "yellow", 96);
+  ], columns, semantic.accents.warning, 96);
 }
 export function addCatalogModal({
   step,
@@ -381,13 +392,13 @@ export function addCatalogModal({
 }) {
   const field = (label: string, value: string) => ({
     text: `${label}: ${value || "…"}▏`,
-    color: "cyan",
+    color: semantic.selected,
     bold: true,
   });
   const content = step === "name"
-    ? [field("Catalog name", name), ...(message ? [{ text: message, color: "yellow" }] : []), "", "ENTER CONTINUES · ESC CANCEL"]
+    ? [field("Catalog name", name), ...(message ? [{ text: message, color: semantic.accents.warning }] : []), "", "ENTER CONTINUES · ESC CANCEL"]
     : step === "repository"
-      ? [field("HTTPS GitHub URL", repository), ...(message ? [{ text: message, color: "yellow" }] : []), "", "ENTER CONTINUES · ESC CANCEL"]
+      ? [field("HTTPS GitHub URL", repository), ...(message ? [{ text: message, color: semantic.accents.warning }] : []), "", "ENTER CONTINUES · ESC CANCEL"]
       : step === "mode"
         ? [
           choiceGroup("Choose catalog setup:", ["BASIC", "CUSTOM"], mode === "basic" ? 0 : 1),
@@ -407,7 +418,7 @@ export function addCatalogModal({
             kind === "skill"
               ? "Enter a skill folder with SKILL.md or a parent folder containing multiple skills."
               : "Enter a Markdown file or a folder containing multiple artifacts of this kind.",
-            ...(message ? [{ text: message, color: "yellow" }] : []),
+            ...(message ? [{ text: message, color: semantic.accents.warning }] : []),
             "ENTER ADDS ENTRY · ESC CANCEL",
           ]
               : step === "entries"
@@ -415,7 +426,7 @@ export function addCatalogModal({
                   `Entries configured: ${entries.length}`,
                   ...entries.map((entry, index) =>
                     selectableOption(`${entry.kind} ← ${entry.path}`, index === entryIndex)),
-                  ...(message ? [{ text: message, color: "yellow" }] : []),
+                  ...(message ? [{ text: message, color: semantic.accents.warning }] : []),
                   "", "[ A ] ADD ENTRY · [ DELETE ] REMOVE SELECTED · [ ENTER ] SAVE · [ ESC ] CANCEL",
                 ]
                 : [
@@ -428,7 +439,7 @@ export function addCatalogModal({
       : `${intent === "edit" ? "EDIT" : "ADD"} CATALOG`,
     content,
     columns,
-    step === "result" && /Catalog (?:added|updated):/.test(message) ? "green" : "cyan",
+    step === "result" && /Catalog (?:added|updated):/.test(message) ? semantic.accents.success : semantic.selected,
     80,
   );
 }
@@ -468,7 +479,7 @@ export function removeCatalogModal({
     state.step === "confirm" ? "CONFIRM CATALOG REMOVAL" : "REMOVE CATALOG",
     content,
     columns,
-    state.failed ? "redBright" : state.step === "result" ? "green" : "yellow",
+    state.failed ? semantic.accents.error : state.step === "result" ? semantic.accents.success : semantic.accents.warning,
     80,
   );
 }
@@ -515,7 +526,7 @@ export function refreshCatalogModal({
       : state.step === "errors" ? "CATALOG REFRESH ERRORS" : "REFRESH CATALOG",
     content,
     columns,
-    state.failed ? "redBright" : state.step === "result" ? "green" : "yellow",
+    state.failed ? semantic.accents.error : state.step === "result" ? semantic.accents.success : semantic.accents.warning,
     80,
   );
 }
@@ -565,14 +576,14 @@ export function catalogTransferModal({ action, step, content, message, summary, 
       ];
   return modalFrame(action === "import" ? "IMPORT CATALOGS" : "EXPORT CATALOGS", [
     ...(action === "import" ? importLines : ["Copy the current catalog configuration to the clipboard?"]),
-    ...(message ? [{ text: message, color: "yellow" }] : []),
+    ...(message ? [{ text: message, color: semantic.accents.warning }] : []),
     "",
     working ? "PLEASE WAIT"
       : action === "import" && step === "paste" ? "CTRL+S REVIEW · ENTER NEW LINE · ESC CANCEL"
         : action === "import" && step === "select" ? "SPACE/ENTER TOGGLE · CTRL+S IMPORT · ESC BACK"
           : action === "import" ? "ENTER CLOSE · ESC CLOSE"
             : "ENTER COPY TO CLIPBOARD · ESC CANCEL",
-  ], columns, "cyan", 80);
+  ], columns, semantic.selected, 80);
 }
 export function catalogPresetModal({ presets, index, columns }: {
   presets: readonly { name: string; repository: string }[];
@@ -585,7 +596,7 @@ export function catalogPresetModal({ presets, index, columns }: {
       selectableOption(`${name} · ${repository}`, presetIndex === index)),
     "",
     "↑↓ SELECT · ENTER ADD · ESC CANCEL",
-  ], columns, "cyan", 88);
+  ], columns, semantic.selected, 88);
 }
 
 export function onboardingModal(step: number) {
@@ -612,7 +623,7 @@ export function onboardingModal(step: number) {
     tour.shortcut,
     "",
     step < 2 ? "ENTER / SPACE / → NEXT · ← BACK · ESC FINISH" : "ENTER / SPACE / ← BACK · ESC FINISH",
-  ], 76, "yellow", 76);
+  ], 76, semantic.accents.warning, 76);
 }
 
 export function versionAvailableModal(
@@ -631,7 +642,7 @@ export function versionAvailableModal(
     changelogUrl,
     "",
     "ENTER / ESC CLOSE",
-  ], columns, "green", 76);
+  ], columns, semantic.accents.success, 76);
 }
 
 function fixedModalText(text, props) {
@@ -648,7 +659,7 @@ function ChoiceGroup({ line }) {
       {
         backgroundColor: MODAL_BACKGROUND,
         color: index === line.selectedIndex
-          ? option.color || line.color || "cyan"
+          ? option.color || line.color || semantic.selected
           : MODAL_FOREGROUND,
         bold: index === line.selectedIndex || line.focused,
         dimColor: index !== line.selectedIndex && !line.focused,
@@ -666,12 +677,12 @@ function SelectableOption({ line }) {
     fixedModalText("│ ", { backgroundColor: MODAL_BACKGROUND }),
     fixedModalText(line.selected ? "› " : "  ", {
       backgroundColor: MODAL_BACKGROUND,
-      color: line.selected ? "cyan" : MODAL_FOREGROUND,
+      color: line.selected ? semantic.selected : MODAL_FOREGROUND,
       bold: line.selected,
     }),
     fixedModalText(fitColumn(line.label, line.bodyText.length - 2), {
       backgroundColor: MODAL_BACKGROUND,
-      color: line.selected ? "cyan" : MODAL_FOREGROUND,
+      color: line.selected ? semantic.selected : MODAL_FOREGROUND,
       bold: line.selected,
     }),
     fixedModalText(

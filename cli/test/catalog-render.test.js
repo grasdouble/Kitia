@@ -22,7 +22,13 @@ function visibleInkText(node, output = []) {
   return output;
 }
 
-async function captureDashboardFrame(resources, actions = {}, keys = [], dimensions = { columns: 120, rows: 56 }) {
+async function captureDashboardFrame(
+  resources,
+  actions = {},
+  keys = [],
+  dimensions = { columns: 120, rows: 56 },
+  cleanupKeys = [],
+) {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const input = new PassThrough();
@@ -37,22 +43,41 @@ async function captureDashboardFrame(resources, actions = {}, keys = [], dimensi
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output, [], actions);
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  for (const key of keys) {
-    input.write(key);
+  let completed = false;
+  try {
     await new Promise((resolve) => setTimeout(resolve, 120));
+    for (const key of keys) {
+      input.write(key);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    const start = rendered.lastIndexOf("\u001b[?2026h");
+    const end = rendered.indexOf("\u001b[?2026l", start);
+    assert.ok(start >= 0 && end > start, "runDashboard should emit a synchronized frame");
+    const frame = rendered.slice(start, end)
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+      .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "");
+    for (const key of cleanupKeys) {
+      input.write(key);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    input.write("q");
+    assert.equal(await done, true);
+    completed = true;
+    return frame;
+  } finally {
+    if (!completed) {
+      input.write("\u001b");
+      input.write("q");
+      let timeout;
+      await Promise.race([
+        done.catch(() => false),
+        new Promise((resolve) => { timeout = setTimeout(resolve, 250); }),
+      ]);
+      clearTimeout(timeout);
+    }
+    input.destroy();
+    output.destroy();
   }
-  const start = rendered.lastIndexOf("\u001b[?2026h");
-  const end = rendered.indexOf("\u001b[?2026l", start);
-  assert.ok(start >= 0 && end > start, "runDashboard should emit a synchronized frame");
-  const frame = rendered.slice(start, end)
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "");
-  input.write("q");
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
-  return frame;
 }
 
 function catalogProps(resource) {
@@ -72,6 +97,118 @@ function catalogProps(resource) {
     rows: 40,
   };
 }
+
+test("dashboard colors rows by kind and selection in ANSI", async () => {
+  const { execFileSync } = require("node:child_process");
+  const { pathToFileURL } = require("node:url");
+  const screens = pathToFileURL(require.resolve("../dist/dashboard/screens.mjs")).href;
+  const env = { ...process.env, FORCE_COLOR: "1", TERM: "xterm" };
+  delete env.NO_COLOR;
+  const script = `
+    import React from "react";
+    import { render } from "ink";
+    import { PassThrough } from "node:stream";
+    const { CatalogScreen, InventoryScreen } = await import(process.argv[1]);
+    const { DASHBOARD_THEME } = await import(new URL("./colors.js", process.argv[1]));
+    const resources = [
+      { kind: "skill", status: "unmanaged" },
+      { kind: "agent", status: "attention", license_status: "Proprietary" },
+      { kind: "instruction", status: "unmanaged", managed: false },
+      { kind: "other", status: "current", license_status: "Proprietary" },
+    ].map((resource) => ({
+      catalog: "sample", scope: "project", id: resource.kind + "-one", ...resource,
+    }));
+    const common = {
+      query: "", filterMode: false, catalogFilter: "all", kindFilter: "all",
+      versionLabel: "test", showDetails: false, columns: 120, rows: 40,
+    };
+    const frames = [];
+    for (const [component, props] of [
+      [CatalogScreen, { candidates: resources, resources: [], catalogs: [], screenName: "Catalog",
+        tagFilter: "all", statusFilter: "all", licenseFilter: "all" }],
+      [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true }],
+    ]) {
+      for (let selectedIndex = 0; selectedIndex < resources.length; selectedIndex++) {
+        const output = new PassThrough();
+        output.isTTY = true;
+        output.columns = 120;
+        output.rows = 40;
+        let frame = "";
+        output.on("data", (chunk) => { frame += chunk.toString(); });
+        const instance = render(React.createElement(component, { ...common, ...props, selectedIndex }), {
+          stdout: output, stdin: new PassThrough(), stderr: output, exitOnCtrlC: false,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        instance.unmount();
+        frames.push(frame);
+      }
+    }
+    process.stdout.write(JSON.stringify({
+      frames,
+      selectedAnsi: DASHBOARD_THEME.terminalAnsi[DASHBOARD_THEME.semantic.selected],
+    }));
+  `;
+  const { frames, selectedAnsi } = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script, screens], {
+    env, encoding: "utf8", timeout: 10000,
+  }));
+  const selectedColor = new RegExp(`\\x1b\\[1m\\x1b\\[${selectedAnsi}m`);
+  const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+  for (let screen = 0; screen < 2; screen++) {
+    for (let selectedIndex = 0; selectedIndex < 4; selectedIndex++) {
+      const frame = frames[screen * 4 + selectedIndex];
+      const lines = frame.split("\n");
+      const rows = ["skill", "agent", "instruction", "other"].map((kind) => {
+        const row = lines.find((line) => line.includes(`${kind}-one`));
+        assert.ok(row, `missing ${kind} row on screen ${screen}`);
+        return row;
+      });
+      const selectedRow = rows[selectedIndex];
+      assert.match(selectedRow, selectedColor);
+      const unselectedKindColors = [[33, "skill"], [36, "agent"], [32, screen ? "instr" : "instruction"]];
+      for (const [index, [code, label]] of unselectedKindColors.entries()) {
+        if (index === selectedIndex) {
+          assert.doesNotMatch(rows[index], new RegExp(`\\x1b\\[${code}m`));
+          continue;
+        }
+        assert.match(rows[index], new RegExp(`\\x1b\\[${code}m`));
+        assert.match(rows[index], new RegExp(`\\x1b\\[${code}m[\\s\\S]*${label}`));
+      }
+      if (selectedIndex !== 3) assert.doesNotMatch(rows[3], selectedColor);
+      if (screen) {
+        if (selectedIndex !== 1) assert.doesNotMatch(rows[1], /\x1b\[33m/);
+        if (selectedIndex !== 2) assert.doesNotMatch(rows[2], /\x1b\[90m/);
+        if (selectedIndex !== 3) assert.match(rows[3], /\x1b\[32m/);
+        else assert.match(rows[3], selectedColor);
+      } else if (selectedIndex !== 3) {
+        assert.match(rows[3], /\x1b\[33m/);
+      } else {
+        assert.match(rows[3], selectedColor);
+      }
+      const plain = rows.map((row) => row.replace(ansi, ""));
+      for (const [index, row] of plain.entries()) {
+        assert.equal((row.match(/›/g) || []).length, index === selectedIndex ? 1 : 0);
+      }
+      assert.equal(plain[0].indexOf("skill"), plain[1].indexOf("agent"));
+      assert.equal(plain[1].indexOf("agent"), plain[2].indexOf(screen ? "instr " : "instruction "));
+      assert.equal(plain[2].indexOf("instruction-one"), plain[3].indexOf("other-one"));
+    }
+  }
+  const { CatalogManagementScreen } = await import(screens);
+  const catalogs = [
+    { name: "catalog-one", repository: "example/one" },
+    { name: "catalog-two", repository: "example/two" },
+  ];
+  for (let selectedIndex = 0; selectedIndex < catalogs.length; selectedIndex++) {
+    const tree = CatalogManagementScreen({
+      catalogs, catalogResources: [], installedResources: [], selectedIndex, freshness: {},
+      canAdd: true, canRemove: true, canEdit: true, canRefresh: true, canTransfer: true,
+      versionLabel: "test", showDetails: false, columns: 120, rows: 40,
+    });
+    const rendered = childText(tree);
+    assert.ok(rendered.includes(catalogs[selectedIndex].name));
+    assert.equal((rendered.match(/›/g) || []).length, 1);
+  }
+});
 
 test("CatalogScreen exposes source license and pin only when provenance exists", async () => {
   const { Text } = await import("ink");
@@ -172,6 +309,345 @@ test("InventoryScreen wraps complete locations and descriptions at narrow widths
     assert.ok(text.includes("https://github.com/example/long-repository-name"));
     assert.ok(text.includes(sourceRef));
   }
+});
+test("inventory uses wide-screen context while preserving compact layout", async () => {
+  const id = "release-assistant-resource-v2";
+  const catalog = "platform-team";
+  const resource = {
+    catalog,
+    kind: "skill",
+    id,
+    scope: "project",
+    status: "current",
+    source_repository: "example/platform-team",
+  };
+  const wideFrame = await captureDashboardFrame([resource]);
+  const wideRow = wideFrame.split(/\r?\n/).find((line) =>
+    line.includes(id) && line.includes(catalog));
+  assert.ok(wideRow, "inventory row should show the complete ID and catalog label");
+  assert.ok(wideRow.length >= 70, "inventory columns should use most of the list panel width");
+  const largeResource = {
+    ...resource,
+    category: "Release Engineering",
+    tags: ["automation", "deployments"],
+    use_when: "Prepare production releases.",
+    example: "Run release checks.",
+    prerequisites: ["Release approval", "Git access"],
+  };
+  const largeFrame = await captureDashboardFrame(
+    [largeResource], {}, [], { columns: 120, rows: 60 },
+  );
+  const largeLines = largeFrame.split(/\r?\n/);
+  assert.ok(largeLines.some((line) =>
+    line.includes(id) && line.includes(catalog) && line.length >= 70));
+  assert.ok(largeFrame.includes("Release Engineering"));
+  assert.ok(largeFrame.includes("USE WHEN"));
+  assert.ok(largeFrame.includes("Run release checks."));
+  assert.ok(largeFrame.includes("PREREQUISITES"));
+
+  const narrowFrame = await captureDashboardFrame(
+    [{ ...resource, id: "short-id" }],
+    {},
+    [],
+    { columns: 56, rows: 56 },
+  );
+  const narrowLines = narrowFrame.split(/\r?\n/);
+  const narrowHeader = narrowLines.find((line) => line.includes("STATUS") && line.includes("SCOPE"));
+  assert.ok(narrowHeader);
+  assert.equal(narrowHeader.includes("CATALOG"), false);
+  assert.ok(narrowLines.some((line) => line.includes("short-id")));
+});
+test("inventory table fills the available list panel at 80, 120, and 160 columns", async () => {
+  const id = "assistant";
+  const catalog = "platform-team";
+  const resource = {
+    id,
+    catalog,
+    kind: "skill",
+    scope: "project",
+    status: "current",
+    source_repository: "example/platform-team",
+  };
+  const { tableColumns } = await import("../dist/dashboard/helpers.mjs");
+  for (const dimensions of [
+    { columns: 80, rows: 56 },
+    { columns: 120, rows: 60 },
+    { columns: 160, rows: 60 },
+  ]) {
+    const frame = await captureDashboardFrame([resource], {}, [], dimensions);
+    const lines = frame.split(/\r?\n/);
+    const row = lines.find((line) => line.includes(id) && line.includes(catalog));
+    const header = lines.find((line) => line.includes("STATUS") && line.includes("CATALOG"));
+    assert.ok(header && row, `inventory row should render at ${dimensions.columns} columns`);
+    assert.equal(header.indexOf("CATALOG"), row.indexOf(catalog));
+    assert.equal(header.indexOf("STATUS"), row.indexOf("CURRENT"));
+    assert.equal(header.indexOf("SCOPE"), row.indexOf("PROJECT"));
+    assert.equal(header.indexOf("KIND"), row.indexOf("skill"));
+    const listContentWidth = dimensions.columns < 112
+      ? dimensions.columns - 6
+      : Math.floor((dimensions.columns - 3) * (dimensions.columns >= 132 ? 0.64 : 0.68)) - 4;
+    const layout = tableColumns(listContentWidth, id.length, catalog.length);
+    const layoutWidth = layout.marker + layout.status + layout.scope + layout.kind +
+      layout.id + layout.catalog + 5;
+    assert.equal(layoutWidth, listContentWidth);
+    assert.ok(row.length >= layoutWidth && row.length <= dimensions.columns);
+  }
+});
+test("catalog browser and connected-catalog tables use available panel width", async () => {
+  const dimensions = [
+    { columns: 80, rows: 56 },
+    { columns: 120, rows: 60 },
+    { columns: 160, rows: 60 },
+  ];
+  const description = "A reusable assistant workflow that prepares consistent release notes from repository changes.";
+  const candidate = {
+    catalog: "platform-team",
+    kind: "skill",
+    id: "assistant-helper",
+    description,
+    source_repository: "example/platform-team",
+    source_path: "skills/assistant-helper",
+    source_ref: "a".repeat(40),
+  };
+  const catalogActions = { catalogResources: [candidate] };
+  const { catalogTableColumns } = await import("../dist/dashboard/helpers.mjs");
+  for (const size of dimensions) {
+    const frame = await captureDashboardFrame([], catalogActions, ["a"], size);
+    const lines = frame.split(/\r?\n/);
+    const header = lines.find((line) => line.includes("SOURCE") && line.includes("INSTALLED"));
+    const row = lines.find((line) => line.includes(candidate.id) && line.includes(candidate.catalog));
+    assert.ok(header && row, `catalog table should render at ${size.columns} columns`);
+    const installedOffset = header.indexOf("INSTALLED");
+    assert.equal(row.slice(installedOffset, installedOffset + "INSTALLED".length).trim(), "no");
+    assert.ok(header.indexOf("SOURCE") - installedOffset <= "INSTALLED".length + 3);
+    assert.equal(header.indexOf("SOURCE"), row.indexOf(candidate.catalog));
+    assert.equal(header.indexOf("KIND"), row.indexOf(candidate.kind));
+    assert.ok(header.indexOf("ID") - header.indexOf("KIND") <= candidate.kind.length + 3);
+    assert.equal(header.indexOf("ID"), row.indexOf(candidate.id));
+    const listContentWidth = size.columns < 112
+      ? size.columns - 6
+      : Math.floor((size.columns - 3) * 0.68) - 4;
+    const layout = catalogTableColumns(
+      listContentWidth,
+      candidate.catalog.length,
+      candidate.id.length,
+      candidate.kind.length,
+    );
+    const layoutWidth = layout.marker + layout.installed + layout.source +
+      layout.kind + layout.id + 4;
+    assert.equal(layoutWidth, listContentWidth);
+    assert.ok(row.length >= layoutWidth && row.length <= size.columns);
+  }
+
+  const catalogName = "tooling";
+  const repository = "example/tool-catalog";
+  const managementActions = {
+    userCatalogs: [{ name: catalogName, repository }],
+  };
+  for (const size of dimensions) {
+    const frame = await captureDashboardFrame([], managementActions, ["m"], size);
+    const lines = frame.split(/\r?\n/);
+    const header = lines.find((line) => line.includes("REPOSITORY") && line.includes("FRESHNESS"));
+    const row = lines.find((line) => line.includes(catalogName) && line.includes(repository));
+    assert.ok(header && row, `catalog management table should render at ${size.columns} columns`);
+    assert.equal(header.indexOf("CATALOG"), row.indexOf(catalogName));
+    assert.equal(header.indexOf("REPOSITORY"), row.indexOf(repository));
+    assert.equal(row.slice(header.indexOf("RESOURCES"), header.indexOf("RESOURCES") + "RESOURCES".length).trim(), "0");
+    assert.equal(row.slice(header.indexOf("INSTALLED"), header.indexOf("INSTALLED") + "INSTALLED".length).trim(), "0");
+    assert.ok(header.indexOf("INSTALLED") - header.indexOf("RESOURCES") <= "RESOURCES".length + 3);
+    assert.ok(header.indexOf("FRESHNESS") - header.indexOf("INSTALLED") <= "INSTALLED".length + 3);
+    assert.equal(row.slice(header.indexOf("FRESHNESS"), header.indexOf("FRESHNESS") + "FRESHNESS".length).trim(), "UNKNOWN");
+    const listContentWidth = size.columns < 112
+      ? size.columns - 6
+      : Math.floor((size.columns - 3) * 0.68) - 4;
+    const tableStart = header.indexOf("CATALOG") - 3; // Two marker cells and one separator.
+    const freshnessOffset = header.indexOf("FRESHNESS") - tableStart;
+    assert.ok(freshnessOffset + "FRESHNESS".length >= Math.floor(listContentWidth * 0.8));
+    assert.ok(freshnessOffset + "FRESHNESS".length <= listContentWidth);
+    if (size.columns >= 112) {
+      assert.ok(frame.split(repository).length - 1 >= 2, "details remain in a separate right-hand panel");
+    }
+  }
+  const compact = await captureDashboardFrame([], catalogActions, ["a"], { columns: 56, rows: 56 });
+  const compactHeader = compact.split(/\r?\n/).find((line) =>
+    line.includes("SOURCE") && line.includes("ID"));
+  assert.ok(compactHeader);
+});
+
+test("catalog tables make long names readable as the viewport grows", async () => {
+  const source = "platform-engineering-team";
+  const id = "deployment-automation-assistant";
+  const repository = "github.com/platform-engineering/automation-catalog";
+  const candidate = {
+    catalog: source, kind: "instruction", id, source_repository: "example/platform",
+    source_path: "instructions/deploy.md", source_ref: "a".repeat(40),
+  };
+  const managementActions = { userCatalogs: [{ name: source, repository }] };
+  const narrowBrowser = await captureDashboardFrame([], { catalogResources: [candidate] }, ["a"], { columns: 56, rows: 56 });
+  const narrowHeader = narrowBrowser.split(/\r?\n/).find((line) => line.includes("INST") && line.includes("SOURCE"));
+  assert.ok(narrowHeader);
+  assert.ok(narrowHeader.indexOf("SOURCE") - narrowHeader.indexOf("INST") <= 7);
+
+  for (const columns of [80, 120, 160]) {
+    const size = { columns, rows: 60 };
+    const keys = columns === 160 ? ["a", "d"] : ["a"];
+    const browser = await captureDashboardFrame([], { catalogResources: [candidate] }, keys, size);
+    const browserRow = browser.split(/\r?\n/).find((line) => line.includes("instruction") && line.includes("platform"));
+    assert.ok(browserRow, `browser row should be visible at ${columns}`);
+    const management = await captureDashboardFrame([], managementActions, columns === 160 ? ["m", "d"] : ["m"], size);
+    assert.ok(management.split(/\r?\n/).some((line) =>
+      line.includes("RESOURCES") && line.includes("INSTALLED") && line.includes("FRESHNESS")),
+      `management headers should remain readable at ${columns}`);
+    const managementRow = management.split(/\r?\n/).find((line) => line.includes("platform") && line.includes("github"));
+    assert.ok(managementRow, `management row should be visible at ${columns}`);
+    if (columns === 160) {
+      assert.ok(browserRow.includes(source) && browserRow.includes(id));
+      assert.ok(managementRow.includes(source) && managementRow.includes(repository));
+    } else {
+      assert.ok(browserRow.includes("..."), "long browser values truncate in the narrow viewport");
+      assert.ok(managementRow.includes("..."), "long repository or name truncates in the narrow viewport");
+    }
+  }
+});
+
+test("dashboard tables expand their columns when details are hidden", async () => {
+  const size = { columns: 160, rows: 60 };
+  const resource = {
+    catalog: "platform-team", kind: "skill", id: "assistant-helper",
+    scope: "project", status: "current", source_repository: "example/platform-team",
+    source_path: "skills/assistant-helper", source_ref: "a".repeat(40),
+  };
+  const cases = [
+    { resources: [resource], actions: {}, keys: [], label: "CATALOG" },
+    { resources: [], actions: { catalogResources: [resource] }, keys: ["a"], label: "ID" },
+    { resources: [], actions: { userCatalogs: [{ name: "tooling", repository: "example/tool-catalog" }] }, keys: ["m"], label: "FRESHNESS" },
+  ];
+  for (const entry of cases) {
+    const withDetails = await captureDashboardFrame(entry.resources, entry.actions, entry.keys, size);
+    const withoutDetails = await captureDashboardFrame(entry.resources, entry.actions, [...entry.keys, "d"], size);
+    const header = (frame) => frame.split(/\r?\n/).find((line) =>
+      line.includes(entry.label) && (line.includes("STATUS") || line.includes("INSTALLED")));
+    const splitHeader = header(withDetails);
+    const fullHeader = header(withoutDetails);
+    assert.ok(splitHeader && fullHeader, `${entry.label} header should render in both modes`);
+    assert.ok(fullHeader.indexOf(entry.label) > splitHeader.indexOf(entry.label),
+      `${entry.label} should move right as the list expands`);
+  }
+});
+test("source-version picker adapts SHA, date, and subject columns at 80 and 120 columns", async () => {
+  const resource = {
+    catalog: "platform-team",
+    kind: "skill",
+    id: "assistant-helper",
+    scope: "project",
+    status: "current",
+    source_repository: "example/platform-team",
+    source_path: "skills/assistant-helper",
+    source_ref: "a".repeat(40),
+  };
+  const versions = [
+    { sha: "a".repeat(40), prefix: "abcdef0", date: "2025-04-03T12:13:14Z", subject: "Add TUI table sizing" },
+    { sha: "b".repeat(40), prefix: "fedcba987", date: "2025-04-04T12:13:14Z", subject: "Fix adaptive columns in terminal frames" },
+  ];
+  for (const dimensions of [
+    { columns: 80, rows: 56 },
+    { columns: 120, rows: 60 },
+  ]) {
+    const frame = await captureDashboardFrame([resource], {
+      listSourceVersions: () => versions,
+    }, ["v"], dimensions, ["\u001b"]);
+    const lines = frame.split(/\r?\n/);
+    const first = lines.find((line) => line.includes(versions[0].prefix) && line.includes(versions[0].subject));
+    const second = lines.find((line) => line.includes(versions[1].prefix) && line.includes(versions[1].subject));
+    assert.ok(first && second, `revision rows should render at ${dimensions.columns} columns`);
+    assert.equal(first.indexOf("2025-04-03"), second.indexOf("2025-04-04"));
+    assert.equal(first.indexOf(versions[0].subject), second.indexOf(versions[1].subject));
+    assert.ok(first.length <= dimensions.columns);
+  }
+});
+test("CLI catalog and installed-resource tables adapt to terminal width without truncating piped output", async () => {
+  const {
+    formatCatalogTable,
+    renderInstalledResources,
+    selectCatalogResource,
+  } = require("../dist/dashboard/terminal.js");
+  const description = "A complete description retained for piped terminal output.";
+  const resources = [
+    {
+      catalog: "platform-team",
+      kind: "skill",
+      id: "assistant-helper",
+      status: "stable",
+      scope: "project",
+      description,
+      source_repository: "example/platform-team",
+    },
+    {
+      catalog: "personal-tools",
+      kind: "skill",
+      id: "assistant-helper",
+      status: "stable",
+      scope: "project",
+      description,
+      source_repository: "example/personal-tools",
+    },
+  ];
+  for (const columns of [80, 120]) {
+    const terminal = { isTTY: true, columns };
+    const catalogLines = formatCatalogTable(resources, terminal).split("\n")
+      .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, ""));
+    const catalogHeader = catalogLines[0];
+    const catalogRow = catalogLines[1];
+    assert.equal(catalogRow.slice(0, catalogHeader.indexOf("KIND")).trim(), resources[0].catalog);
+    assert.equal(catalogHeader.indexOf("CATALOG"), catalogRow.indexOf(resources[0].catalog));
+    assert.equal(catalogHeader.indexOf("KIND"), catalogRow.indexOf(resources[0].kind));
+    assert.equal(catalogHeader.indexOf("ID"), catalogRow.indexOf(resources[0].id));
+    assert.equal(catalogHeader.indexOf("STATUS"), catalogRow.indexOf(resources[0].status));
+    assert.ok(catalogRow.length <= columns);
+    assert.equal(catalogHeader.indexOf("DESCRIPTION"), catalogRow.indexOf(description.slice(0, 12)));
+
+    const installed = renderInstalledResources(resources, terminal).split("\n")
+      .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, ""));
+    assert.equal(installed[1].slice(
+      installed[0].indexOf("CATALOG"), installed[0].indexOf("KIND") - 1,
+    ).trim(), resources[0].catalog);
+    assert.equal(installed[0].indexOf("CATALOG"), installed[1].indexOf(resources[0].catalog));
+    assert.equal(installed[0].indexOf("ID"), installed[1].indexOf(resources[0].id));
+    assert.equal(installed[0].indexOf("SCOPE"), installed[1].indexOf(resources[0].scope));
+    assert.equal(installed[0].indexOf("KIND"), installed[1].indexOf(resources[0].kind));
+    assert.equal(installed[0].indexOf("STATUS"), installed[1].indexOf(resources[0].status));
+    assert.equal(installed[0].indexOf("DESCRIPTION"), installed[1].indexOf(description.slice(0, 12)));
+    assert.ok(installed[1].length <= columns);
+  }
+
+  const nonInteractive = { isTTY: false };
+  assert.ok(formatCatalogTable(resources.slice(0, 1), nonInteractive).includes(description));
+  assert.ok(renderInstalledResources(resources.slice(0, 1), nonInteractive).includes(description));
+
+  const { PassThrough } = require("node:stream");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.isRaw = false;
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 30;
+  let frame = "";
+  output.on("data", (chunk) => { frame += chunk.toString(); });
+  const selected = selectCatalogResource(resources, input, output);
+  input.emit("keypress", "\r", { name: "return" });
+  assert.equal(await selected, resources[0]);
+  const plain = frame.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  const [header, row] = plain.split(/\r?\n/).filter((line) => line.includes("CATALOG") || line.includes(resources[0].catalog));
+  assert.ok(header && row);
+  assert.equal(header.indexOf("CATALOG"), row.indexOf(resources[0].catalog));
+  assert.equal(header.indexOf("KIND"), row.indexOf(resources[0].kind));
+  assert.equal(header.indexOf("ID"), row.indexOf(resources[0].id));
+  assert.equal(header.indexOf("STATUS"), row.indexOf(resources[0].status));
+  assert.equal(header.indexOf("DESCRIPTION"), row.indexOf(description.slice(0, 12)));
+  input.destroy();
+  output.destroy();
 });
 test("narrow inventory terminal links wrapped URL fragments to the complete location", async () => {
   const { PassThrough } = require("node:stream");

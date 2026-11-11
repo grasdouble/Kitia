@@ -4,6 +4,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
 import type { ScanError } from "../../catalog/lifecycle.js";
+import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";
 import {
   colorForStatus, dashboardStatus, detailPanelLayout, filterInventory, inventoryCatalogLabels,
@@ -70,7 +71,7 @@ export function InventoryScreen({
   const needsReview = updates + attention;
   const sideBySide = columns >= 76;
   const contentWidth = Math.max(1, columns - 6);
-  const inventoryLayout = detailPanelLayout(columns);
+  const inventoryLayout = detailPanelLayout(columns, columns >= 132 ? 0.64 : 0.68);
   const inventorySideBySide = showDetails && inventoryLayout.sideBySide;
   const inventoryListWidth = inventorySideBySide ? inventoryLayout.listWidth! : columns;
   const inventoryDetailsWidth = inventorySideBySide ? inventoryLayout.detailsWidth! : columns;
@@ -79,9 +80,9 @@ export function InventoryScreen({
   const cardGap = 1;
   const cardWidth = Math.floor((columns - 2 - cardGap * 2) / 3);
   const summaryCards = [
-    { title: "RESOURCES", value: resources.length, note: `${catalogCount} catalog(s) connected`, color: "cyan" },
-    { title: "MANAGED", value: managedResources.length, note: `${current} current · ${unmanaged} unmanaged`, color: "green" },
-    { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} warning(s)`, color: needsReview ? "yellow" : "green" },
+    { title: "RESOURCES", value: resources.length, note: `${catalogCount} catalog(s) connected`, color: DASHBOARD_THEME.semantic.accents.primary },
+    { title: "MANAGED", value: managedResources.length, note: `${current} current · ${unmanaged} unmanaged`, color: DASHBOARD_THEME.semantic.inventoryStatus.current },
+    { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} warning(s)`, color: needsReview ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.inventoryStatus.current },
   ];
   const summaryPanels = h(Box, {
     flexDirection: sideBySide ? "row" : "column",
@@ -100,13 +101,19 @@ export function InventoryScreen({
     ? h(Panel, { title: "SCAN WARNINGS", marginTop: 1 },
       ...errors.map((error, index) => h(Text, {
         key: `warning-${index}`,
-        color: "yellow",
+        color: DASHBOARD_THEME.semantic.inventoryStatus.attention,
       }, fitText(
         `${error.scope.toUpperCase()} · ${error.code}: ${error.message}`,
         contentWidth,
       ))))
     : null;
-  const columnsByField = tableColumns(inventorySideBySide ? inventoryListWidth : columns);
+  const longestId = visible.reduce((length, resource) =>
+    Math.max(length, String(resource.id || "").length), 2);
+  const longestCatalog = visible.reduce((length, resource) =>
+    Math.max(length, (inventoryLabels.get(resource) || "-").length), 7);
+  const columnsByField = tableColumns(
+    listContentWidth, longestId, longestCatalog,
+  );
   const tableHeader = tableLine([
     ["", columnsByField.marker],
     ["STATUS", columnsByField.status],
@@ -134,6 +141,19 @@ export function InventoryScreen({
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
   const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
   const compactDetails = rows < 40;
+  const largeScreenContext = selected && columns >= 112 && rows >= 50
+    ? [
+      ...(selected.category ? [{ label: "CATEGORY", value: selected.category, maxLines: 2 }] : []),
+      ...(selected.tags?.length
+        ? [{ label: "TAGS", value: selected.tags.join(" · "), maxLines: 2 }]
+        : []),
+      ...(selected.use_when ? [{ label: "USE WHEN", value: selected.use_when, maxLines: 3 }] : []),
+      ...(selected.example ? [{ label: "EXAMPLE", value: selected.example, maxLines: 3 }] : []),
+      ...(selected.prerequisites?.length
+        ? [{ label: "PREREQUISITES", value: selected.prerequisites.join(" · "), maxLines: 2 }]
+        : []),
+    ]
+    : [];
   const detailRows = selected
     ? [
       ...(!compactDetails ? [
@@ -142,6 +162,7 @@ export function InventoryScreen({
       ] : []),
       { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
       { label: "", value: issues, maxLines: Infinity },
+      ...largeScreenContext,
       ...(!compactDetails ? [
         { label: "VERSION", value: displayVersion, maxLines: Infinity },
         { label: "LOCATIONS", value: locations, maxLines: Infinity },
@@ -161,7 +182,7 @@ export function InventoryScreen({
   const selectionContent = detailRows.flatMap((row, index) =>
     row.label === "LOCATIONS"
       ? [
-        h(Text, { key: "inventory-locations-label", color: "white", bold: true },
+        h(Text, { key: "inventory-locations-label", color: DASHBOARD_THEME.semantic.accents.label, bold: true },
           fitText(row.label, detailsContentWidth)),
         ...detailLocations("inventory-locations", locationValues, detailsContentWidth),
       ]
@@ -172,7 +193,7 @@ export function InventoryScreen({
           row.value,
           detailsContentWidth,
           row.maxLines,
-          row.label === "STATUS" ? colorForStatus(selectedStatus) : "gray",
+          row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
         )
         : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
   const shortcutLines = modalActive ? [] : filterMode
@@ -219,7 +240,7 @@ export function InventoryScreen({
       const selectedRow = first + index === activeIndex;
       const status = dashboardStatus(resource);
       const row = tableLine([
-        [selectedRow ? ">" : "", columnsByField.marker],
+        [selectedRow ? "›" : "", columnsByField.marker],
         [status.toUpperCase(), columnsByField.status],
         [resource.scope.toUpperCase(), columnsByField.scope],
         [resource.kind === "instruction" ? "instr" : resource.kind, columnsByField.kind],
@@ -228,23 +249,25 @@ export function InventoryScreen({
       ]);
       return h(Text, {
         key: `${resource.managed === false ? "unmanaged" : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
-        color: selectedRow ? "cyan" : colorForStatus(status),
+        color: resolveRowColor(resource.kind, selectedRow, colorForStatus(status)),
         bold: selectedRow,
       }, row);
     })
     : [h(Text, { key: "empty", dimColor: true }, fitText("No matching resources.", listContentWidth))];
-  while (tableRows.length < viewport) {
-    tableRows.push(h(Text, { key: `empty-${tableRows.length}` }, " "));
+  if (!inventorySideBySide) {
+    while (tableRows.length < viewport) {
+      tableRows.push(h(Text, { key: `empty-${tableRows.length}` }, " "));
+    }
   }
   const resourcePanel = h(Panel, {
     title: "INVENTORY",
     width: inventorySideBySide ? inventoryListWidth : undefined,
-    color: tourStep === 0 ? "yellow" : "cyan",
+    color: tourStep === 0 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
     marginTop: 1,
   },
   h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${resources.length} · ${pageRange}`, listContentWidth)),
   h(Text, {
-    color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" ? "cyan" : "gray",
+    color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" ? DASHBOARD_THEME.semantic.selected : DASHBOARD_THEME.semantic.accents.muted,
   }, fitText(
     `Filter ${filterMode ? `${query}▏` : query || "(F to filter)"} · Catalog ${catalogFilter.toUpperCase()} · Kind ${kindFilter.toUpperCase()}`,
     listContentWidth,

@@ -1,6 +1,8 @@
 "use strict";
 
+import { DASHBOARD_THEME } from "./colors.js";
 import { createRequire } from "node:module";
+import { adaptiveColumnWidths } from "../table-layout.js";
 import type { CatalogResource } from "../catalog/entries.js";
 
 const require = createRequire(import.meta.url);
@@ -272,12 +274,11 @@ export function filterInventory(
     ]);
   });
 }
-
 export function colorForStatus(status?: string) {
-  if (status === "unmanaged") return "gray";
-  if (status === "attention") return "yellow";
-  if (status === "update") return "blue";
-  return "green";
+  if (status === "unmanaged") return DASHBOARD_THEME.semantic.inventoryStatus.unmanaged;
+  if (status === "attention") return DASHBOARD_THEME.semantic.inventoryStatus.attention;
+  if (status === "update") return DASHBOARD_THEME.semantic.inventoryStatus.update;
+  return DASHBOARD_THEME.semantic.inventoryStatus.current;
 }
 
 export function fitText(value: unknown, width: number): string {
@@ -320,31 +321,49 @@ export function wrapText(value: unknown, width: number, maxLines = Infinity): st
   return limited;
 }
 
-export function tableColumns(width: number) {
-  const targetWidth = Math.max(1, width - 6);
-  const compact = width < 64;
+export function tableColumns(
+  width: number,
+  idContentWidth = 12,
+  catalogContentWidth = 9,
+) {
+  const compact = width < 58;
   const marker = 2;
   const scope = compact ? 5 : 7;
   const kind = compact ? 5 : 8;
   const status = compact ? 7 : 9;
-  const separators = compact ? 4 : 5;
-  const id = Math.max(compact ? 8 : 12, Math.min(24, Math.floor(targetWidth * 0.18)));
-  const catalog = compact ? 0 : Math.max(9, targetWidth - marker - scope - kind - status - id - separators);
+  const idContent = Math.max(8, idContentWidth);
+  const catalogContent = Math.max(9, catalogContentWidth);
+  const fields = adaptiveColumnWidths(width, [
+    { contentWidth: marker, minWidth: marker, maxWidth: marker, shrinkWeight: 0 },
+    { contentWidth: status, minWidth: 6, growWeight: 1 },
+    { contentWidth: scope, minWidth: 5, growWeight: 1 },
+    { contentWidth: kind, minWidth: 5, growWeight: 1 },
+    {
+      contentWidth: idContent,
+      minWidth: 8,
+      growWeight: 2,
+    },
+    ...(!compact ? [{
+      contentWidth: catalogContent,
+      minWidth: 9,
+      growWeight: 2,
+    }] : []),
+  ]);
   return {
-    marker,
-    status,
-    scope,
-    kind,
-    id,
-    catalog,
+    marker: fields[0],
+    status: fields[1],
+    scope: fields[2],
+    kind: fields[3],
+    id: fields[4],
+    catalog: compact ? 0 : fields[5],
   };
 }
-export function detailPanelLayout(width: number) {
+export function detailPanelLayout(width: number, listRatio = 0.68) {
   if (width < 112) {
     return { sideBySide: false, listWidth: undefined, detailsWidth: undefined };
   }
   const available = width - 3;
-  const listWidth = Math.floor(available * 0.68);
+  const listWidth = Math.floor(available * listRatio);
   return {
     sideBySide: true,
     listWidth,
@@ -352,22 +371,45 @@ export function detailPanelLayout(width: number) {
   };
 }
 
-
-export function catalogTableColumns(width: number) {
-  const targetWidth = Math.max(1, width - 6);
-  const compact = width < 64;
+export function catalogTableColumns(
+  width: number,
+  sourceContentWidth = 12,
+  idContentWidth = 12,
+  kindContentWidth = 4,
+) {
+  const compact = width < 58;
   const marker = 2;
-  const source = compact ? 11 : 30;
-  const kind = compact ? 8 : 12;
-  const installed = compact ? 7 : 11;
-  const separators = 4;
-  const minId = compact ? 8 : 12;
-  const fixedWidth = marker + source + kind + installed + separators + minId;
-  const flexibleWidth = Math.max(0, targetWidth - fixedWidth);
-  const id = compact
-    ? minId + Math.min(14, flexibleWidth)
-    : Math.max(12, Math.min(30, minId + flexibleWidth));
-  return { marker, source, kind, installed, id };
+  const installed = compact ? 4 : 9;
+  const sourceContent = Math.max(8, sourceContentWidth);
+  const idContent = Math.max(8, idContentWidth);
+  const kind = Math.max(compact ? 5 : 4, kindContentWidth);
+  const naturalWidth = marker + installed + kind + 4 + sourceContent + idContent;
+  const preserveValues = naturalWidth <= width;
+  const fields = adaptiveColumnWidths(width, [
+    { contentWidth: marker, minWidth: marker, maxWidth: marker, shrinkWeight: 0 },
+    { contentWidth: installed, minWidth: installed, maxWidth: installed + 2, growWeight: 1 },
+    {
+      contentWidth: sourceContent,
+      minWidth: preserveValues ? sourceContent : Math.min(sourceContent, 8),
+      growWeight: 2,
+      shrinkWeight: 1,
+    },
+    { contentWidth: kind, minWidth: kind, maxWidth: kind + 2, growWeight: 1 },
+    {
+      contentWidth: idContent,
+      minWidth: preserveValues ? idContent : Math.min(idContent, 8),
+      growWeight: 2,
+      shrinkWeight: 1,
+    },
+  ]);
+  return {
+    marker: fields[0],
+    installed: fields[1],
+    source: fields[2],
+    kind: fields[3],
+    id: fields[4],
+    compact,
+  };
 }
 
 export function tableLine(fields: Array<[string, number]>): string {

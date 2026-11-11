@@ -3,11 +3,14 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
+import { DASHBOARD_THEME } from "../colors.js";
 import type { CatalogFreshnessStatus } from "../catalog-freshness.mjs";
 import { detailPanelLayout, fitColumn, fitText, tableLine, wrapText } from "../helpers.mjs";
 import {
   DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailValue, wrappedShortcutLines,
 } from "./shared.mjs";
+import { adaptiveColumnWidths } from "../../table-layout.js";
+
 
 const h = React.createElement;
 export function CatalogManagementScreen({
@@ -54,24 +57,38 @@ export function CatalogManagementScreen({
   const contentWidth = Math.max(1, detailsSideBySide ? listWidth - 4 : columns - 6);
   const detailsContentWidth = Math.max(1, detailsSideBySide ? detailsWidth - 4 : columns - 6);
   const compact = contentWidth < 64;
-  const nameWidth = Math.min(compact ? 12 : 20, Math.max(8, Math.floor(contentWidth * 0.22)));
-  const resourceWidth = compact ? 4 : 9;
-  const installedWidth = compact ? 5 : 9;
-  const freshnessWidth = 10;
-  const repositoryWidth = Math.max(8,
-    contentWidth - nameWidth - resourceWidth - installedWidth - freshnessWidth - 7);
+  const repositoryVisible = !compact || contentWidth >= 44;
+  const resourceWidth = Math.max(compact ? 3 : 9, String(catalogResources.length).length);
+  const installedWidth = Math.max(compact ? 4 : 9, String(installedResources.length).length);
+  const nameContentWidth = catalogs.reduce((width, catalog) =>
+    Math.max(width, catalog.name.length), "CATALOG".length);
+  const repositoryContentWidth = catalogs.reduce((width, catalog) =>
+    Math.max(width, catalog.repository.length), "REPOSITORY".length);
+  const columnWidths = adaptiveColumnWidths(contentWidth, [
+    { contentWidth: 2, minWidth: 2, maxWidth: 2, shrinkWeight: 0 },
+    { contentWidth: nameContentWidth, minWidth: Math.min(nameContentWidth, 8), growWeight: 2, shrinkWeight: 1 },
+    ...(repositoryVisible ? [{
+      contentWidth: repositoryContentWidth,
+      minWidth: Math.min(repositoryContentWidth, 24),
+      growWeight: 2,
+      shrinkWeight: 2,
+    }] : []),
+    { contentWidth: resourceWidth, minWidth: compact ? 3 : 9, maxWidth: resourceWidth + 2, growWeight: 1, shrinkWeight: 1 },
+    { contentWidth: installedWidth, minWidth: compact ? 4 : 9, maxWidth: installedWidth + 2, growWeight: 1, shrinkWeight: 1 },
+    { contentWidth: 10, minWidth: 9, maxWidth: 12, growWeight: 1, shrinkWeight: 0 },
+  ]);
+  const [, nameWidth] = columnWidths;
+  const repositoryWidth = repositoryVisible ? columnWidths[2] : 0;
+  const resourceColumnWidth = columnWidths[repositoryVisible ? 3 : 2];
+  const installedColumnWidth = columnWidths[repositoryVisible ? 4 : 3];
+  const freshnessWidth = columnWidths[repositoryVisible ? 5 : 4];
   const freshnessLabels: Record<CatalogFreshnessStatus, string> = {
     checking: "CHECKING",
     current: "UP TO DATE",
     outdated: "OUTDATED",
     unknown: "UNKNOWN",
   };
-  const freshnessColors: Record<CatalogFreshnessStatus, string> = {
-    checking: "cyan",
-    current: "green",
-    outdated: "yellow",
-    unknown: "gray",
-  };
+  const freshnessColors = DASHBOARD_THEME.semantic.catalogFreshness;
   const freshnessOf = (name: string) => freshness[name] || "unknown";
   const catalogCounts = (name: string) => ({
     resources: catalogResources.filter((resource) => resource.catalog === name).length,
@@ -82,8 +99,8 @@ export function CatalogManagementScreen({
     ["", 2],
     ["CATALOG", nameWidth],
     ["REPOSITORY", repositoryWidth],
-    [compact ? "RES" : "RESOURCES", resourceWidth],
-    [compact ? "INST" : "INSTALLED", installedWidth],
+    [compact ? "RES" : "RESOURCES", resourceColumnWidth],
+    [compact ? "INST" : "INSTALLED", installedColumnWidth],
     ["FRESHNESS", freshnessWidth],
   ]);
   const selectedCounts = selected ? catalogCounts(selected.name) : null;
@@ -91,7 +108,7 @@ export function CatalogManagementScreen({
   const detailsContent = selected
     ? compactDetails
       ? [
-        h(Text, { key: "catalog-repository", color: "gray" },
+        h(Text, { key: "catalog-repository", color: DASHBOARD_THEME.semantic.accents.muted },
           fitText(`REPOSITORY ${selected.repository}`, detailsContentWidth)),
         h(Text, { key: "catalog-freshness", color: freshnessColors[freshnessOf(selected.name)] },
           fitText(`FRESHNESS ${freshnessLabels[freshnessOf(selected.name)]}`, detailsContentWidth)),
@@ -101,7 +118,7 @@ export function CatalogManagementScreen({
           2,
         ).map((line, index) => h(Text, {
           key: `catalog-refresh-${index}`,
-          color: "gray",
+          color: DASHBOARD_THEME.semantic.accents.muted,
         }, line)),
       ]
       : [
@@ -165,14 +182,14 @@ export function CatalogManagementScreen({
       flexDirection: "row",
     },
     h(Text, {
-      color: selectedRow ? "cyan" : undefined,
+      color: selectedRow ? DASHBOARD_THEME.semantic.selected : undefined,
       bold: selectedRow,
     }, `${tableLine([
-      [selectedRow ? ">" : "", 2],
+      [selectedRow ? "›" : "", 2],
       [catalog.name, nameWidth],
       [catalog.repository, repositoryWidth],
-      [String(counts.resources), resourceWidth],
-      [String(counts.installed), installedWidth],
+      [String(counts.resources), resourceColumnWidth],
+      [String(counts.installed), installedColumnWidth],
     ])} `),
     h(Text, {
       color: freshnessColors[status],
@@ -185,7 +202,7 @@ export function CatalogManagementScreen({
   const catalogPanel = h(Panel, {
     title: `CONNECTED CATALOGS ${catalogs.length}`,
     width: detailsSideBySide ? listWidth : undefined,
-    color: tourStep === 2 ? "yellow" : "cyan",
+    color: tourStep === 2 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
     marginTop: 1,
   },
   h(Text, { bold: true }, tableHeader),
