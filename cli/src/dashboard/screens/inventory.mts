@@ -7,7 +7,7 @@ import type { ScanError } from "../../catalog/lifecycle.js";
 import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";
 import {
-  colorForStatus, dashboardStatus, detailPanelLayout, filterInventory, inventoryCatalogLabels,
+  colorForStatus, dashboardStatus, detailPanelLayout, filterInventory, inventoryCatalogLabels, wrapText,
   issueLine, tableColumns, tableLine, fitText,
 } from "../helpers.mjs";
 import {
@@ -22,6 +22,7 @@ export function InventoryScreen({
   filterMode,
   catalogFilter,
   kindFilter,
+  licenseFilter = "all",
   selectedIndex,
   versionLabel,
   actionMessage,
@@ -41,6 +42,7 @@ export function InventoryScreen({
   filterMode: boolean;
   catalogFilter: string;
   kindFilter: string;
+  licenseFilter: string;
   selectedIndex: number;
   versionLabel: string;
   actionMessage: string;
@@ -55,7 +57,7 @@ export function InventoryScreen({
   tourStep?: number | null;
 }) {
   const inventoryLabels = suppliedInventoryLabels || inventoryCatalogLabels(resources, userCatalogs);
-  const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels);
+  const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels, licenseFilter);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
   const managedResources = resources.filter((resource) => resource.managed !== false);
@@ -76,6 +78,10 @@ export function InventoryScreen({
   const inventoryListWidth = inventorySideBySide ? inventoryLayout.listWidth! : columns;
   const inventoryDetailsWidth = inventorySideBySide ? inventoryLayout.detailsWidth! : columns;
   const listContentWidth = Math.max(1, inventorySideBySide ? inventoryListWidth - 4 : contentWidth);
+  const inventoryFilterLines = wrapText(
+    `Filter ${filterMode ? `${query}▏` : query || "(F to filter)"} · Catalog ${catalogFilter.toUpperCase()} · Kind ${kindFilter.toUpperCase()} · License ${licenseFilter.toUpperCase()}`,
+    listContentWidth,
+  );
   const detailsContentWidth = Math.max(1, inventorySideBySide ? inventoryDetailsWidth - 4 : contentWidth);
   const cardGap = 1;
   const cardWidth = Math.floor((columns - 2 - cardGap * 2) / 3);
@@ -206,20 +212,20 @@ export function InventoryScreen({
         ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
         : []),
       "M catalogs",
-      ["F filter", ...(resources.length ? ["C catalog", "K kind"] : [])].join(" · "),
+      ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])].join(" · "),
       "D details",
       "↑↓ navigate · ? guide · Q quit",
     ];
   const inventoryShortcutWidth = inventorySideBySide ? inventoryDetailsWidth : columns - 2;
   const fullSummaryPanelRows = sideBySide ? 5 : 17;
   const warningPanelRows = errors.length ? errors.length + 4 : 0;
-  const detailsPanelRows = showDetails ? selectionContent.length + 4 : 0;
-  const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, inventoryShortcutWidth).length + 4;
+  const detailsPanelRows = showDetails ? selectionContent.length + 5 : 0;
+  const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, inventoryShortcutWidth).length + 5;
   const detailsVerticalOverhead = inventorySideBySide
     ? 0
     : detailsPanelRows + shortcutsPanelRows;
   const requiredRowsForSummary = 6 + fullSummaryPanelRows + warningPanelRows +
-    6 + detailsVerticalOverhead + 2;
+    7 + detailsVerticalOverhead + 2;
   const summaryCompactPanel = h(Panel, { title: "SUMMARY" },
     h(Text, { dimColor: true }, fitText(
       `RES ${resources.length} · MAN ${managedResources.length} · REVIEW ${needsReview}`,
@@ -228,9 +234,19 @@ export function InventoryScreen({
   const showFullSummaryPanels = rows >= requiredRowsForSummary;
   const summaryPanelRows = showFullSummaryPanels ? fullSummaryPanelRows : 4;
   const panels = showFullSummaryPanels ? summaryPanels : summaryCompactPanel;
+  // Reclaim blank panel gaps before sacrificing content in a cramped terminal.
+  const stackedOverflow = inventorySideBySide ? 0 : Math.max(
+    0, 6 + summaryPanelRows + warningPanelRows + 7 + detailsVerticalOverhead + 1 - rows,
+  );
+  const shortcutsMarginTop = stackedOverflow > 0 || (inventorySideBySide &&
+    selectionContent.length + 4 + shortcutsPanelRows > rows - (6 + summaryPanelRows + warningPanelRows)) ? 0 : 1;
+  const selectionMarginTop = inventorySideBySide || stackedOverflow > Number(Boolean(shortcutsPanelRows)) ? 0 : 1;
+  const listMarginTop = stackedOverflow > Number(Boolean(shortcutsPanelRows)) + Number(showDetails) ? 0 : 1;
+  const reclaimedRows = inventorySideBySide ? 0 : 1 - listMarginTop +
+    (showDetails ? 1 - selectionMarginTop : 0) + (shortcutsPanelRows ? 1 - shortcutsMarginTop : 0);
   const viewport = Math.max(
     1,
-    rows - (6 + summaryPanelRows + warningPanelRows + 6 + detailsVerticalOverhead),
+    rows - (6 + summaryPanelRows + warningPanelRows + 7 + (inventoryFilterLines.length - 1) + detailsVerticalOverhead - reclaimedRows),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
@@ -261,36 +277,37 @@ export function InventoryScreen({
   }
   const resourcePanel = h(Panel, {
     title: "INVENTORY",
+    separateHeader: true,
     width: inventorySideBySide ? inventoryListWidth : undefined,
     color: tourStep === 0 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
-    marginTop: 1,
+    marginTop: listMarginTop,
+    headerContent: h(React.Fragment, null,
+      h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${resources.length} · ${pageRange}`, listContentWidth)),
+      ...inventoryFilterLines.map((line, index) => h(Text, {
+        key: `inventory-filter-${index}`,
+        color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" || licenseFilter !== "all"
+          ? DASHBOARD_THEME.semantic.selected : DASHBOARD_THEME.semantic.accents.muted,
+      }, line))),
   },
-  h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${resources.length} · ${pageRange}`, listContentWidth)),
-  h(Text, {
-    color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" ? DASHBOARD_THEME.semantic.selected : DASHBOARD_THEME.semantic.accents.muted,
-  }, fitText(
-    `Filter ${filterMode ? `${query}▏` : query || "(F to filter)"} · Catalog ${catalogFilter.toUpperCase()} · Kind ${kindFilter.toUpperCase()}`,
-    listContentWidth,
-  )),
   h(Text, { bold: true }, tableHeader),
   ...tableRows);
   const selectionPanel = showDetails ? h(DetailsPanel, {
     title: selected ? `${selected.kind.toUpperCase()} - ${fitText(selected.id, Math.max(1, detailsContentWidth - selected.kind.length - 3))}` : "SELECTION",
     width: inventorySideBySide ? inventoryDetailsWidth : undefined,
-    marginTop: inventorySideBySide ? 0 : 1,
+    marginTop: selectionMarginTop,
     flexGrow: inventorySideBySide ? 1 : 0,
     flexShrink: inventorySideBySide ? 1 : 0,
   }, selectionContent) : null;
   const shortcutsPanel = modalActive ? null : ShortcutsPanel({
     lines: shortcutLines,
     width: inventoryShortcutWidth,
-    marginTop: 1,
+    marginTop: shortcutsMarginTop,
   });
   const detailsColumn = h(Box, {
     flexDirection: "column",
     alignItems: "stretch",
     width: inventorySideBySide ? inventoryDetailsWidth : undefined,
-    height: inventorySideBySide ? viewport + 6 : undefined,
+    height: inventorySideBySide ? viewport + 7 : undefined,
     marginTop: inventorySideBySide ? 1 : 0,
     marginLeft: inventorySideBySide ? 1 : 0,
   }, ...(showDetails

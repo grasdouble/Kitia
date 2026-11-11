@@ -32,7 +32,7 @@ const { main: runCliMain } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 const { executeCommand, runDashboardWorker } = require("../dist/cli/commands.js");
 const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
-test("dashboard preview, audit, and install dispatch use source audit and capture semantics", async () => {
+test("dashboard preview combines source inspection and audit while installs remain audited", async () => {
   const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-inspection-"));
   const configDirectory = path.join(temporary, "config");
@@ -67,14 +67,12 @@ test("dashboard preview, audit, and install dispatch use source audit and captur
       target: temporary, userTarget: temporary,
     }, { sourceResources: [resource] }, installOptions);
     await invoke("preview");
-    await invoke("audit");
     await invoke("install");
     const ref = "b".repeat(40);
     await invoke("install", { ref });
     await invoke("update", { ref });
     assert.deepEqual(dispatched.map(({ command, audit, captureOutput, ref: selectedRef }) =>
       ({ command, audit, captureOutput, ref: selectedRef })), [
-      { command: "preview", audit: undefined, captureOutput: true, ref: undefined },
       { command: "preview", audit: true, captureOutput: true, ref: undefined },
       { command: "install", audit: true, captureOutput: false, ref: undefined },
       { command: "install", audit: true, captureOutput: false, ref },
@@ -129,9 +127,24 @@ test("dashboard installs the selected full skill revision from the revision pick
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.ok(["|", "/", "-", "\\"].some((frame) =>
     rendered.includes(`${frame} Loading commit history for revision-skill`)));
-  await new Promise((resolve) => setTimeout(resolve, 160));
+  for (let attempt = 0; attempt < 50 && !rendered.includes("RESOURCE REVISIONS"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.match(rendered, /RESOURCE REVISIONS/);
+  const revisionBody = assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "RESOURCE REVISIONS", "", [
+    "Test / skill:revision-skill",
+    "Select a commit to install; the catalog pin remains unchanged.",
+  ]).filter((line) => line.trim());
+  assert.equal(revisionBody.length, 2, "unpaginated revision rows stay below the divider without new column labels");
+  assert.match(revisionBody[0], /› aaaaaaa\s+2026-11-09\s+Current pin/);
+  assert.match(revisionBody[1], /bbbbbbb\s+2026-11-08\s+Previous revision/);
+  const selectionStart = rendered.length;
   input.write("\x1b[B");
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (let attempt = 0; attempt < 50 &&
+      !rendered.slice(selectionStart).includes("› bbbbbbb"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(rendered.slice(selectionStart).includes("› bbbbbbb"), "the second revision is selected before Enter");
   input.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.match(rendered, /Selected commit:/);
@@ -239,6 +252,12 @@ test("dashboard revision picker applies a selected full SHA to a confirmed instr
   input.write("v");
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.match(rendered, /RESOURCE REVISIONS/);
+  const revisionBody = assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "RESOURCE REVISIONS", "", [
+    "Test / instruction:review",
+    "Select a commit to update; the catalog pin remains unchanged.",
+  ]).filter((line) => line.trim());
+  assert.equal(revisionBody.length, 2, "the existing update context moves into the header without consuming revision rows");
+  assert.match(revisionBody[0], /› aaaaaaa\s+2026-11-09\s+Current pin/);
   input.write("\x1b[B");
   await new Promise((resolve) => setTimeout(resolve, 50));
   input.write("\r");
@@ -2728,6 +2747,43 @@ test("dashboard update reaches the production CLI and reports a safe local-confl
 });
 
 
+function selectedDetailsFrame(rendered) {
+  const start = rendered.lastIndexOf("\u001b[?2026h");
+  const end = rendered.indexOf("\u001b[?2026l", start);
+  assert.ok(start >= 0 && end > start, "dashboard emits a complete synchronized frame");
+  return require("node:util").stripVTControlCharacters(rendered.slice(start, end));
+}
+
+function assertSeparatedPanelHeader(frame, title, firstBody, metadata = []) {
+  const lines = frame.split(/\r?\n/);
+  const titleRow = lines.findIndex((line) => {
+    const column = line.indexOf(title);
+    return column >= 2 && line[column - 2] === "│";
+  });
+  assert.ok(titleRow >= 0, `panel title ${title} is visible inside its frame`);
+  const column = lines[titleRow].indexOf(title);
+  const contentAt = (row) => lines[row]?.slice(column).split("│", 1)[0].trimEnd();
+  for (const [offset, expected] of metadata.entries()) {
+    const content = contentAt(titleRow + offset + 1);
+    assert.ok(content !== undefined, `${title} metadata row ${offset + 1} remains visible`);
+    if (expected instanceof RegExp) assert.match(content, expected);
+    else assert.equal(content, expected, `${title} preserves its metadata text and order`);
+  }
+  const dividerRow = titleRow + metadata.length + 1;
+  assert.match(lines[dividerRow].slice(column), /^─+\s*│/,
+    `one divider follows ${title} and all its metadata`);
+  assert.ok(contentAt(dividerRow + 1)?.trimStart().startsWith(firstBody),
+    `${title} content starts immediately below the divider`);
+  const body = [];
+  for (const line of lines.slice(dividerRow + 1)) {
+    if (line[column - 2] !== "│") break;
+    const content = line.slice(column).split("│", 1)[0].trimEnd();
+    assert.doesNotMatch(content, /^─+$/, `${title} has no duplicate divider`);
+    body.push(content);
+  }
+  return body;
+}
+
 test("dashboard renders the resource list and selection panel at wide and narrow widths", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
@@ -2780,6 +2836,7 @@ test("dashboard renders the resource list and selection panel at wide and narrow
     assert.match(selectedPanel, /abcdef0/);
     assert.match(selectedPanel, /https:\/\/github\.com\/example\/manual-skill/);
     assert.match(selectedPanel, /A manually maintained skill\./);
+    assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "SKILL - manual-skill", "CATALOG");
     if (columns >= 112) {
       assert.match(rendered, /LOCATIONS/);
       assert.match(rendered, /DESCRIPTION/);
@@ -2835,144 +2892,378 @@ test("catalog browser renders ordered columns without list descriptions at wide 
     const listHeader = header.split("│ │", 1)[0];
     assert.doesNotMatch(listHeader, /DESC/);
     assert.match(rendered, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
+    assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "INSTRUCTION - catalog-skill", "CATALOG");
     input.write("q");
     assert.equal(await done, true);
     input.destroy();
     output.destroy();
   }
 });
-test("preview starts with a tree page, then advances through each complete file", async () => {
+test("preview starts with source files and keeps audit and tree pages separate", async () => {
   const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
   const resource = { catalog: "AI-Kit", kind: "skill", id: "sample" };
+  const firstFile = Array.from({ length: 80 }, (_, index) => `First file line ${index}`);
+  const secondFile = ["Second file line 0", "Second file line 1"];
+  const tree = ["sample/", "├── references/", "│   └── second.md", "└── SKILL.md"];
+  const audit = [
+    "Audit coverage: 2/2 files analyzed; no files skipped.",
+    "  No configured audit rules matched. This is not a safety guarantee.",
+  ];
   const content = [
-    "sample/",
-    "├── first.md",
-    "└── second.md",
-    "",
-    "── first.md ──",
-    "",
-    ...Array.from({ length: 8 }, (_, index) => `First file line ${index}`),
-    "",
-    "── second.md ──",
-    "",
-    "Second file line 0",
-    "Second file line 1",
+    ...tree, "", "── SKILL.md ──", "", ...firstFile,
+    "", "── references/second.md ──", "", ...secondFile, ...audit,
   ].join("\n");
-  const options = { action: "preview", resource, content, columns: 100, rows: 32 };
-  assert.equal(inspectionPageCount(options), 4);
-  assert.deepEqual(inspectionPageView({ ...options, page: 0 }), {
-    title: "SOURCE TREE",
-    lines: ["sample/", "├── first.md", "└── second.md"],
-    page: 0,
-    pageCount: 4,
-  });
-  assert.deepEqual(inspectionPageView({ ...options, page: 1 }), {
-    title: "FILE first.md · PART 1/2",
-    lines: Array.from({ length: 6 }, (_, index) => `First file line ${index}`),
-    page: 1,
-    pageCount: 4,
-  });
-  assert.deepEqual(inspectionPageView({ ...options, page: 2 }), {
-    title: "FILE first.md · PART 2/2",
-    lines: ["First file line 6", "First file line 7"],
-    page: 2,
-    pageCount: 4,
-  });
-  assert.deepEqual(inspectionPageView({ ...options, page: 3 }), {
-    title: "FILE second.md",
-    lines: ["Second file line 0", "Second file line 1"],
-    page: 3,
-    pageCount: 4,
-  });
+  const options = { action: "preview", resource, content, columns: 90, rows: 40 };
+  const sourceCount = inspectionPageCount(options);
+  assert.equal(sourceCount, 4);
+  const sourcePages = Array.from({ length: sourceCount }, (_, page) =>
+    inspectionPageView({ ...options, page }));
+  assert.match(sourcePages[0].title, /^FILE SKILL\.md/);
+  assert.equal(sourcePages[0].lines[0], firstFile[0]);
+  assert.deepEqual(sourcePages.flatMap(({ lines }) => lines), [...firstFile, ...secondFile]);
+  assert.equal(sourcePages.at(-1).title, "FILE references/second.md");
+  assert.deepEqual(inspectionPageView({ ...options, focus: "source", page: 0 }), sourcePages[0]);
+  assert.deepEqual(inspectionPageView({ ...options, page: -1 }), sourcePages[0]);
+  assert.deepEqual(inspectionPageView({ ...options, page: sourceCount }), sourcePages.at(-1));
+  for (const [focus, title, expected] of [
+    ["audit", "AUDIT REPORT", audit.map((line) => line.trim())],
+    ["tree", "SOURCE TREE", tree],
+  ]) {
+    const count = inspectionPageCount({ ...options, focus });
+    const pages = Array.from({ length: count }, (_, page) =>
+      inspectionPageView({ ...options, focus, page }));
+    assert.match(pages[0].title, new RegExp(`^${title}`));
+    assert.deepEqual(pages.flatMap(({ lines }) => lines), expected);
+    assert.equal(pages[0].pageCount, count);
+    assert.deepEqual(inspectionPageView({ ...options, focus, page: count }), pages.at(-1));
+  }
 });
-test("preview page count adapts to terminal height", async () => {
-  const { inspectionPageCount } = await import("../dist/dashboard/screens.mjs");
-  const resource = { catalog: "AI-Kit", kind: "skill", id: "sample" };
-  const content = [
-    "sample/",
+
+for (const [kind, sourcePath] of [
+  ["skill", "skills/sample"],
+  ["agent", "agents/sample.agent.md"],
+  ["instruction", "instructions/sample.instructions.md"],
+]) {
+  test(`preview opens ${kind} content before its fallback tree and unavailable audit`, async () => {
+    const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+    const options = {
+      action: "preview",
+      resource: { catalog: "sample", kind, id: "sample", source_path: sourcePath },
+      content: "# Pinned source\nRead the complete source before installing.",
+      columns: 100,
+      rows: 40,
+      page: 0,
+    };
+    const source = inspectionPageView(options);
+    assert.equal(source.lines[0], "# Pinned source");
+    assert.match(source.title, /^FILE /);
+    assert.equal(inspectionPageCount(options), 1);
+    const tree = inspectionPageView({ ...options, focus: "tree" });
+    assert.equal(tree.title, "SOURCE TREE");
+    assert.deepEqual(tree.lines, [
+      "sample/",
+      `└── ${kind === "skill" ? "SKILL.md" : path.basename(sourcePath)}`,
+    ]);
+    const audit = inspectionPageView({ ...options, focus: "audit" });
+    assert.equal(audit.title, "AUDIT REPORT");
+    assert.equal(audit.lines.join(" "), "Audit report unavailable; no result was returned.");
+    assert.doesNotMatch(audit.lines.join(" "), /No configured audit rules matched|no files skipped|clean/i);
+  });
+}
+
+function rawSourcePreview(resource, lines) {
+  return [
+    `id: ${resource.id}`,
+    `description: Review repository changes.`,
+    `catalog: ${resource.catalog}`,
+    `source: ${resource.source_repository}/${resource.source_path}@${resource.source_ref}`,
+    "license: MIT",
+    `upstream: https://github.com/${resource.source_repository}/tree/${resource.source_ref}/${resource.source_path}`,
+    "", ...lines,
+  ].join("\n");
+}
+
+const previewMarkdownLines = [
+  "", "---", "name: reviewer", "---", "",
+  "# Review checklist",
+  "Item|Status|Note",
+  "----|-----|----",
+  "Tests|pass|done",
+  "",
+  "| Item | Status |",
+  "| ---- | ------ |",
+  "| Docs | ready |",
+  "",
+  "Section title", "-------------",
+  "Another section", "==============",
+  "**Review carefully** and *keep emphasis* with [reference](https://example.com/review).",
+  "Keep `inline code`, <angle brackets>, & ampersands, café, 漢字 and 🙂 literal.  ",
+  "\tIndented source retains tabs and trailing spaces.  ",
+  "```javascript",
+  "const review = \"approved\";",
+  "/* Preserve comment state",
+  "   across source lines. */",
+  "```",
+  "~~~unknown-preview-language",
+  "const unrecognized = \"plain source\";",
+  "~~~",
+  "---", "----", "***", "___",
+  "-- important body text --",
+  "── ordinary body text ──",
+  "— ordinary body text —",
+  "– ordinary body text –",
+  "",
+  "```markdown",
+  "── references/checklist.md ──", "",
+  "This exact declared header is a fenced example.",
+  "```",
+  "~~~markdown",
+  "── scripts/tools/review.sh ──", "",
+  "This other declared header is also a fenced example.",
+  "~~~",
+  "── missing.md ──", "",
+  "An undeclared path is body text.",
+  "── SKILL.md ──", "",
+  "A repeated entrypoint is body text.",
+  "", "",
+];
+
+for (const [kind, sourcePath] of [
+  ["skill", "skills/reviewer"],
+  ["agent", "agents/reviewer.agent.md"],
+  ["instruction", "instructions/reviewer.instructions.md"],
+]) {
+  test(`preview preserves Markdown and exact source page counts for ${kind}`, async () => {
+    const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+    const resource = {
+      catalog: "sample", kind, id: "reviewer", source_repository: "org/repo",
+      source_path: sourcePath, source_ref: "a".repeat(40),
+    };
+    const tree = [
+      "reviewer/",
+      "├── references/",
+      "│   └── checklist.md",
+      "├── scripts/",
+      "│   └── tools/",
+      "│       └── review.sh",
+      "└── SKILL.md",
+    ];
+    const files = kind === "skill" ? [
+      { path: "SKILL.md", lines: previewMarkdownLines },
+      { path: "references/checklist.md", lines: ["", "# Checklist", "Keep every line.", ""] },
+      { path: "scripts/tools/review.sh", lines: ["#!/bin/sh", "printf 'review complete\\n'", "", ""] },
+    ] : [{ path: path.basename(sourcePath), lines: rawSourcePreview(resource, previewMarkdownLines).split("\n") }];
+    const content = kind === "skill"
+      ? [...tree, "", ...files.flatMap((file, index) => [
+        ...(index ? [""] : []), `── ${file.path} ──`, "", ...file.lines,
+      ]), ""].join("\n")
+      : files[0].lines.join("\n");
+    const options = { resource, content, columns: 240, rows: 100 };
+    const count = inspectionPageCount(options);
+    assert.equal(count, files.length, "only real source files contribute pages");
+    const pages = Array.from({ length: count }, (_, page) => inspectionPageView({ ...options, page }));
+    assert.deepEqual(pages.map(({ title }) => title), files.map((file) => `FILE ${file.path}`));
+    assert.deepEqual(pages.map(({ lines }) => lines), files.map((file) => file.lines));
+    assert.ok(pages.every(({ pageCount }) => pageCount === files.length));
+    const treePage = inspectionPageView({ ...options, focus: "tree", page: 0 });
+    assert.deepEqual(treePage.lines, kind === "skill" ? tree : [
+      "reviewer/", `└── ${path.basename(sourcePath)}`,
+    ]);
+  });
+}
+
+test("preview independently paginates complete long source, audit and tree content at adaptive sizes", async () => {
+  const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+  const tree = [
+    "sample/", "├── references/",
+    ...Array.from({ length: 80 }, (_, index) => `│   ${index === 79 ? "└" : "├"}── file-${index}.md`),
     "└── SKILL.md",
-    "",
-    "── SKILL.md ──",
-    "",
-    ...Array.from({ length: 40 }, (_, index) => `Preview line ${index}`),
-  ].join("\n");
-  assert.equal(inspectionPageCount({ action: "preview", resource, content, columns: 100, rows: 30 }), 11);
-  assert.equal(inspectionPageCount({ action: "preview", resource, content, columns: 100, rows: 40 }), 4);
+  ];
+  const source = Array.from({ length: 100 }, (_, index) => `Source line ${index}`);
+  const audit = [
+    "Audit coverage: 1/1 files analyzed; no files skipped.",
+    ...Array.from({ length: 80 }, (_, index) => `  WARNING f.md:${index + 1} [PROMPT_OVERRIDE] Finding ${index}`),
+  ];
+  const options = {
+    action: "preview",
+    resource: { catalog: "sample", kind: "skill", id: "sample" },
+    content: [...tree, "", "── SKILL.md ──", "", ...source, ...audit].join("\n"),
+  };
+  for (const [columns, rows] of [[120, 45], [72, 40], [120, 18], [60, 24], [56, 12], [120, 8]]) {
+    for (const [focus, expected] of [["source", source], ["audit", audit], ["tree", tree]]) {
+      const viewport = { ...options, columns, rows, focus };
+      const count = inspectionPageCount(viewport);
+      assert.ok(count > 1, `${focus} has multiple pages at ${columns}x${rows}`);
+      const pages = Array.from({ length: count }, (_, page) => inspectionPageView({ ...viewport, page }));
+      assert.deepEqual(
+        pages.flatMap(({ lines }) => lines).join("").replace(/\s/g, ""),
+        expected.join("").replace(/\s/g, ""),
+        `${focus} retains every line at ${columns}x${rows}`,
+      );
+      assert.deepEqual(pages.map(({ page }) => page), Array.from({ length: count }, (_, page) => page));
+      assert.ok(pages.every(({ pageCount }) => pageCount === count));
+    }
+  }
+  assert.ok(
+    inspectionPageCount({ ...options, columns: 72, rows: 30 }) >
+    inspectionPageCount({ ...options, columns: 72, rows: 45 }),
+    "a shorter terminal uses more source pages",
+  );
 });
-test("catalog browser previews source text and reports audits from keyboard actions", async () => {
-  const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
-  const input = new PassThrough();
-  input.isTTY = true;
-  input.setRawMode = () => {};
-  input.ref = () => {};
-  input.unref = () => {};
-  const output = new PassThrough();
-  output.isTTY = true;
-  output.columns = 120;
-  output.rows = 40;
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString(); });
-  const calls = [];
-  const done = runDashboard([], input, output, [], {
-    catalogResources: [{
-      catalog: "sample",
-      kind: "agent",
-      id: "reviewer",
-      source_repository: "org/repo",
-      description: `${"A long description that must remain complete. ".repeat(12)}Final description sentence.`,
-    }],
-    execute: async (action) => {
-      calls.push(action);
-      const message = action === "preview"
-        ? [
-          "reviewer/",
-          "├── AGENTS.md",
-          "└── references.md",
-          "",
-          "── AGENTS.md ──",
-          "",
-          ...Array.from({ length: 70 }, (_, index) => `# Source line ${index}`),
-          "",
-          "── references.md ──",
-          "",
-          "Reference content.",
-        ].join("\n")
-        : "Audit coverage: 1/1 files analyzed.";
-      return { code: 0, messages: [message], resources: [], errors: [] };
-    },
+
+test("preview wraps highlighted source without changing whitespace, Unicode or logical-file state", async () => {
+  const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+  const source = [
+    "# Exact source",
+    "**Emphasis** and [link](https://example.com/?a=1&b=2) with `inline code`.",
+    "",
+    "```javascript",
+    "/* " + "comment continuation café 漢字 🙂 <>& ".repeat(70),
+    "still inside the same comment */",
+    "const message = `" + "wrapped template content ".repeat(70),
+    "template continuation`;",
+    "```",
+    "\tTrailing whitespace stays intact.  ",
+    "",
+    "~~~unsupported-preview-language",
+    "const plain = '<>&';",
+    "~~~",
+    "",
+  ];
+  const resource = { catalog: "sample", kind: "skill", id: "sample" };
+  const content = ["sample/", "└── SKILL.md", "", "── SKILL.md ──", "", ...source, ""].join("\n");
+  for (const [columns, rows] of [[72, 40], [60, 24]]) {
+    const options = { resource, content, columns, rows };
+    const width = columns - 6;
+    const expected = source.flatMap((line) => {
+      if (line.length <= width) return [line];
+      const characters = Array.from(line);
+      return Array.from({ length: Math.ceil(characters.length / width) }, (_, index) =>
+        characters.slice(index * width, (index + 1) * width).join(""));
+    });
+    const count = inspectionPageCount(options);
+    assert.ok(count > 2, "multiline tokens cross source pages");
+    const pages = Array.from({ length: count }, (_, page) => inspectionPageView({ ...options, page }));
+    assert.deepEqual(pages.flatMap(({ lines }) => lines), expected,
+      `source text and wrapping remain exact at ${columns}x${rows}`);
+    assert.ok(pages.every(({ lines }) => lines.every((line) => !line.includes("\u001b"))));
+    assert.deepEqual(inspectionPageView({ ...options, focus: "tree", page: 0 }).lines,
+      ["sample/", "└── SKILL.md"]);
+    assert.equal(inspectionPageView({ ...options, focus: "audit", page: 0 }).lines.join(" "),
+      "Audit report unavailable; no result was returned.");
+  }
+});
+
+for (const [kind, columns, rows, hasAudit] of [
+  ["skill", 120, 45, true],
+  ["agent", 72, 40, true],
+  ["instruction", 120, 18, true],
+  ["instruction", 72, 40, false],
+]) {
+  test(`catalog preview independently navigates ${kind} panes at ${columns}x${rows}${hasAudit ? "" : " without an audit"}`, async () => {
+    const { PassThrough } = require("node:stream");
+    const { stripVTControlCharacters } = require("node:util");
+    const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+    const { inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+    const input = new PassThrough();
+    input.isTTY = true;
+    input.setRawMode = () => {};
+    input.ref = () => {};
+    input.unref = () => {};
+    const output = new PassThrough();
+    output.isTTY = true;
+    output.columns = columns;
+    output.rows = rows;
+    let rendered = "";
+    output.on("data", (chunk) => { rendered += chunk.toString(); });
+    const calls = [];
+    const resource = {
+      catalog: "sample", kind, id: "reviewer", source_repository: "org/repo", source_ref: "a".repeat(40),
+      source_path: kind === "skill" ? "skills/reviewer" : `${kind}s/reviewer.md`,
+    };
+    const sourceLines = [
+      "Source marker 0", "Item|Status|Note", "----|-----|----", "Tests|pass|done",
+      ...Array.from({ length: 99 }, (_, index) => `Source marker ${index + 1}`),
+    ];
+    const sourceOutput = [
+      ...(kind === "skill" ? [
+        "reviewer/", "├── references/",
+        ...Array.from({ length: 60 }, (_, index) => `│   ${index === 59 ? "└" : "├"}── reference-${index}.md`),
+        "└── SKILL.md", "", "── SKILL.md ──", "", ...sourceLines,
+      ] : rawSourcePreview(resource, sourceLines).split("\n")),
+      ...(hasAudit ? [
+        "Audit coverage: 1/1 files analyzed; no files skipped.",
+        ...Array.from({ length: 60 }, (_, index) =>
+          `  WARNING ${kind === "skill" ? "SKILL.md" : resource.source_path}:${index + 1} [PROMPT_OVERRIDE] Audit marker ${index}`),
+      ] : []),
+    ].join("\n");
+    const options = { action: "preview", resource, content: sourceOutput, columns, rows };
+    const done = runDashboard([], input, output, [], {
+      catalogResources: [resource],
+      execute: async (action) => {
+        calls.push(action);
+        return { code: 0, messages: [sourceOutput], resources: [], errors: [] };
+      },
+    });
+    const press = async (key, expected) => {
+      const start = rendered.length;
+      input.write(key);
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const frame = stripVTControlCharacters(rendered.slice(start));
+        if (frame.includes(expected)) return frame;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.fail(`Expected ${JSON.stringify(expected)} after ${JSON.stringify(key)}`);
+    };
+    const navigate = async (key, focus, page) => {
+      const view = inspectionPageView({ ...options, focus, page });
+      return press(key, view.lines.find((line) => line.trim()));
+    };
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await press("a", "CATALOG RESOURCES");
+      const initial = await press("p", kind === "skill" ? "Source marker 0" : "id: reviewer");
+      assert.match(initial, /SOURCE PREVIEW/);
+      assert.match(initial, new RegExp(`FILE ${kind === "skill" ? "SKILL\\.md" : "reviewer\\.md"}`));
+      if (kind === "skill") assert.match(initial, /----\|-----\|----/);
+      if (columns >= 120 && rows >= 40) {
+        assert.match(initial, /AUDIT REPORT/);
+        assert.match(initial, /SOURCE TREE/);
+        assert.match(initial, /Audit coverage:/);
+      } else {
+        assert.doesNotMatch(initial, /AUDIT REPORT|SOURCE TREE/);
+      }
+      await navigate("\x1b[C", "source", 1);
+      const audit = await navigate("a", "audit", 0);
+      if (hasAudit) {
+        assert.match(audit, /Audit coverage:/);
+        await navigate("\x1b[C", "audit", 1);
+      } else {
+        assert.match(audit.replace(/\s+/g, " "), /Audit report unavailable; no result was returned\./);
+        assert.doesNotMatch(audit, /No configured audit rules matched|no files skipped/);
+      }
+      const treePages = kind === "skill" ? 2 : 1;
+      await navigate("t", "tree", 0);
+      if (treePages > 1) await navigate("\x1b[C", "tree", 1);
+      await navigate("s", "source", 1);
+      await navigate("\x1b[D", "source", 0);
+      await navigate("a", "audit", hasAudit ? 1 : 0);
+      if (hasAudit) await navigate("\x1b[D", "audit", 0);
+      await navigate("t", "tree", treePages - 1);
+      if (treePages > 1) await navigate("\x1b[D", "tree", 0);
+      await navigate("\t", "source", 0);
+      assert.deepEqual(calls, ["preview"]);
+      await press("\r", "CATALOG RESOURCES");
+    } finally {
+      input.write("\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      input.write("q");
+      await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 250))]);
+      input.destroy();
+      output.destroy();
+    }
   });
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  input.write("p");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /SOURCE PREVIEW/);
-  assert.match(rendered, /PAGE 1\/12 · SOURCE TREE/);
-  assert.match(rendered, /REVIEWER\//i);
-  assert.match(rendered, /├── AGENTS\.md/);
-  assert.doesNotMatch(rendered, /# Source line 0/);
-  assert.match(rendered, /DESCRIPTION/);
-  assert.match(rendered, /description sentence\./);
-  const secondPageStart = rendered.length;
-  input.write("\x1b[C");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered.slice(secondPageStart), /PAGE 2\/12 · FILE AGENTS\.md · PART 1\/10/);
-  assert.match(rendered.slice(secondPageStart), /# Source line 0/);
-  input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /RESOURCE AUDIT/);
-  assert.match(rendered, /Audit coverage: 1\/1 files analyzed/);
-  assert.deepEqual(calls, ["preview", "audit"]);
-  input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  input.write("q");
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
-});
+}
 test("dashboard toggles the selection panel with D", async () => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
@@ -3103,6 +3394,181 @@ test("dashboard toggles catalog management details with D", async () => {
   input.destroy();
   output.destroy();
 });
+
+for (const [screen, dimensions] of [
+  ["inventory", [[160, 40], [112, 50], [100, 50], [160, 30], [120, 36], [100, 36]]],
+  ["catalog", [[160, 40], [112, 40], [100, 50], [160, 30], [120, 36], [100, 38]]],
+  ["management", [[160, 40], [112, 40], [100, 50], [160, 24], [120, 36], [100, 29]]],
+]) {
+  for (const [columns, rows] of dimensions) {
+    test(`${screen} table, details and shortcuts retain single dividers and navigation at ${columns}x${rows}`, { timeout: 5_000 }, async () => {
+      const { PassThrough } = require("node:stream");
+      const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+      const { wrappedShortcutLines } = await import("../dist/dashboard/screens/shared.mjs");
+      const { detailPanelLayout } = require("../dist/dashboard/helpers.mjs");
+      const input = new PassThrough();
+      input.isTTY = true;
+      input.setRawMode = () => {};
+      input.ref = () => {};
+      input.unref = () => {};
+      const output = new PassThrough();
+      output.isTTY = true;
+      output.columns = columns;
+      output.rows = rows;
+      let rendered = "";
+      output.on("data", (chunk) => { rendered += chunk.toString(); });
+      const resources = Array.from({ length: 60 }, (_, index) => ({
+        catalog: "sample",
+        kind: "skill",
+        id: `resource-${String(index).padStart(2, "0")}`,
+        scope: "project",
+        status: "current",
+        managed: true,
+        tags: ["review"],
+        license_status: "MIT",
+        license_spdx: "MIT",
+        description: `Selected description ${index}.`,
+        source_repository: "org/repo",
+        source_path: "skills/sample",
+        source_ref: "main",
+      }));
+      const catalogs = resources.map((_, index) => ({
+        name: `catalog-${String(index).padStart(2, "0")}`,
+        repository: `org/repo-${index}`,
+      }));
+      const done = runDashboard(screen === "inventory" ? resources : [], input, output, [], {
+        ...(screen === "catalog" ? { catalogResources: resources } : {}),
+        ...(screen === "management" ? { userCatalogs: catalogs } : {}),
+      });
+      const title = (index) => screen === "management"
+        ? `CATALOG - ${catalogs[index].name}`
+        : `SKILL - ${resources[index].id}`;
+      const frame = () => {
+        const value = selectedDetailsFrame(rendered);
+        assert.ok(value.trimEnd().split(/\r?\n/).length <= rows,
+          `${screen} fits the ${columns}x${rows} viewport`);
+        return value;
+      };
+      const waitForFrame = async (expected, start = 0) => {
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          if (rendered.slice(start).includes(expected) &&
+              rendered.lastIndexOf("\u001b[?2026l") > start) return frame();
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.fail(`Expected a complete frame containing ${JSON.stringify(expected)}`);
+      };
+      const press = async (key, expected) => {
+        const start = rendered.length;
+        input.write(key);
+        return waitForFrame(expected, start);
+      };
+      const assertListAndShortcuts = (value, detailsVisible = true, query = "",
+        catalogFilter = "ALL", kindFilter = "ALL", licenseFilter = "ALL") => {
+        const tableTitle = screen === "inventory" ? "INVENTORY"
+          : screen === "catalog" ? "CATALOG RESOURCES" : "CONNECTED CATALOGS 60";
+        const metadata = screen === "inventory"
+          ? [new RegExp(`^RESOURCES ${query ? 10 : 60}/60 · \\d+-\\d+$`),
+            `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter}`]
+          : screen === "catalog"
+            ? [new RegExp(`^RESOURCES \\d+/60 · \\d+-\\d+$`),
+              `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter} · License ${licenseFilter}`]
+            : [];
+        const tableBody = assertSeparatedPanelHeader(value, tableTitle,
+          screen === "inventory" ? "STATUS" : screen === "catalog" ? "INST" : "CATALOG", metadata);
+        const headings = tableBody[0];
+        assert.match(headings, screen === "inventory" ? /STATUS\s+SCOPE\s+KIND\s+ID\s+CATALOG/
+          : screen === "catalog" ? /INST(?:ALLED)?\s+SOURCE\s+KIND\s+ID/
+            : /CATALOG\s+REPOSITORY\s+RES(?:OURCES)?\s+INST(?:ALLED)?\s+FRESHNESS/);
+        const visibleRows = tableBody.slice(1).filter((line) =>
+          line.includes(screen === "management" ? "catalog-" : "resource-"));
+        assert.ok(visibleRows.length > 0, "data rows stay below their column headings");
+        if (screen === "inventory") {
+          const countLine = value.split(/\r?\n/).find((line) => /RESOURCES \d+\/60 ·/.test(line));
+          const [, first, last] = countLine.match(/· (\d+)-(\d+)/);
+          assert.equal(Number(last) - Number(first) + 1, visibleRows.length,
+            "the header range matches the unchanged visible row budget");
+          assert.ok(visibleRows[0].includes(resources[Number(first) - 1 + (query ? 50 : 0)].id));
+          assert.ok(visibleRows.at(-1).includes(resources[Number(last) - 1 + (query ? 50 : 0)].id));
+        }
+        const shortcuts = screen === "inventory"
+          ? ["M catalogs", "F filter · C catalog · K kind", "D details", "↑↓ navigate · ? guide · Q quit"]
+          : screen === "catalog"
+            ? ["F filter · C catalog · K kind", "T tag · S status · L license",
+              "V revisions · P preview/audit · D details",
+              "↑↓ navigate · ENTER install · ESC back", "? guide · Q quit"]
+            : ["D details · ↑↓ nav · ? guide", "ESC inventory · Q quit"];
+        const layout = detailPanelLayout(columns, screen === "inventory" && columns >= 132 ? 0.64 : 0.68);
+        const shortcutWidth = detailsVisible && layout.sideBySide ? layout.detailsWidth : columns - 2;
+        const expected = wrappedShortcutLines(shortcuts, shortcutWidth);
+        const actual = assertSeparatedPanelHeader(value, "SHORTCUTS", expected[0]);
+        assert.deepEqual(actual, expected, "every wrapped shortcut remains visible below its single divider");
+        if (screen === "catalog" && columns === 112 && detailsVisible) {
+          assert.ok(expected.length > shortcuts.length, "the narrow side column exercises shortcut wrapping");
+        }
+      };
+      const assertSelection = (value, index) => {
+        const firstBody = screen === "management"
+          ? rows < 30 ? `REPOSITORY ${catalogs[index].repository}` : "REPOSITORY"
+          : screen === "inventory" && rows < 40 ? "STATUS" : "CATALOG";
+        assertSeparatedPanelHeader(value, title(index), firstBody);
+        assertListAndShortcuts(value);
+        const selectedRow = value.split(/\r?\n/).find((line) =>
+          line.includes("›") && line.includes(screen === "management" ? catalogs[index].name : resources[index].id));
+        assert.ok(selectedRow, "the selected list row remains in the visible page");
+        if (screen === "management") {
+          assert.match(value, new RegExp(`org/repo-${index}(?:\\s|│)`));
+          assert.match(value, /FRESHNESS/);
+          assert.match(value, /Updates catalog metadata only/);
+        } else if (screen === "catalog" || rows >= 40) {
+          assert.match(value, new RegExp(`Selected description ${index}\\.`));
+          assert.match(value, /org\/repo/);
+        } else {
+          assert.match(value, /Healthy · no recorded issues/);
+        }
+      };
+      try {
+        const inventoryFrame = await waitForFrame("INVENTORY");
+        const initial = screen === "inventory" ? inventoryFrame
+          : await press(screen === "catalog" ? "a" : "m", title(0));
+        assertSelection(initial, 0);
+        assertSelection(await press("\u001b[A", title(59)), 59);
+        const hidden = await press("d", "SHORTCUTS");
+        assert.doesNotMatch(hidden, /SKILL - resource-|CATALOG - catalog-/);
+        assertListAndShortcuts(hidden, false);
+        assertSelection(await press("d", title(59)), 59);
+        assertSelection(await press("\u001b[B", title(0)), 0);
+        if (screen !== "management") {
+          await press("f", "TYPE to search");
+          const filtered = await press("resource-5", "resource-5▏");
+          assert.ok(filtered.includes("resource-50"), "live filtering selects a matching resource");
+          await press("\r", screen === "catalog" ? "C catalog" : "F filter");
+          assertListAndShortcuts(frame(), true, "resource-5");
+          const lastMatch = await press("\u001b[A", title(59));
+          assertListAndShortcuts(lastMatch, true, "resource-5");
+          assert.ok(lastMatch.split(/\r?\n/).some((line) => line.includes("›") && line.includes("resource-59")),
+            "filtered navigation keeps the last matching row selected and visible");
+          if (screen === "catalog") {
+            assertListAndShortcuts(await press("l", "License MIT"), true, "resource-5", "ALL", "ALL", "MIT");
+          }
+          if (screen === "inventory") {
+            assertListAndShortcuts(await press("c", "Catalog SAMPLE"), true, "resource-5", "SAMPLE");
+            assertListAndShortcuts(await press("k", "Kind SKILL"), true, "resource-5", "SAMPLE", "SKILL");
+          }
+        }
+        input.write("q");
+        assert.equal(await done, true);
+      } finally {
+        input.write("\u001b");
+        input.write("q");
+        let timeout;
+        await Promise.race([done, new Promise((resolve) => { timeout = setTimeout(resolve, 250); })]);
+        clearTimeout(timeout);
+        input.destroy();
+        output.destroy();
+      }
+    });
+  }
+}
 
 
 test("inventory columns reserve usable ID space and expose custom Catalog suffixes at 120 columns", async () => {

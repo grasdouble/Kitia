@@ -47,7 +47,7 @@ function setShowcaseEnvironment(fixture) {
   process.env.KITIA_CONFIG_DIR = fixture.config;
   process.env.TERM = "xterm-256color";
   process.env.COLORTERM = "truecolor";
-  process.env.FORCE_COLOR = "1";
+  process.env.FORCE_COLOR = "3";
   delete process.env.NO_COLOR;
   return () => {
     for (const [key, value] of Object.entries(previous)) {
@@ -90,6 +90,12 @@ function remapAnsiPalette(chunk) {
       const code = codes[index];
       let paletteIndex = -1;
       let background = false;
+      // RGB components and 256-color indices are data, not independent SGR codes.
+      if ((code === 38 || code === 48) && codes[index + 1] === 2 && index + 4 < codes.length) {
+        mapped.push(code, 2, codes[index + 2], codes[index + 3], codes[index + 4]);
+        index += 4;
+        continue;
+      }
       if (code >= 30 && code <= 37) paletteIndex = code - 30;
       else if (code >= 90 && code <= 97) paletteIndex = code - 90 + 8;
       else if (code >= 40 && code <= 47) {
@@ -98,9 +104,14 @@ function remapAnsiPalette(chunk) {
       } else if (code >= 100 && code <= 107) {
         paletteIndex = code - 100 + 8;
         background = true;
-      } else if ((code === 38 || code === 48) && codes[index + 1] === 5 &&
-                 codes[index + 2] >= 0 && codes[index + 2] < ANSI_PALETTE.length) {
-        paletteIndex = codes[index + 2];
+      } else if ((code === 38 || code === 48) && codes[index + 1] === 5 && index + 2 < codes.length) {
+        const value = codes[index + 2];
+        if (value < 0 || value >= ANSI_PALETTE.length) {
+          mapped.push(code, 5, value);
+          index += 2;
+          continue;
+        }
+        paletteIndex = value;
         background = code === 48;
         index += 2;
       }
@@ -142,7 +153,7 @@ function createTtyOutput() {
   return output;
 }
 
-async function launchShowcaseDashboard(directory, { executeOverride } = {}) {
+async function launchShowcaseDashboard(directory, { executeOverride, listSourceVersionsOverride, catalogResourcesOverride } = {}) {
   assertTermlessRuntime();
   const fixture = await seedShowcase(directory);
   const restoreEnvironment = setShowcaseEnvironment(fixture);
@@ -190,7 +201,7 @@ async function launchShowcaseDashboard(directory, { executeOverride } = {}) {
     );
     const allResources = catalogEntries(loaded.sourceResources);
     const rows = formatDashboardRows(installed.resources, allResources);
-    const catalogResources = allResources;
+    const catalogResources = catalogResourcesOverride || allResources;
     const dashboardOptions = { target: fixture.project, userTarget: fixture.home };
     const execute = (operation, resource, installOptions) => executeDashboardAction(
       operation,
@@ -205,6 +216,7 @@ async function launchShowcaseDashboard(directory, { executeOverride } = {}) {
       catalogResources,
       userCatalogs,
       execute: executeOverride || execute,
+      listSourceVersions: listSourceVersionsOverride,
     });
     done.catch(() => {});
     const session = {

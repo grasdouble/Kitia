@@ -166,10 +166,18 @@ export function CatalogManagementScreen({
   const managementShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
   const shortcutsPanelRows = modalActive
     ? 0
-    : wrappedShortcutLines(shortcuts, managementShortcutWidth).length + 4;
-  const detailsPanelRows = showDetails ? detailsContent.length + 4 : 0;
+    : wrappedShortcutLines(shortcuts, managementShortcutWidth).length + 5;
+  const detailsPanelRows = showDetails ? detailsContent.length + 5 : 0;
   const stackedOverhead = detailsSideBySide ? 0 : detailsPanelRows + shortcutsPanelRows;
-  const viewport = Math.max(1, rows - (11 + stackedOverhead));
+  // Keep all details and shortcuts when optional gap rows are the only overflow.
+  const stackedOverflow = detailsSideBySide ? 0 : Math.max(0, 12 + stackedOverhead + 1 - rows);
+  const shortcutsMarginTop = stackedOverflow > 0 || (detailsSideBySide &&
+    detailsContent.length + 4 + shortcutsPanelRows > rows - 6) ? 0 : 1;
+  const detailsMarginTop = detailsSideBySide || stackedOverflow > Number(Boolean(shortcutsPanelRows)) ? 0 : 1;
+  const listMarginTop = stackedOverflow > Number(Boolean(shortcutsPanelRows)) + Number(showDetails) ? 0 : 1;
+  const reclaimedRows = detailsSideBySide ? 0 : 1 - listMarginTop +
+    (showDetails ? 1 - detailsMarginTop : 0) + (shortcutsPanelRows ? 1 - shortcutsMarginTop : 0);
+  const viewport = Math.max(1, rows - (12 + stackedOverhead - reclaimedRows));
   const catalogPanelsWidth = detailsSideBySide ? listWidth + 1 + detailsWidth : columns - 2;
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
   const page = catalogs.slice(first, first + viewport);
@@ -201,9 +209,10 @@ export function CatalogManagementScreen({
   }
   const catalogPanel = h(Panel, {
     title: `CONNECTED CATALOGS ${catalogs.length}`,
+    separateHeader: true,
     width: detailsSideBySide ? listWidth : undefined,
     color: tourStep === 2 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
-    marginTop: 1,
+    marginTop: listMarginTop,
   },
   h(Text, { bold: true }, tableHeader),
   ...(page.length
@@ -212,7 +221,7 @@ export function CatalogManagementScreen({
   const detailsPanel = showDetails ? h(DetailsPanel, {
     title: selected ? `CATALOG - ${selected.name}` : "CATALOG DETAILS",
     width: detailsSideBySide ? detailsWidth : undefined,
-    marginTop: detailsSideBySide ? 0 : 1,
+    marginTop: detailsMarginTop,
     flexGrow: detailsSideBySide ? 1 : 0,
     flexShrink: detailsSideBySide ? 1 : 0,
   }, detailsContent) : null;
@@ -220,14 +229,14 @@ export function CatalogManagementScreen({
     ? ShortcutsPanel({
       lines: shortcuts,
       width: managementShortcutWidth,
-      marginTop: 1,
+      marginTop: shortcutsMarginTop,
     })
     : null;
   const detailColumn = h(Box, {
     flexDirection: "column",
     alignItems: "stretch",
     width: detailsSideBySide ? detailsWidth : undefined,
-    height: detailsSideBySide ? viewport + 5 : undefined,
+    height: detailsSideBySide ? viewport + 6 : undefined,
     marginTop: detailsSideBySide ? 1 : 0,
     marginLeft: detailsSideBySide ? 1 : 0,
   }, ...(showDetails

@@ -7,7 +7,7 @@ import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
 import {
-  cycleFilter, cycleIndex, filterCatalogResources, filterInventory, inventoryCatalogLabels,
+  cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, filterCatalogResources, filterInventory, inventoryCatalogLabels,
   mergeRefreshedCatalogResources,
 } from "./helpers.mjs";
 import {
@@ -162,10 +162,9 @@ export function Dashboard({
   const [catalogPreset, setCatalogPreset] = useState<CatalogPresetState | null>(null);
   const [inventoryCatalogFilter, setInventoryCatalogFilter] = useState("all");
   const [inventoryKindFilter, setInventoryKindFilter] = useState("all");
+  const [inventoryLicenseFilter, setInventoryLicenseFilter] = useState("all");
   const [catalogSourceFilter, setCatalogSourceFilter] = useState("all");
   const [catalogKindFilter, setCatalogKindFilter] = useState("all");
-  const [catalogTagFilter, setCatalogTagFilter] = useState("all");
-  const [catalogStatusFilter, setCatalogStatusFilter] = useState("all");
   const [catalogLicenseFilter, setCatalogLicenseFilter] = useState("all");
   const [installResource, setInstallResource] = useState<CatalogResource | null>(null);
   const [installScope, setInstallScope] = useState("project");
@@ -177,10 +176,12 @@ export function Dashboard({
   const [actionMessage, setActionMessage] = useState("");
   const [actionFailure, setActionFailure] = useState<{ action: string; message: string } | null>(null);
   const [inspection, setInspection] = useState<{
-    action: "preview" | "audit";
     resource: CatalogResource;
     content: string;
     page: number;
+    focus: "source" | "audit" | "tree";
+    auditPage: number;
+    treePage: number;
   } | null>(null);
   const [sourceVersionPicker, setSourceVersionPicker] = useState<{
     resource: CatalogResource;
@@ -228,14 +229,15 @@ export function Dashboard({
   const inventoryLabels = inventoryCatalogLabels(installedResources, userCatalogs);
   const visibleInventory = filterInventory(
     installedResources, query, inventoryCatalogFilter, inventoryKindFilter, userCatalogs, inventoryLabels,
+    inventoryLicenseFilter,
   );
   const activeInventoryIndex = Math.min(selectedIndex, Math.max(0, visibleInventory.length - 1));
   const selectedResource = visibleInventory[activeInventoryIndex];
   const candidates = catalogCandidates;
+  const catalogFilters = { catalog: catalogSourceFilter, kind: catalogKindFilter, license: catalogLicenseFilter };
+  const resetCatalogLicenseFilter = () => setCatalogLicenseFilter("all");
   const visibleCatalog = filterCatalogResources(
     candidates, catalogQuery, catalogSourceFilter, catalogKindFilter, userCatalogs, {
-      tag: catalogTagFilter === "all" ? undefined : catalogTagFilter,
-      status: catalogStatusFilter === "all" ? undefined : catalogStatusFilter,
       license: catalogLicenseFilter === "all" ? undefined : catalogLicenseFilter,
     },
   );
@@ -424,17 +426,15 @@ export function Dashboard({
     setActionPending(true);
     setLastActionFailed(false);
     setActionFailure(null);
-    const inspectionAction = requested.action === "preview" || requested.action === "audit";
+    const inspectionAction = requested.action === "preview";
     const progressLabel = requested.action === "install" ? "Installing"
       : requested.action === "update" ? "Updating"
         : requested.action === "remove-unmanaged" ? "Removing"
-          : requested.action === "uninstall" ? "Uninstalling"
-            : requested.action === "preview" ? "Previewing" : "Auditing";
+          : requested.action === "uninstall" ? "Uninstalling" : "Previewing";
     const completedLabel = requested.action === "install" ? "Installed"
       : requested.action === "update" ? "Updated"
         : requested.action === "remove-unmanaged" ? "Removed"
-          : requested.action === "uninstall" ? "Uninstalled"
-            : requested.action === "preview" ? "Previewed" : "Audited";
+          : requested.action === "uninstall" ? "Uninstalled" : "Previewed";
     setActionMessage(`${progressLabel} ${requested.resource.kind}:${requested.resource.id}...`);
     await yieldToRenderer();
     try {
@@ -465,10 +465,12 @@ export function Dashboard({
         }
       } else if (inspectionAction) {
         setInspection({
-          action: requested.action as "preview" | "audit",
           resource: requested.resource,
-          content: outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`,
+          content: outcome || "Source content unavailable; no preview was returned.",
           page: 0,
+          focus: "source",
+          auditPage: 0,
+          treePage: 0,
         });
       } else {
         setActionMessage(outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
@@ -525,15 +527,22 @@ export function Dashboard({
       return;
     }
     if (inspection) {
-      if (key.leftArrow || key.pageUp) {
-        setInspection((current) => current
-          ? { ...current, page: Math.max(0, current.page - 1) }
-          : current);
-      } else if (key.rightArrow || key.pageDown) {
+      if (key.tab || character === "s" || character === "a" || character === "t") {
         setInspection((current) => {
           if (!current) return current;
+          const panels = ["source", "audit", "tree"] as const;
+          const focus = key.tab
+            ? panels[(panels.indexOf(current.focus) + (key.shift ? 2 : 1)) % panels.length]
+            : character === "a" ? "audit" : character === "t" ? "tree" : "source";
+          return { ...current, focus };
+        });
+      } else if (key.leftArrow || key.pageUp || key.rightArrow || key.pageDown) {
+        setInspection((current) => {
+          if (!current) return current;
+          const field = current.focus === "audit" ? "auditPage" : current.focus === "tree" ? "treePage" : "page";
           const pageCount = inspectionPageCount({ ...current, columns, rows });
-          return { ...current, page: Math.min(pageCount - 1, current.page + 1) };
+          const delta = key.leftArrow || key.pageUp ? -1 : 1;
+          return { ...current, [field]: Math.max(0, Math.min(pageCount - 1, current[field] + delta)) };
         });
       } else if (key.return || key.escape || input === " ") {
         setInspection(null);
@@ -1011,6 +1020,7 @@ export function Dashboard({
         else if (key.escape) {
           setCatalogFilterMode(false);
           setCatalogQuery("");
+          resetCatalogLicenseFilter();
           setCatalogIndex(0);
         } else if (key.upArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, -1));
         else if (key.downArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, 1));
@@ -1028,35 +1038,28 @@ export function Dashboard({
       } else if (character === "f") {
         setCatalogFilterMode(true);
       } else if (character === "c") {
-        setCatalogSourceFilter(cycleFilter(
-          catalogSourceFilter, candidates, "catalog", "kind", catalogKindFilter, userCatalogs,
+        setCatalogSourceFilter(cycleCatalogFilter(
+          catalogSourceFilter, candidates, "catalog", catalogFilters, userCatalogs,
         ));
+        resetCatalogLicenseFilter();
         setCatalogIndex(0);
       } else if (character === "k") {
-        setCatalogKindFilter(cycleFilter(
-          catalogKindFilter, candidates, "kind", "catalog", catalogSourceFilter, userCatalogs,
+        setCatalogKindFilter(cycleCatalogFilter(
+          catalogKindFilter, candidates, "kind", catalogFilters, userCatalogs,
         ));
-        setCatalogIndex(0);
-      } else if (character === "t") {
-        setCatalogTagFilter(cycleFilter(catalogTagFilter, candidates, "tag", "kind", "all"));
-        setCatalogIndex(0);
-      } else if (character === "s") {
-        setCatalogStatusFilter(cycleFilter(catalogStatusFilter, candidates, "status", "kind", "all"));
+        setCatalogLicenseFilter("all");
         setCatalogIndex(0);
       } else if (character === "l") {
-        setCatalogLicenseFilter(cycleFilter(catalogLicenseFilter, candidates, "license", "kind", "all"));
+        setCatalogLicenseFilter(cycleCatalogFilter(catalogLicenseFilter, candidates, "license", catalogFilters, userCatalogs));
         setCatalogIndex(0);
       } else if (character === "v") {
         const resource = visibleCatalog[activeCatalogIndex];
         if (resource?.source_repository && resource.source_path) {
           openSourceVersions(resource);
         }
-      } else if (character === "p" || character === "a") {
+      } else if (character === "p") {
         const resource = visibleCatalog[activeCatalogIndex];
-        if (resource) void runConfirmedAction({
-          action: character === "p" ? "preview" : "audit",
-          resource,
-        });
+        if (resource) void runConfirmedAction({ action: "preview", resource });
       } else if (key.upArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, -1));
       else if (key.downArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, 1));
       else if (key.return && visibleCatalog[activeCatalogIndex]) {
@@ -1152,6 +1155,11 @@ export function Dashboard({
         inventoryKindFilter, installedResources, "kind", "catalog", inventoryCatalogFilter, userCatalogs,
       ));
       setSelectedIndex(0);
+    } else if (character === "l") {
+      setInventoryLicenseFilter(cycleInventoryLicense(
+        inventoryLicenseFilter, installedResources, inventoryCatalogFilter, inventoryKindFilter, userCatalogs,
+      ));
+      setSelectedIndex(0);
     } else if (character === "v" && selectedResource &&
         selectedResource.managed !== false && selectedResource.source_repository &&
         selectedResource.source_path &&
@@ -1160,6 +1168,7 @@ export function Dashboard({
     } else if (character === "a" && candidates.length) {
       setScreenMode("catalog");
       setCatalogQuery("");
+      resetCatalogLicenseFilter();
       setCatalogIndex(0);
       setCatalogFilterMode(false);
       setActionMessage("");
@@ -1223,7 +1232,7 @@ export function Dashboard({
   } else if (catalogTransfer) {
     modal = catalogTransferModal({ ...catalogTransfer, columns });
   } else if (sourceVersionPicker) {
-    modal = sourceVersionsModal({ ...sourceVersionPicker, columns });
+    modal = sourceVersionsModal({ ...sourceVersionPicker, columns, rows });
   } else if (actionFailure) {
     modal = actionFailureModal({ ...actionFailure, columns });
   } else if (confirmation) {
@@ -1280,8 +1289,6 @@ export function Dashboard({
       filterMode: catalogFilterMode,
       catalogFilter: catalogSourceFilter,
       kindFilter: catalogKindFilter,
-      tagFilter: catalogTagFilter,
-      statusFilter: catalogStatusFilter,
       licenseFilter: catalogLicenseFilter,
       selectedIndex: activeCatalogIndex,
       versionLabel: headerVersionLabel,
@@ -1300,6 +1307,7 @@ export function Dashboard({
       filterMode,
       catalogFilter: inventoryCatalogFilter,
       kindFilter: inventoryKindFilter,
+      licenseFilter: inventoryLicenseFilter,
       selectedIndex: activeInventoryIndex,
       versionLabel: headerVersionLabel,
       actionMessage,

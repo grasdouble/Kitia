@@ -109,9 +109,50 @@ Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
 Operations that can block run in a worker thread so rendering and animation
 continue during the work.
-Preview and audit use dedicated screens below the dashboard header. Resource
-metadata appears above a content panel that fills the remaining terminal space;
-terminal-sized pages navigate with Left/Right or PageUp/PageDown.
+Preview uses a dedicated screen below the dashboard header and opens directly
+on source-file content, not an initial tree page. With enough terminal width
+and height, source files occupy the main pane on the left; the right sidebar
+stacks `AUDIT REPORT` above `SOURCE TREE`. On narrow or short terminals, one
+focused pane fills the available content area instead. Press `S`, `A`, or `T`
+to focus source, audit, or tree; `Tab` cycles those panes and `Shift+Tab` cycles
+backward. Left/Right or PageUp/PageDown navigate only the focused pane. Each
+pane retains its own page when focus changes, and pagination adapts to the
+available pane width and height. Enter or Esc closes Preview.
+The source pane groups its title, page counter, and filename into a distinct
+header above a theme-colored divider. The audit and tree panes likewise separate
+their existing title and page counter from the body with one divider row; they
+do not gain filename rows. Header rows are reserved separately from each pane's
+body pagination, including in narrow and short-terminal layouts.
+Preview preserves Markdown source bodies, including tables, rules, frontmatter,
+and fenced examples. Source-only syntax colors distinguish Markdown headings,
+emphasis, links and code, plus comments, keywords, strings and other supported
+code tokens. Colors do not render Markdown or alter source characters, whitespace,
+line wrapping, page boundaries, filenames, audit text or tree text. Tokenization
+covers each complete logical file before wrapping and pagination, so multiline
+comments, strings and fenced blocks retain their syntax state across pages.
+Only skill previews use upstream file boundaries: the `SKILL.md` entrypoint
+followed by files declared in the source tree. Agent and instruction previews
+remain single source files with their provenance metadata.
+
+Supported filename extensions are Markdown (`md`, `markdown`, `mdown`, `mkd`),
+JavaScript (`js`, `mjs`, `cjs`, `jsx`), TypeScript (`ts`, `mts`, `cts`, `tsx`),
+JSON/JSONC (`json`, `jsonc`), Python (`py`, `pyw`), shell (`sh`, `bash`, `zsh`,
+`ksh`), YAML (`yaml`, `yml`), markup (`html`, `htm`, `xml`, `svg`), CSS (`css`),
+Go (`go`), Rust (`rs`) and SQL (`sql`). Shell startup filenames `.bashrc`,
+`.bash_profile`, `.bash_login`, `.profile`, `.zshrc`, `.zprofile`, `.zshenv` and
+`.zlogin` also select the shell grammar.
+Markdown backtick and tilde fences select a grammar only for an explicit
+supported language: `md`/`markdown`, `js`/`javascript`/`jsx`,
+`ts`/`typescript`/`tsx`, `json`/`jsonc`, `py`/`python`,
+`sh`/`shell`/`bash`/`zsh`/`ksh`, `yaml`/`yml`,
+`html`/`markup`/`xml`/`svg`/`mathml`, `css`, `go`/`golang`, `rs`/`rust` or
+`sql`. Unknown filenames and unknown or unlabeled fenced languages remain plain
+source; content is never used to guess a language. Fence recognition covers
+top-level fences with up to three leading spaces, not fences nested inside
+blockquote or list containers. Shell aliases use the Bash grammar, and SQL uses
+a generic SQL grammar rather than dialect-specific parsing. These lexical source
+colors are not a rendered CommonMark or MDX view.
+This presentation does not change CLI output, JSON output or command syntax.
 Inventory, catalog browser, and catalog management distribute available list
 width across their columns. Catalog tables limit padding for short status and
 count fields, leaving more room for source names, IDs, and repository URLs.
@@ -123,9 +164,33 @@ browser, and catalog management screens. Unknown kinds retain the
 existing status-based inventory color or proprietary-license catalog
 highlighting, when applicable. CLI tables retain their existing presentation.
 On wide terminals, an open details panel shares the viewport; hiding it lets
-the table expand. This presentation applies to skills, agents, and instructions
-alike. Human-readable CLI tables also adapt to terminal width; piped output
-retains complete values.
+the table expand. Selected-content details in inventory, the catalog browser,
+and catalog management separate their existing title from the body with one
+theme-colored divider row. The title text and colors, selected-row highlighting,
+metadata, and keyboard actions remain unchanged; filename and page labels remain
+Preview-only. This applies to skills, agents, and instructions alike, including
+stacked details on narrow terminals. The Inventory, Catalog Resources, Connected
+Catalogs, and Resource Revisions table panels group their existing title first
+and their existing metadata next, above one theme-colored divider. Inventory
+and Catalog Resources show `RESOURCES n/total · range`, then the shared
+`Filter query · Catalog value · Kind value` line; Catalog Resources adds
+`Tag value · Status value · License value`, wrapping this full summary above
+the same divider as needed. Connected Catalogs has no separate metadata lines:
+its count remains in the title. Resource Revisions keeps its resource/action
+context and, when paginated, its existing Showing range above the divider; no
+column labels are added to revisions. Existing table column headings and data
+rows remain below the divider. Moving these metadata lines reserves header rows
+and can reduce the responsive list row budget; selected-row visibility and
+pagination reflect the available body rows. All framed `SHORTCUTS` panels,
+including modal shortcut frames, keep their metadata-free title/divider/body
+structure and full keyboard hints. Selection colors, navigation, filters, and
+the `D` details toggle are unchanged. Summary cards, warnings, non-table modal
+main title bars, and the five-line global dashboard header are unchanged.
+Preview's unframed one-line keyboard footer stays compact. These presentation
+changes do not change CLI command syntax, options, output contracts, or audit
+semantics.
+Human-readable CLI tables also adapt to terminal width; piped output retains
+complete values.
 The dashboard is the interactive resource-management interface. CLI-only
 `validate` and `doctor` provide strict catalog validation and environment/
 installation diagnostics for terminal automation; `--json` provides stable
@@ -143,15 +208,33 @@ artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
 New installations can choose project/user scope and Copilot/Claude/both
 clients; instructions remain project-scoped. In the catalog browser, `F` enters
-search mode; `C`/`K` cycle catalog/type filters, and `T`/`S`/`L` cycle tag,
-status, and license filters. `V` on a skill opens its pinned commit history.
+search mode; while searching, all typed characters—including `T`, `S`, and `L`—
+are query text, and `Enter` applies the query. Outside search mode, `F` starts
+search, `C`/`K` cycle catalog/kind, and `L` cycles license within the active
+Catalog/Kind scope. Search and all three filters intersect when selecting visible
+resources. A stale license value advances to the first available value rather
+than appearing unchanged. Changing catalog or kind resets License to `ALL`.
+`Esc` while searching clears the query and License filter while preserving
+Catalog and Kind; opening Catalog Resources with `A` likewise clears query and
+License while preserving Catalog and Kind. Tag and status remain resource
+metadata, but do not have Catalog browser filter controls.
+In Inventory, `L` cycles license within the active Catalog/Kind scope; license
+and text filters intersect, while `C`/`K` retain their paired cycling behavior.
+`Esc` from Inventory search clears only the text query; it preserves Catalog,
+Kind, and License filters. While search is active, `L` is query text.
+`V` on a skill opens its pinned commit history.
 Choosing a commit in the catalog browser applies that full SHA to this install
 only; choosing one in inventory applies it to the confirmed update. Neither
 changes the catalog pin. `D` toggles the selected resource's details panel.
-`P` previews the selected pinned source and `A` reports deterministic audit
-findings and coverage. Dashboard installations always audit pinned source
+`P` previews the selected pinned source and reports deterministic audit findings
+and coverage in the same screen's audit pane, replacing the separate Audit
+action. Skills, agents, and instructions use the same source-first layout and
+independent pane navigation. If no audit result was returned, the audit pane
+explicitly says `Audit report unavailable; no result was returned.`; an absent
+report is not a clean audit. Dashboard installations always audit pinned source
 content first and are blocked on findings or incomplete coverage; audit results
-are warnings, not a safety guarantee.
+are warnings, not a safety guarantee. These interactive presentation changes do
+not change CLI command syntax, options, output contracts, or audit semantics.
 Selected-resource details expose license status and, when source provenance is
 available, the pinned repository/path/commit. Missing license metadata is shown
 as undeclared; incomplete pin metadata may show as unknown.

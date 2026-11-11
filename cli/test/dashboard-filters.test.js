@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { listCatalogResources } = require("../dist/cli/catalog.js");
-const { filterCatalogResources, cycleFilter } = require("../dist/dashboard/helpers.mjs");
+const { filterCatalogResources, filterInventory, cycleFilter, cycleCatalogFilter, cycleInventoryLicense } = require("../dist/dashboard/helpers.mjs");
 
 test("catalog discovery ranks exact identifiers and preserves existing filters", () => {
   const resources = [
@@ -37,20 +37,50 @@ test("catalog browser search covers discovery metadata fields", () => {
   }
 });
 
-test("catalog browser filters compose tag, status, and SPDX license constraints", () => {
+test("catalog browser filters combine catalog, kind, and SPDX license constraints", () => {
   const resources = [
     { id: "release-helper", kind: "skill", catalog: "main", tags: ["release"], status: "stable", license_status: "MIT", license_spdx: "MIT" },
     { id: "release-agent", kind: "agent", catalog: "main", tags: ["review"], status: "experimental", license_status: "Apache-2.0", license_spdx: "Apache-2.0" },
     { id: "release-guide", kind: "instruction", catalog: "other", tags: ["review"], status: "stable", license_status: "Proprietary" },
   ];
-  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { tag: "review" })
-    .map(({ id }) => id), ["release-agent", "release-guide"]);
-  assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { status: "stable" })
-    .map(({ id }) => id), ["release-helper", "release-guide"]);
   assert.deepEqual(filterCatalogResources(resources, "", "all", "all", [], { license: "Apache-2.0" })
     .map(({ id }) => id), ["release-agent"]);
-  assert.deepEqual(filterCatalogResources(resources, "release", "main", "skill", [], {
-    tag: "release", status: "stable", license: "MIT",
-  }).map(({ id }) => id), ["release-helper"]);
-  assert.equal(cycleFilter("all", resources, "tag", "kind", "all"), "release");
+  assert.deepEqual(filterCatalogResources(resources, "release", "main", "skill", [], { license: "MIT" })
+    .map(({ id }) => id), ["release-helper"]);
+});
+
+test("catalog cycling respects paired scope and SPDX license choices", () => {
+  const resources = [
+    { id: "a", catalog: "one", kind: "skill", license_status: "MIT", license_spdx: "MIT" },
+    { id: "b", catalog: "one", kind: "skill", license_status: "Apache-2.0", license_spdx: "Apache-2.0" },
+    { id: "c", catalog: "one", kind: "agent", license_status: "MIT", license_spdx: "MIT" },
+    { id: "d", catalog: "two", kind: "skill", license_status: "GPL-3.0-only", license_spdx: "GPL-3.0-only" },
+  ];
+  const filters = { catalog: "one", kind: "skill", license: "all" };
+  assert.equal(cycleCatalogFilter("all", resources, "catalog", { ...filters, kind: "agent" }), "one");
+  assert.equal(cycleCatalogFilter("all", resources, "kind", { ...filters, catalog: "two" }), "skill");
+  assert.equal(cycleCatalogFilter("all", resources, "license", filters), "Apache-2.0");
+});
+
+
+test("Inventory license filtering and cycling respect active catalog and kind", () => {
+  const resources = [
+    { id: "one-skill", catalog: "one", kind: "skill", source_repository: "org/one", source_path: "skills/one", license_status: "MIT", license_spdx: "MIT" },
+    { id: "one-agent", catalog: "one", kind: "agent", source_repository: "org/one", source_path: "agents/one.md", license_status: "Apache-2.0", license_spdx: "Apache-2.0" },
+    { id: "two-skill", catalog: "two", kind: "skill", source_repository: "org/two", source_path: "skills/two", license_status: "Proprietary" },
+  ];
+  assert.equal(cycleInventoryLicense("all", resources, "one", "skill"), "MIT");
+  assert.deepEqual(filterInventory(resources, "", "one", "skill", [], undefined, "MIT")
+    .map(({ id }) => id), ["one-skill"]);
+  assert.equal(cycleInventoryLicense("MIT", resources, "one", "skill"), "all");
+  assert.equal(cycleInventoryLicense("stale", resources, "two", "skill"), "Proprietary");
+});
+
+test("inventory paired filter cycling remains scoped to its paired facet", () => {
+  const resources = [
+    { id: "one-skill", catalog: "one", kind: "skill", tags: ["x"], source_repository: "org/one", source_path: "skills/one-skill" },
+    { id: "one-agent", catalog: "one", kind: "agent", tags: ["y"], source_repository: "org/one", source_path: "agents/one-agent.md" },
+    { id: "two-skill", catalog: "two", kind: "skill", tags: ["y"], source_repository: "org/two", source_path: "skills/two-skill" },
+  ];
+  assert.equal(cycleFilter("all", resources, "kind", "catalog", "one"), "agent");
 });

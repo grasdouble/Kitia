@@ -29,16 +29,21 @@ function listCatalogResources(sourceResources, options: CliOptions): CatalogReso
 }
 
 function formatDashboardRows(installed: CatalogResource[], allResources: CatalogResource[]): CatalogResource[] {
-  const descriptions = new Map(allResources.map((resource) => [
-    `${resource.catalog}:${resource.kind}:${resource.id}`, resource.description,
+  const catalogResources = new Map(allResources.map((resource) => [
+    `${resource.catalog}:${resource.kind}:${resource.id}`, resource,
   ]));
-  return installed.map((resource) => ({
-    ...resource,
-    description: resource.managed === false
-      ? resource.description
-      : descriptions.get(`${resource.catalog}:${resource.kind}:${resource.id}`) ||
-        resource.description || (resource.status === "attention" ? "Review this installation." : ""),
-  })).sort((left, right) =>
+  return installed.map((resource) => {
+    const catalogResource = catalogResources.get(`${resource.catalog}:${resource.kind}:${resource.id}`);
+    return {
+      ...resource,
+      description: resource.managed === false
+        ? resource.description
+        : catalogResource?.description || resource.description ||
+          (resource.status === "attention" ? "Review this installation." : ""),
+      license_status: resource.license_status || catalogResource?.license_status,
+      license_spdx: resource.license_spdx || catalogResource?.license_spdx,
+    };
+  }).sort((left, right) =>
     left.scope.localeCompare(right.scope) ||
     left.catalog.localeCompare(right.catalog) ||
     left.kind.localeCompare(right.kind) ||

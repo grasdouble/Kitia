@@ -47,8 +47,8 @@ function createDashboardActionHandler(
     if (removingUnmanaged && resource.managed !== false) {
       throw new Error("Only unmanaged dashboard artifacts can be removed this way.");
     }
-    const audit = action === "audit" || action === "install";
-    const command = action === "audit" ? "preview" : action;
+    const shouldAudit = action === "preview" || action === "install";
+    const command = action;
     const scope = command === "install" ? installOptions.scope || "project" : resource.scope;
     const options: CliOptions = removingUnmanaged
       ? {
@@ -62,7 +62,7 @@ function createDashboardActionHandler(
         else if (command !== "preview") args.push("--target", dashboardOptions.target);
         if (command === "install") args.push("--tool", installOptions.tool || "copilot");
         if (["install", "update"].includes(command) && installOptions.ref) args.push("--ref", installOptions.ref);
-        if (audit) args.push("--audit");
+        if (shouldAudit) args.push("--audit");
         const parsed = parseArguments(args);
         if (command === "update" && installOptions.ghForce) {
           parsed.ghForce = true;
@@ -79,7 +79,7 @@ function createDashboardActionHandler(
     let release: (() => void) | undefined;
     let code: number;
     try {
-      if (!["preview", "audit"].includes(action)) release = acquireOperationLock(options.target);
+      if (action !== "preview") release = acquireOperationLock(options.target);
       const targetRoot = fs.realpathSync(options.target);
       const state = readInstallState(targetRoot);
       if (removingUnmanaged) {

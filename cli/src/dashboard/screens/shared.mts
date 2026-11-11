@@ -83,36 +83,59 @@ function shortcutHint(value: string, width: number) {
       : part));
 }
 
+export function PanelHeader({
+  title, color = DASHBOARD_THEME.semantic.accents.primary, children,
+}: { title: string; color?: string; children?: ReactNode }) {
+  return h(Box, {
+    flexDirection: "column", flexShrink: 0,
+    borderStyle: "single", borderTop: false, borderLeft: false, borderRight: false,
+    borderColor: color,
+  },
+  h(Text, { bold: true, color }, title),
+  children);
+}
+
 export function Panel({
   title,
   children,
+  headerContent,
   color = DASHBOARD_THEME.semantic.accents.primary,
   width,
   marginTop = 0,
   marginLeft = 0,
   flexGrow = 0,
   flexShrink = 0,
+  separateHeader = false,
+  bordered = true,
+  backgroundColor,
 }: {
   title: string;
   children?: ReactNode;
+  headerContent?: ReactNode;
   color?: string;
   width?: number;
   marginTop?: number;
   marginLeft?: number;
   flexGrow?: number;
   flexShrink?: number;
+  separateHeader?: boolean;
+  bordered?: boolean;
+  backgroundColor?: string;
 }) {
   return h(Box, {
     flexDirection: "column",
     flexShrink,
     flexGrow,
-    borderStyle: "single",
+    borderStyle: bordered ? "single" : undefined,
     borderColor: color,
-    paddingX: 1,
+    backgroundColor,
+    paddingX: bordered ? 1 : 2,
     marginTop,
     marginLeft,
     width,
-  }, h(Text, { bold: true, color }, title), children);
+  }, separateHeader
+    ? h(PanelHeader, { title, color }, headerContent)
+    : h(Text, { bold: true, color }, title), children);
 }
 
 export function DetailsPanel({
@@ -134,6 +157,7 @@ export function DetailsPanel({
 }) {
   return h(Panel, {
     title, children, color: DASHBOARD_THEME.semantic.accents.detailPanel, width, marginTop, marginLeft, flexGrow, flexShrink,
+    separateHeader: true,
   });
 
 }
@@ -156,12 +180,14 @@ export function wrappedShortcutLines(lines: string[], width?: number) {
   });
 }
 
-export function ShortcutsPanel({ lines, width, marginTop = 0 }: {
+export function ShortcutsPanel({ lines, width, marginTop = 0, color, backgroundColor }: {
   lines: string[];
   width?: number;
   marginTop?: number;
+  color?: string;
+  backgroundColor?: string;
 }) {
-  return h(Panel, { title: "SHORTCUTS", width, marginTop },
+  return h(Panel, { title: "SHORTCUTS", width, marginTop, color, backgroundColor, separateHeader: true },
     ...wrappedShortcutLines(lines, width).map((line) => shortcutHint(line, Math.max(1, (width || 80) - 4))));
 }
 

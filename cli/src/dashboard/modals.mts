@@ -7,9 +7,10 @@ import type { ScanError } from "../catalog/lifecycle.js";
 import { adaptiveColumnWidths } from "../table-layout.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
 import { DASHBOARD_THEME } from "./colors.js";
+import { Panel, ShortcutsPanel, wrappedShortcutLines } from "./screens/shared.mjs";
 
 export interface PendingDashboardAction {
-  action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview" | "audit";
+  action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview";
   resource: CatalogResource;
   scope?: string;
   tool?: string;
@@ -36,7 +37,7 @@ function choiceGroup(label, choices, selectedIndex, focused = true) {
   const options = choices.map((choice) => typeof choice === "string" ? { label: choice } : choice);
   const prefix = label ? `${label.padEnd(8)} ` : "";
   const text = `${prefix}${options.map((choice, index) =>
-    choiceLabel(choice.label, index === selectedIndex)).join("  ")}`;
+    choiceLabel(choice.label, index === selectedIndex)).join(" ")}`;
   return {
     type: "choice-group",
     text,
@@ -56,7 +57,8 @@ function selectableOption(label, selected) {
   };
 }
 
-function modalFrame(title, content, columns, accent, maxWidth = 64) {
+function modalFrame(title, content, columns, accent, maxWidth = 64, headerContent?: string[]) {
+  const separateHeader = headerContent !== undefined;
   const width = Math.max(20, Math.min(maxWidth, columns - 4));
   const innerWidth = width - 4;
   const lastContent = content.at(-1);
@@ -65,15 +67,15 @@ function modalFrame(title, content, columns, accent, maxWidth = 64) {
     ? lastContent
     : undefined;
   const modalContent = shortcutHint ? content.slice(0, -1) : content;
-  const label = ` ${fitText(title, width - 5)} `;
-  const top = `┌─${label}${"─".repeat(Math.max(0, width - label.length - 3))}┐`;
+  const label = separateHeader ? "" : ` ${fitText(title, width - 5)} `;
+  const top = separateHeader ? "" : `┌─${label}${"─".repeat(Math.max(0, width - label.length - 3))}┐`;
   const body = modalContent.flatMap((entry) => {
     const row = typeof entry === "string" ? { text: entry } : entry;
-    const wrapped = wrapText(row.text, innerWidth);
-    return wrapped.map((line, index) => ({
-      text: `│ ${fitColumn(line, innerWidth)} │`,
+    const wrapped = row.preserveSpacing ? [row.text] : wrapText(row.text, innerWidth);
+    return wrapped.map((line) => ({
+      text: separateHeader ? line : `│ ${fitColumn(line, innerWidth)} │`,
       bodyText: line,
-      component: wrapped.length === 1 ? row.type : undefined,
+      component: wrapped.length === 1 && row.text.length <= innerWidth ? row.type : undefined,
       label: row.label,
       options: row.options,
       selectedIndex: row.selectedIndex,
@@ -82,28 +84,21 @@ function modalFrame(title, content, columns, accent, maxWidth = 64) {
       color: row.color,
       bold: row.bold,
       dimColor: row.dimColor,
+      borderColor: accent,
     }));
   });
-  const shortcutLabel = " SHORTCUTS ";
-  const shortcutTop = `┌─${shortcutLabel}${"─".repeat(Math.max(0, width - shortcutLabel.length - 3))}┐`;
-  const shortcutRows = shortcutHint
-    ? shortcutHint.split(/ · | \| /).flatMap((hint) =>
-      wrapText(hint, innerWidth).map((line) => `│ ${fitColumn(line, innerWidth)} │`))
-    : [];
   return {
     width,
-    lines: [
+    accent,
+    panelTitle: separateHeader ? title : undefined,
+    headerLines: (headerContent || []).flatMap((text) =>
+      wrapText(text, innerWidth).map((text) => ({ text }))),
+    lines: separateHeader ? body : [
       { text: top, color: accent, bold: true },
       ...body,
       { text: `└${"─".repeat(width - 2)}┘`, color: accent, bold: true },
     ],
-    shortcuts: shortcutHint
-      ? [
-        { text: shortcutTop, color: accent, bold: true },
-        ...shortcutRows.map((text) => ({ text, color: MODAL_FOREGROUND })),
-        { text: `└${"─".repeat(width - 2)}┘`, color: accent, bold: true },
-      ]
-      : [],
+    shortcuts: shortcutHint ? [shortcutHint.replaceAll(" | ", " · ")] : [],
   };
 }
 
@@ -299,28 +294,47 @@ export function sourceVersionsModal({
   selectedIndex,
   action,
   columns,
+  rows,
 }: {
   resource: CatalogResource;
   versions: SourceVersionOption[];
   selectedIndex: number;
   action: "install" | "update";
   columns: number;
+  rows: number;
 }) {
-  const count = Math.min(14, versions.length);
+  const width = Math.max(20, columns - 4);
+  const lineWidth = width - 4;
+  const shortcutHint = `↑↓ SELECT · ENTER ${action.toUpperCase()} · ESC BACK`;
+  const shortcutsRows = wrappedShortcutLines([shortcutHint], width).length + 4;
+  const rangeRows = wrapText(`Showing ${versions.length}-${versions.length} of ${versions.length} commits.`, lineWidth).length;
+  const instruction = `Select a commit to ${action}; the catalog pin remains unchanged.`;
+  const resourceLabel = `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`;
+  const instructionRows = wrapText(instruction, lineWidth);
+  const contextBudget = rows - 4 - shortcutsRows - 1 - rangeRows - 1;
+  const resourceRows = wrapText(resourceLabel, lineWidth);
+  const context = [
+    ...(resourceRows.length + instructionRows.length <= contextBudget
+      ? resourceRows : [fitText(resourceLabel, lineWidth)]),
+    ...instructionRows,
+  ];
+  // Reserve both frames, their gap, and header metadata before sizing the revision viewport.
+  const headerRows = context.length + rangeRows;
+  const availableRows = rows - 4 - shortcutsRows - 1 - headerRows;
+  const gap = availableRows > 1 ? [""] : [];
+  const count = Math.max(1, Math.min(14, versions.length, availableRows - gap.length));
   const first = Math.max(0, Math.min(selectedIndex - Math.floor(count / 2), versions.length - count));
   const visible = versions.slice(first, first + count);
-  const lineWidth = Math.max(1, columns - 8);
   const prefixContentWidth = Math.max(9, ...visible.map(({ prefix }) => prefix.length + 2));
   const subjectContentWidth = Math.max(8, ...visible.map(({ subject }) => subject.length));
+  const minimumColumnWidth = Math.max(1, Math.floor((lineWidth - 4) / 3));
   const [prefixWidth, dateWidth, subjectWidth] = adaptiveColumnWidths(lineWidth, [
-    { contentWidth: prefixContentWidth, minWidth: 9, maxWidth: prefixContentWidth + 6, growWeight: 1 },
-    { contentWidth: 10, minWidth: 8, maxWidth: 10, shrinkWeight: 1 },
-    { contentWidth: subjectContentWidth, minWidth: 8, growWeight: 2, shrinkWeight: 3 },
+    { contentWidth: prefixContentWidth, minWidth: Math.min(9, minimumColumnWidth), maxWidth: prefixContentWidth + 6, growWeight: 1 },
+    { contentWidth: 10, minWidth: Math.min(8, minimumColumnWidth), maxWidth: 10, shrinkWeight: 1 },
+    { contentWidth: subjectContentWidth, minWidth: Math.min(8, minimumColumnWidth), growWeight: 2, shrinkWeight: 3 },
   ], 2);
   return modalFrame("RESOURCE REVISIONS", [
-    `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`,
-    `Select a commit to ${action}; the catalog pin remains unchanged.`,
-    "",
+    ...gap,
     ...visible.map((version, offset) => ({
       text: [
         fitColumn(`${first + offset === selectedIndex ? "›" : " "} ${version.prefix}`, prefixWidth),
@@ -328,11 +342,14 @@ export function sourceVersionsModal({
         fitText(version.subject, subjectWidth),
       ].join("  "),
       color: first + offset === selectedIndex ? semantic.selected : undefined,
+      preserveSpacing: true,
       bold: first + offset === selectedIndex,
     })),
-    versions.length > count ? `Showing ${first + 1}-${first + count} of ${versions.length} commits.` : "",
-    `↑↓ SELECT · ENTER ${action.toUpperCase()} · ESC BACK`,
-  ], columns, semantic.selected, columns - 4);
+    shortcutHint,
+  ], columns, semantic.selected, width, [
+    ...context,
+    ...(versions.length > count ? [`Showing ${first + 1}-${first + count} of ${versions.length} commits.`] : []),
+  ]);
 }
 
 
@@ -650,12 +667,16 @@ function fixedModalText(text, props) {
 }
 
 function ChoiceGroup({ line }) {
-  const props = { backgroundColor: MODAL_BACKGROUND };
+  const props = { backgroundColor: MODAL_BACKGROUND, color: line.borderColor };
+  const contentWidth = Math.max(0, line.text.length - 3);
+  const contentLength = line.label.length + line.options.reduce((length, option, index) =>
+    length + (index ? 1 : 0) + choiceLabel(option.label, index === line.selectedIndex).length, 0);
+  const padding = Math.max(0, contentWidth - contentLength);
   return h(Box, { width: line.text.length, flexDirection: "row" },
     fixedModalText("│ ", props),
     fixedModalText(line.label, props),
     ...line.options.map((option, index) => fixedModalText(
-      `${index ? "  " : ""}${choiceLabel(option.label, index === line.selectedIndex)}`,
+      `${index ? " " : ""}${choiceLabel(option.label, index === line.selectedIndex)}`,
       {
         backgroundColor: MODAL_BACKGROUND,
         color: index === line.selectedIndex
@@ -666,7 +687,7 @@ function ChoiceGroup({ line }) {
       },
     )),
     fixedModalText(
-      " ".repeat(Math.max(0, line.text.length - 3 - line.bodyText.length)),
+      " ".repeat(padding),
       { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
     ),
     fixedModalText("│", props));
@@ -674,7 +695,7 @@ function ChoiceGroup({ line }) {
 
 function SelectableOption({ line }) {
   return h(Box, { width: line.text.length, flexDirection: "row" },
-    fixedModalText("│ ", { backgroundColor: MODAL_BACKGROUND }),
+    fixedModalText("│ ", { backgroundColor: MODAL_BACKGROUND, color: line.borderColor }),
     fixedModalText(line.selected ? "› " : "  ", {
       backgroundColor: MODAL_BACKGROUND,
       color: line.selected ? semantic.selected : MODAL_FOREGROUND,
@@ -689,7 +710,7 @@ function SelectableOption({ line }) {
       " ".repeat(Math.max(0, line.text.length - 3 - line.bodyText.length)),
       { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
     ),
-    fixedModalText("│", { backgroundColor: MODAL_BACKGROUND }));
+    fixedModalText("│", { backgroundColor: MODAL_BACKGROUND, color: line.borderColor }));
 }
 
 function ModalLine({ line }) {
@@ -705,7 +726,13 @@ function ModalLine({ line }) {
   if (line.component === "selectable-option") {
     return h(SelectableOption, { line });
   }
-  return h(Text, commonProps, line.text);
+  if (line.text?.startsWith("│") && line.text.endsWith("│")) {
+    return h(Text, { backgroundColor: MODAL_BACKGROUND },
+      h(Text, { color: line.borderColor }, "│"),
+      h(Text, commonProps, line.text.slice(1, -1)),
+      h(Text, { color: line.borderColor }, "│"));
+  }
+  return h(Text, commonProps, line.text || " ");
 }
 
 export function ModalOverlay({ modal, columns, rows }: {
@@ -713,7 +740,11 @@ export function ModalOverlay({ modal, columns, rows }: {
   columns: number;
   rows: number;
 }) {
-  const modalHeight = modal.lines.length + (modal.shortcuts.length ? modal.shortcuts.length + 1 : 0);
+  const shortcutsRows = modal.shortcuts.length
+    ? wrappedShortcutLines(modal.shortcuts, modal.width).length + 4
+    : 0;
+  const modalHeight = modal.lines.length + modal.headerLines.length + (modal.panelTitle ? 4 : 0) +
+    (shortcutsRows ? shortcutsRows + 1 : 0);
   const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
   return h(Box, {
@@ -723,17 +754,26 @@ export function ModalOverlay({ modal, columns, rows }: {
     width: modal.width,
     flexDirection: "column",
   },
-  ...modal.lines.map((line, index) => h(ModalLine, {
-    key: `modal-line-${index}`,
-    line,
-  })),
+  modal.panelTitle
+    ? h(Panel, {
+      title: modal.panelTitle,
+      width: modal.width,
+      color: modal.accent,
+      backgroundColor: MODAL_BACKGROUND,
+      separateHeader: true,
+      headerContent: modal.headerLines.map((line, index) => h(ModalLine, { key: `modal-header-${index}`, line })),
+    }, ...modal.lines.map((line, index) => h(ModalLine, { key: `modal-line-${index}`, line })))
+    : modal.lines.map((line, index) => h(ModalLine, { key: `modal-line-${index}`, line })),
   ...(modal.shortcuts.length
     ? [
       h(Text, { key: "modal-shortcuts-gap", backgroundColor: MODAL_BACKGROUND }, " ".repeat(modal.width)),
-      ...modal.shortcuts.map((line, index) => h(ModalLine, {
-        key: `modal-shortcut-${index}`,
-        line,
-      })),
+      h(ShortcutsPanel, {
+        key: "modal-shortcuts",
+        lines: modal.shortcuts,
+        width: modal.width,
+        color: modal.accent,
+        backgroundColor: MODAL_BACKGROUND,
+      }),
     ]
     : []));
 }

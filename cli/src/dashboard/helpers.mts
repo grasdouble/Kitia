@@ -99,15 +99,13 @@ export function filterCatalogResources(
   catalogFilter: string,
   kindFilter: string,
   catalogs: InventoryCatalogConfiguration[] = [],
-  filters: { tag?: string; status?: string; license?: string } = {},
+  filters: { license?: string } = {},
 ): CatalogResource[] {
   const labels = inventoryCatalogLabels(resources, catalogs);
   const visible = resources.filter((resource) => {
     const catalog = catalogCandidateLabel(resource, labels);
     if (catalogFilter !== "all" && catalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
-    if (filters.tag && !(resource.tags || []).includes(filters.tag)) return false;
-    if (filters.status && resource.status !== filters.status) return false;
     if (filters.license && !matchesLicense(resource, filters.license)) return false;
     return matchesSearchText(query, [
       catalog, resource.kind, resource.id, resource.description,
@@ -157,7 +155,7 @@ export function mergeRefreshedCatalogResources(
   }
   return merged;
 }
-type CatalogFilterProperty = "catalog" | "kind" | "tag" | "status" | "license";
+type CatalogFilterProperty = "catalog" | "kind" | "license";
 
 function catalogFilterValues(
   resource: CatalogResource,
@@ -168,8 +166,6 @@ function catalogFilterValues(
     return [labels ? catalogCandidateLabel(resource, labels) : catalogLabel(resource)];
   }
   if (property === "kind") return [resource.kind];
-  if (property === "tag") return resource.tags || [];
-  if (property === "status") return resource.status ? [resource.status] : [];
   return [resource.license_status, resource.license_spdx].filter((value): value is string => Boolean(value));
 }
 
@@ -198,7 +194,31 @@ export function cycleFilter(
     .flatMap((resource) => catalogFilterValues(resource, property, labels))
     .filter(Boolean))].sort((left, right) => left.localeCompare(right));
   const choices = ["all", ...values];
-  return choices[(choices.indexOf(current) + 1) % choices.length];
+  const index = choices.indexOf(current);
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
+}
+
+export function cycleCatalogFilter(
+  current: string,
+  resources: CatalogResource[],
+  property: "catalog" | "kind" | "license",
+  filters: { catalog: string; kind: string; license: string },
+  catalogs: InventoryCatalogConfiguration[] = [],
+): string {
+  if (property === "catalog" || property === "kind") {
+    const otherProperty = property === "catalog" ? "kind" : "catalog";
+    return cycleFilter(current, resources, property, otherProperty, filters[otherProperty], catalogs);
+  }
+
+  const scopedResources = filterCatalogResources(resources, "", filters.catalog, filters.kind, catalogs);
+  const values = [...new Set(scopedResources
+    .flatMap((resource) => catalogFilterValues(resource, "license"))
+    .filter(Boolean))]
+    .filter((value) => scopedResources.some((resource) => matchesLicense(resource, value)))
+    .sort((left, right) => left.localeCompare(right));
+  const choices = ["all", ...values];
+  const index = choices.indexOf(current);
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
 }
 
 
@@ -261,18 +281,39 @@ export function filterInventory(
   kindFilter: string,
   catalogs: InventoryCatalogConfiguration[] = [],
   precomputedLabels?: Map<CatalogResource, string>,
+  licenseFilter = "all",
 ): CatalogResource[] {
   const labels = precomputedLabels || inventoryCatalogLabels(resources, catalogs);
   return resources.filter((resource) => {
     const resourceCatalog = labels.get(resource) || catalogLabel(resource);
     if (catalogFilter !== "all" && resourceCatalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
+    if (licenseFilter !== "all" && !matchesLicense(resource, licenseFilter)) return false;
     return matchesSearchText(query, [
       resource.scope, resourceCatalog, resource.kind, resource.id,
       resource.status, resource.description,
       ...(resource.issues || []).flatMap((issue) => [issue.code, ...(issue.paths || [])]),
     ]);
   });
+}
+
+export function cycleInventoryLicense(
+  current: string,
+  resources: CatalogResource[],
+  catalogFilter: string,
+  kindFilter: string,
+  catalogs: InventoryCatalogConfiguration[] = [],
+): string {
+  const labels = inventoryCatalogLabels(resources, catalogs);
+  const eligible = filterInventory(resources, "", catalogFilter, kindFilter, catalogs, labels);
+  const values = [...new Set(eligible
+    .flatMap((resource) => catalogFilterValues(resource, "license"))
+    .filter(Boolean))]
+    .filter((value) => eligible.some((resource) => matchesLicense(resource, value)))
+    .sort((left, right) => left.localeCompare(right));
+  const choices = ["all", ...values];
+  const index = choices.indexOf(current);
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
 }
 export function colorForStatus(status?: string) {
   if (status === "unmanaged") return DASHBOARD_THEME.semantic.inventoryStatus.unmanaged;

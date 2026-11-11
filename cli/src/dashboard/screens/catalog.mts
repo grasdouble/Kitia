@@ -6,7 +6,7 @@ import type { CatalogResource } from "../../catalog/entries.js";
 import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";
 import {
-  catalogTableColumns, detailPanelLayout, filterCatalogResources, fitText, inventoryCatalogLabels, tableLine,
+  catalogTableColumns, detailPanelLayout, filterCatalogResources, fitText, inventoryCatalogLabels, tableLine, wrapText,
 } from "../helpers.mjs";
 import {
   DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailValue, wrappedShortcutLines,
@@ -21,8 +21,6 @@ export function CatalogScreen({
   filterMode,
   catalogFilter,
   kindFilter,
-  tagFilter,
-  statusFilter,
   licenseFilter,
   selectedIndex,
   versionLabel,
@@ -40,8 +38,6 @@ export function CatalogScreen({
   filterMode: boolean;
   catalogFilter: string;
   kindFilter: string;
-  tagFilter: string;
-  statusFilter: string;
   licenseFilter: string;
   selectedIndex: number;
   versionLabel: string;
@@ -58,8 +54,6 @@ export function CatalogScreen({
       ? resource.catalog
       : candidateLabels.get(resource) || resource.catalog;
   const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter, catalogs, {
-    tag: tagFilter === "all" ? undefined : tagFilter,
-    status: statusFilter === "all" ? undefined : statusFilter,
     license: licenseFilter === "all" ? undefined : licenseFilter,
   });
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
@@ -99,33 +93,41 @@ export function CatalogScreen({
     ? detailRows.flatMap((row, index) =>
       detailField(`catalog-entry-${index}`, row.label, row.value, detailsContentWidth, row.maxLines))
     : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
+  const filterLines = wrapText(
+    `Filter ${filterMode ? `${query}▏` : query || "(F to filter)"} · Catalog ${catalogFilter.toUpperCase()} · Kind ${kindFilter.toUpperCase()} · License ${licenseFilter.toUpperCase()}`,
+    contentWidth,
+  );
+  const tableOverhead = 13 + filterLines.length;
   const catalogShortcutLines = modalActive ? [] : screenName === "INSTALL OPTIONS"
     ? []
     : filterMode
       ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
       : [
-        "C catalog · K kind · T tag",
-        "S status · L license · F search",
-        "V revisions · P preview · A audit · D details",
+        "F filter · C catalog · K kind · L license",
+        "V revisions · P preview/audit · D details",
         "↑↓ navigate · ENTER install · ESC back",
         "? guide · Q quit",
       ];
   const shortcutLines = catalogShortcutLines;
   const catalogShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
-  const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, catalogShortcutWidth).length + 4;
+  const shortcutsPanelRows = modalActive || !shortcutLines.length
+    ? 0
+    : wrappedShortcutLines(shortcutLines, catalogShortcutWidth).length + 5;
   const stackedDetailsRows = !detailsSideBySide
-    ? (showDetails ? entryContent.length + 4 : 0) + shortcutsPanelRows
+    ? (showDetails ? entryContent.length + 5 : 0) + shortcutsPanelRows
     : 0;
-  const viewport = Math.max(1, rows - (13 + stackedDetailsRows));
+  // Preserve metadata and wrapped controls by dropping only optional blank gaps.
+  const stackedOverflow = detailsSideBySide ? 0 : Math.max(0, tableOverhead + stackedDetailsRows + 1 - rows);
+  const shortcutsMarginTop = stackedOverflow > 0 || (detailsSideBySide &&
+    entryContent.length + 4 + shortcutsPanelRows > rows - 7) ? 0 : 1;
+  const entryMarginTop = detailsSideBySide || stackedOverflow > Number(Boolean(shortcutsPanelRows)) ? 0 : 1;
+  const listMarginTop = stackedOverflow > Number(Boolean(shortcutsPanelRows)) + Number(showDetails) ? 0 : 1;
+  const reclaimedRows = detailsSideBySide ? 0 : 1 - listMarginTop +
+    (showDetails ? 1 - entryMarginTop : 0) + (shortcutsPanelRows ? 1 - shortcutsMarginTop : 0);
+  const viewport = Math.max(1, rows - (tableOverhead + stackedDetailsRows - reclaimedRows));
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);
   const pageRange = visible.length ? `${first + 1}-${first + page.length}` : "0-0";
-  const activeFilters = [
-    tagFilter !== "all" && `TAG ${tagFilter}`,
-    statusFilter !== "all" && `STATUS ${statusFilter}`,
-    licenseFilter !== "all" && `LICENSE ${licenseFilter}`,
-  ].filter(Boolean);
-  const filterSummary = activeFilters.join(" · ") || "No tag/status/license filters";
   const tableHeader = tableLine([
     ["", columnsByField.marker],
     [columnsByField.compact ? "INST" : "INSTALLED", columnsByField.installed],
@@ -164,13 +166,18 @@ export function CatalogScreen({
 
   const resourcePanel = h(Panel, {
     title: "CATALOG RESOURCES",
+    separateHeader: true,
     width: detailsSideBySide ? listWidth : undefined,
     color: tourStep === 1 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
-    marginTop: 1,
+    marginTop: listMarginTop,
+    headerContent: h(React.Fragment, null,
+      h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${candidates.length} · ${pageRange}`, contentWidth)),
+      ...filterLines.map((line, index) => h(Text, {
+        key: `catalog-filter-${index}`,
+        color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" || licenseFilter !== "all"
+          ? DASHBOARD_THEME.semantic.selected : DASHBOARD_THEME.semantic.accents.muted,
+      }, line))),
   },
-  h(Text, { color: DASHBOARD_THEME.semantic.accents.muted },
-    fitText(`Filter ${filterMode ? `${query}▏` : query || "(F to filter)"}`, contentWidth)),
-  h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, fitText(filterSummary, contentWidth)),
   h(Text, { bold: true }, tableHeader),
   ...tableRows);
   const entryPanel = showDetails ? h(DetailsPanel, {
@@ -180,7 +187,7 @@ export function CatalogScreen({
       )}`
       : "CATALOG ENTRY",
     width: detailsSideBySide ? detailsWidth : undefined,
-    marginTop: detailsSideBySide ? 0 : 1,
+    marginTop: entryMarginTop,
     flexGrow: detailsSideBySide ? 1 : 0,
     flexShrink: detailsSideBySide ? 1 : 0,
   }, entryContent) : null;
@@ -188,14 +195,14 @@ export function CatalogScreen({
     ? ShortcutsPanel({
       lines: shortcutLines,
       width: catalogShortcutWidth,
-      marginTop: 1,
+      marginTop: shortcutsMarginTop,
     })
     : null;
   const detailColumn = h(Box, {
     flexDirection: "column",
     alignItems: "stretch",
     width: detailsSideBySide ? detailsWidth : undefined,
-    height: detailsSideBySide ? viewport + 6 : undefined,
+    height: detailsSideBySide ? viewport + 7 : undefined,
     marginTop: detailsSideBySide ? 1 : 0,
     marginLeft: detailsSideBySide ? 1 : 0,
   }, ...(showDetails

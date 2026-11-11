@@ -1,7 +1,7 @@
 import type { CatalogResource } from "../catalog/entries.js";
 
 type RetryAction = {
-  action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview" | "audit";
+  action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview";
   resource: CatalogResource;
   scope?: string;
   tool?: string;

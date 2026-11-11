@@ -80,6 +80,37 @@ async function captureDashboardFrame(
   }
 }
 
+function separatedPanelFrame(frame, title, hasMetadata = false) {
+  const lines = frame.split(/\r?\n/);
+  const titleIndex = lines.findIndex((line) => line.includes(`│ ${title}`));
+  assert.ok(titleIndex > 0, `${title} has a visible title row`);
+  const left = lines[titleIndex].indexOf(title) - 2;
+  const right = lines[titleIndex].indexOf("│", left + 1);
+  const panelRow = (index) => lines[index].slice(left, right + 1);
+  assert.match(panelRow(titleIndex - 1), /^┌─+┐$/, `${title} has an unlabeled top border`);
+  assert.equal(panelRow(titleIndex), `│ ${title}${" ".repeat(right - left - title.length - 2)}│`);
+  const bottomIndex = lines.findIndex((line, index) =>
+    index > titleIndex && line[left] === "└" && line[right] === "┘");
+  assert.ok(bottomIndex > titleIndex + 2, `${title} has a visible body and bottom border`);
+  const dividerIndices = lines.flatMap((line, index) =>
+    index > titleIndex && index < bottomIndex && /^│ ─+ │$/.test(panelRow(index)) ? [index] : []);
+  assert.equal(dividerIndices.length, 1, `${title} has exactly one shared header divider`);
+  const dividerIndex = dividerIndices[0];
+  const header = lines.slice(titleIndex + 1, dividerIndex).map((line) => line.slice(left + 2, right - 1));
+  assert.equal(header.length > 0, hasMetadata, `${title} keeps only its existing metadata above the divider`);
+  assert.ok(dividerIndex + 1 < bottomIndex, `${title} has a visible body below its divider`);
+  return {
+    topIndex: titleIndex - 1,
+    titleIndex,
+    bottomIndex,
+    dividerIndex,
+    left,
+    right,
+    header,
+    body: lines.slice(dividerIndex + 1, bottomIndex).map((line) => line.slice(left + 2, right - 1)),
+  };
+}
+
 function catalogProps(resource) {
   return {
     candidates: [resource],
@@ -89,6 +120,7 @@ function catalogProps(resource) {
     filterMode: false,
     catalogFilter: "all",
     kindFilter: "all",
+    licenseFilter: "all",
     selectedIndex: 0,
     versionLabel: "test",
     screenName: "Catalog",
@@ -125,7 +157,7 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
     const frames = [];
     for (const [component, props] of [
       [CatalogScreen, { candidates: resources, resources: [], catalogs: [], screenName: "Catalog",
-        tagFilter: "all", statusFilter: "all", licenseFilter: "all" }],
+        licenseFilter: "all" }],
       [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true }],
     ]) {
       for (let selectedIndex = 0; selectedIndex < resources.length; selectedIndex++) {
@@ -376,6 +408,14 @@ test("inventory table fills the available list panel at 80, 120, and 160 columns
   ]) {
     const frame = await captureDashboardFrame([resource], {}, [], dimensions);
     const lines = frame.split(/\r?\n/);
+    const panel = separatedPanelFrame(frame, "INVENTORY", true);
+    assert.deepEqual(panel.header.map((line) => line.trim()), [
+      "RESOURCES 1/1 · 1-1",
+      "Filter (F to filter) · Catalog ALL · Kind ALL · License ALL",
+    ]);
+    assert.match(panel.body[0], /STATUS.*SCOPE.*KIND.*ID.*CATALOG/);
+    assert.ok(panel.body.slice(1).some((line) => line.includes(id) && line.includes(catalog)),
+      "inventory column labels and data stay below the metadata divider");
     const row = lines.find((line) => line.includes(id) && line.includes(catalog));
     const header = lines.find((line) => line.includes("STATUS") && line.includes("CATALOG"));
     assert.ok(header && row, `inventory row should render at ${dimensions.columns} columns`);
@@ -414,6 +454,14 @@ test("catalog browser and connected-catalog tables use available panel width", a
   for (const size of dimensions) {
     const frame = await captureDashboardFrame([], catalogActions, ["a"], size);
     const lines = frame.split(/\r?\n/);
+    const panel = separatedPanelFrame(frame, "CATALOG RESOURCES", true);
+    assert.deepEqual(panel.header.map((line) => line.trim()), [
+      "RESOURCES 1/1 · 1-1",
+      "Filter (F to filter) · Catalog ALL · Kind ALL · License ALL",
+    ]);
+    assert.match(panel.body[0], /INSTALLED.*SOURCE.*KIND.*ID/);
+    assert.ok(panel.body.slice(1).some((line) => line.includes(candidate.id) && line.includes(candidate.catalog)),
+      "catalog column labels and data stay below the metadata divider");
     const header = lines.find((line) => line.includes("SOURCE") && line.includes("INSTALLED"));
     const row = lines.find((line) => line.includes(candidate.id) && line.includes(candidate.catalog));
     assert.ok(header && row, `catalog table should render at ${size.columns} columns`);
@@ -447,6 +495,11 @@ test("catalog browser and connected-catalog tables use available panel width", a
   for (const size of dimensions) {
     const frame = await captureDashboardFrame([], managementActions, ["m"], size);
     const lines = frame.split(/\r?\n/);
+    const panel = separatedPanelFrame(frame, "CONNECTED CATALOGS 1");
+    assert.deepEqual(panel.header, [], "connected catalogs has no metadata separate from its title count");
+    assert.match(panel.body[0], /CATALOG.*REPOSITORY.*RESOURCES.*INSTALLED.*FRESHNESS/);
+    assert.ok(panel.body.slice(1).some((line) => line.includes(catalogName) && line.includes(repository)),
+      "connected catalog column labels and data remain below the title divider");
     const header = lines.find((line) => line.includes("REPOSITORY") && line.includes("FRESHNESS"));
     const row = lines.find((line) => line.includes(catalogName) && line.includes(repository));
     assert.ok(header && row, `catalog management table should render at ${size.columns} columns`);
@@ -557,12 +610,85 @@ test("source-version picker adapts SHA, date, and subject columns at 80 and 120 
       listSourceVersions: () => versions,
     }, ["v"], dimensions, ["\u001b"]);
     const lines = frame.split(/\r?\n/);
+    const revisions = separatedPanelFrame(frame, "RESOURCE REVISIONS", true);
+    const shortcuts = separatedPanelFrame(frame, "SHORTCUTS");
+    assert.deepEqual(revisions.header.map((line) => line.trim()), [
+      "platform-team / skill:assistant-helper",
+      "Select a commit to update; the catalog pin remains unchanged.",
+    ]);
+    assert.equal(revisions.body[0].trim(), "", "the existing gap stays in the revision body");
+    assert.equal(revisions.body.length, versions.length + 1, "moving metadata preserves both revision rows and the body gap");
+    assert.equal(revisions.topIndex, Math.floor((dimensions.rows - 15) / 2),
+      "header metadata counts once when centering the complete modal");
+    assert.equal(shortcuts.topIndex, revisions.bottomIndex + 2, "modal frames have one gap row");
+    assert.deepEqual(shortcuts.body.map((line) => line.trim()), ["↑↓ SELECT · ENTER UPDATE · ESC BACK"]);
+    assert.ok(revisions.body.some((line) => line.startsWith(`› ${versions[0].prefix}`)),
+      "the selected revision marker remains visible");
     const first = lines.find((line) => line.includes(versions[0].prefix) && line.includes(versions[0].subject));
     const second = lines.find((line) => line.includes(versions[1].prefix) && line.includes(versions[1].subject));
     assert.ok(first && second, `revision rows should render at ${dimensions.columns} columns`);
     assert.equal(first.indexOf("2025-04-03"), second.indexOf("2025-04-04"));
     assert.equal(first.indexOf(versions[0].subject), second.indexOf(versions[1].subject));
     assert.ok(first.length <= dimensions.columns);
+  }
+});
+
+test("revision viewport keeps the selected commit and separated shortcuts bounded on narrow short terminals", async () => {
+  const resource = {
+    catalog: "platform-team",
+    kind: "skill",
+    id: "assistant-helper",
+    scope: "project",
+    status: "current",
+    source_repository: "example/platform-team",
+    source_path: "skills/assistant-helper",
+    source_ref: "a".repeat(40),
+  };
+  const versions = Array.from({ length: 18 }, (_, index) => ({
+    sha: index.toString(16).padStart(40, "0"),
+    prefix: index.toString(16).padStart(7, "0"),
+    date: "2025-04-03T12:13:14Z",
+    subject: `Revision ${index + 1} with a complete subject`,
+  }));
+  for (const dimensions of [
+    { columns: 40, rows: 16 },
+    { columns: 80, rows: 18 },
+  ]) {
+    const selectedIndex = 9;
+    const frame = await captureDashboardFrame([resource], {
+      listSourceVersions: () => versions,
+    }, ["v", ...Array(selectedIndex).fill("\u001b[B")], dimensions, ["\u001b"]);
+    const lines = frame.split(/\r?\n/);
+    const revisions = separatedPanelFrame(frame, "RESOURCE REVISIONS", true);
+    const shortcuts = separatedPanelFrame(frame, "SHORTCUTS");
+    assert.equal(lines.length, dimensions.rows, "the overlay stays inside the terminal height");
+    assert.equal(revisions.topIndex, 0, "the unchanged revision viewport uses the full short-terminal height");
+    assert.ok(shortcuts.bottomIndex < dimensions.rows, "the complete shortcut frame stays visible");
+    assert.equal(shortcuts.topIndex, revisions.bottomIndex + 2);
+    assert.ok(revisions.body.some((line) => line.startsWith(`› ${versions[selectedIndex].prefix}`)),
+      `selection stays in the revision viewport at ${dimensions.columns}x${dimensions.rows}`);
+    const expectedRange = dimensions.columns === 40 ? "Showing 10-10 of 18 commits." : "Showing 8-11 of 18 commits.";
+    assert.equal(revisions.header.at(-1).trim(), expectedRange);
+    assert.ok(revisions.header[0].startsWith("platform-team / skill:"));
+    assert.equal(revisions.header.slice(1, -1).map((line) => line.trim()).join(" "),
+      "Select a commit to update; the catalog pin remains unchanged.");
+    assert.doesNotMatch(revisions.body.join("\n"), /Showing|Select a commit|platform-team/);
+    const revisionRows = revisions.body.filter((line) => /^\s*(?:› )?[0-9a-f]{7}(?:\s|$)/.test(line));
+    assert.equal(revisionRows.length, dimensions.columns === 40 ? 1 : 4,
+      "metadata relocation preserves the selected revision viewport count");
+    assert.equal(revisions.body.length, revisionRows.length + (dimensions.columns === 40 ? 0 : 1),
+      "only the existing optional gap remains alongside commit rows below the divider");
+    for (const hint of ["↑↓ SELECT", "ENTER UPDATE", "ESC BACK"]) {
+      assert.ok(shortcuts.body.join(" ").includes(hint), `the complete ${hint} hint stays visible`);
+    }
+    for (const panel of [revisions, shortcuts]) {
+      assert.ok(panel.right < dimensions.columns);
+      for (const line of lines.slice(panel.topIndex, panel.bottomIndex + 1)) {
+        assert.equal(line[panel.left], line === lines[panel.topIndex] ? "┌"
+          : line === lines[panel.bottomIndex] ? "└" : "│");
+        assert.ok(line.length <= dimensions.columns);
+      }
+    }
   }
 });
 test("CLI catalog and installed-resource tables adapt to terminal width without truncating piped output", async () => {
@@ -1474,17 +1600,20 @@ test("all dashboard modes show a dedicated shortcut frame for active controls", 
   const compactDimensions = { columns: 80, rows: 80 };
 
   const inventory = await captureDashboardFrame([], actions, [], compactDimensions);
-  assert.ok(inventory.includes("SHORTCUTS"));
+  separatedPanelFrame(inventory, "SHORTCUTS");
   assert.ok(inventory.includes("A install"));
   assert.ok(inventory.includes("M catalogs"));
 
   const catalog = await captureDashboardFrame([], actions, ["a"], compactDimensions);
-  assert.ok(catalog.includes("SHORTCUTS"));
+  separatedPanelFrame(catalog, "SHORTCUTS");
   assert.ok(catalog.includes("ENTER install"));
   assert.ok(catalog.includes("C catalog"));
   assert.ok(!catalog.includes("A install"));
 
   const installOptions = await captureDashboardFrame([], actions, ["a", "\r"], compactDimensions);
+  const installShortcuts = separatedPanelFrame(installOptions, "SHORTCUTS");
+  assert.equal(installShortcuts.body.length, 1, "modal actions pack together instead of taking one row per action");
+  assert.match(installOptions, /┌─ INSTALL OPTIONS /, "non-table modal title bars stay unchanged");
   assert.ok(installOptions.includes("SHORTCUTS"));
   assert.ok(installOptions.includes("FIELD"));
   assert.ok(installOptions.includes("ENTER REVIEW"));
@@ -1493,7 +1622,7 @@ test("all dashboard modes show a dedicated shortcut frame for active controls", 
   assert.ok(!installOptions.includes("C catalog"));
 
   const catalogManagement = await captureDashboardFrame([], actions, ["m"], compactDimensions);
-  assert.ok(catalogManagement.includes("SHORTCUTS"));
+  separatedPanelFrame(catalogManagement, "SHORTCUTS");
   for (const shortcut of ["A add", "P presets", "Delete remove", "E edit",
     "R refresh", "I import", "X export", "D details", "ESC inventory"]) {
     assert.ok(catalogManagement.includes(shortcut), `missing management shortcut: ${shortcut}`);
@@ -1537,7 +1666,7 @@ test("wide catalog management fills the terminal and wraps every active shortcut
     "catalog list frame should reach the bottom row like Inventory");
   assert.equal(detailsBottom + 2, shortcutsTitle - 1,
     "DETAILS fills the column above the one-row panel separation");
-  assert.equal(shortcutsBottom - shortcutsTitle - 1, 5,
+  assert.equal(separatedPanelFrame(management, "SHORTCUTS").body.length, 5,
     `the long active action line wraps into a counted extra panel row:\n${shortcutsFrame}`);
   assert.equal(shortcutsBottom, dimensions.rows - 1,
     "management shortcuts should stay bottom-anchored to the full-height panel");
