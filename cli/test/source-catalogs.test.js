@@ -3790,19 +3790,22 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
     "",
   ].join("\n"), { mode: 0o755 });
   const previousConfig = process.env.KITIA_CONFIG_DIR;
-  const previousPath = process.env.PATH;
   const previousHome = process.env.HOME;
   const previousCwd = process.cwd();
   const previousPin = process.env.KITIA_TEST_GH_PIN;
   process.env.KITIA_CONFIG_DIR = configDirectory;
   process.env.KITIA_TEST_GH_PIN = receivedPin;
-  process.env.PATH = `${binDirectory}${path.delimiter}${previousPath}`;
   const output = { log() {}, error() {} };
   const invoke = async (scope, target) => {
     const args = scope === "user"
       ? ["install", "skill", "demo-skill", "--catalog", "Test", "--ref", selectedRef, "--scope", "user"]
       : ["install", "skill", "demo-skill", "--catalog", "Test", "--ref", selectedRef, "--target", target];
-    const options = { ...parseArguments(args), output };
+    const options = {
+      ...parseArguments(args),
+      output,
+      onProgress() {},
+      spawnProcess: nodeScriptSpawn(path.join(binDirectory, "gh")),
+    };
     if (scope === "user") assert.equal(options.target, userTarget);
     return executeCommand(options, null);
   };
@@ -3844,8 +3847,6 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
   } finally {
     if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
     else process.env.KITIA_CONFIG_DIR = previousConfig;
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
     if (previousPin === undefined) delete process.env.KITIA_TEST_GH_PIN;
     else process.env.KITIA_TEST_GH_PIN = previousPin;
     if (previousHome === undefined) delete process.env.HOME;

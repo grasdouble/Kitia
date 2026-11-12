@@ -3,6 +3,7 @@
 import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { PlanAction, InstallationTool, InventoryScope } from "../catalog/inventory/files.js";
+import type { spawn } from "node:child_process";
 export interface CliOptions {
   command?: string;
   action?: string;
@@ -39,6 +40,7 @@ export interface CliOptions {
   captureOutput?: boolean;
   onResource?: (resource: { catalog: string; kind: string; id: string; status?: string; source?: boolean }) => void;
   onProgress?: (message: string) => void;
+  spawnProcess?: typeof spawn;
 }
 const os = require("node:os");
 const path = require("node:path");

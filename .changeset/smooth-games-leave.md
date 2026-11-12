@@ -2,4 +2,4 @@
 
 ---
 
-Make GitHub CLI process tests cross-platform
+Keep GitHub CLI process tests cross-platform across CLI command paths

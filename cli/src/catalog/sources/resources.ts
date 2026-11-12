@@ -25,6 +25,7 @@ import type { CatalogResource } from "../entries.js";
 import type { FileFingerprint, InstallPlanEntry } from "../plan.js";
 import type { InstalledSourceResource } from "./installed.js";
 import type { InstallState, PlanAction } from "../inventory/files.js";
+import type { spawn } from "node:child_process";
 
 function catalogLabel(resource: CatalogResource): string {
   return `${resource.catalog || "source"} catalog`;
@@ -431,6 +432,7 @@ async function updateSourceResourcesAsync(
     onProgress = () => {},
     nonInteractive = true,
     scope = "project",
+    spawnProcess,
   }: {
     dryRun?: boolean;
     force?: boolean;
@@ -440,6 +442,7 @@ async function updateSourceResourcesAsync(
     onProgress?: (message: string) => void;
     nonInteractive?: boolean;
     scope?: string;
+    spawnProcess?: typeof spawn;
   } = {},
 ): Promise<string[]> {
   onProgress("Validating installed resource and local file state...");
@@ -477,7 +480,7 @@ async function updateSourceResourcesAsync(
             ...installOptions, force: force || (ghForce && installation.agent === ghForceAgent),
           }),
           targetRoot,
-          { nonInteractive, onProgress },
+          { nonInteractive, onProgress, spawnProcess },
         );
       } catch (error) {
         if ((error as Error & { code?: string }).code === "GH_SPAWN_FAILED") {

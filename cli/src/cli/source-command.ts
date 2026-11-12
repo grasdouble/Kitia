@@ -172,7 +172,7 @@ function runSourceCommand(
           : await runGhSkillAsync(
             args,
             target,
-            { nonInteractive: options.nonInteractive, onProgress: options.onProgress },
+            { nonInteractive: options.nonInteractive, onProgress: options.onProgress, spawnProcess: options.spawnProcess },
           );
         const status = typeof result === "number" ? result : result.status;
         if (status !== 0) {
