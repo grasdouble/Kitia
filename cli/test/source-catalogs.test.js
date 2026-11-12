@@ -2002,18 +2002,23 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       ...extraActions,
     });
     let dashboardFinished = false;
-    const awaitDashboardExit = () => new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(
-        `Dashboard did not exit after q for ${JSON.stringify(keys)}: ${latestFrame().slice(-400)}`,
-      )), 5_000);
-      done.then((result) => {
+    done.then(() => { dashboardFinished = true; }, () => { dashboardFinished = true; });
+    const awaitDashboardExit = async () => {
+      input.write("q");
+      let timeout;
+      try {
+        return await Promise.race([
+          done,
+          new Promise((_, reject) => {
+            timeout = setTimeout(() => reject(new Error(
+              `Dashboard did not exit after q for ${JSON.stringify(keys)}: ${latestFrame().slice(-400)}`,
+            )), 5_000);
+          }),
+        ]);
+      } finally {
         clearTimeout(timeout);
-        resolve(result);
-      }, (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-    });
+      }
+    };
     const latestFrame = () => {
       const end = renderedOutput.lastIndexOf("\x1b[?2026l");
       const start = renderedOutput.lastIndexOf("\x1b[?2026h", end);
@@ -2026,16 +2031,14 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       for (const entry of keys) {
         const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
         if (key === "q") {
-          input.write("q");
           const result = await awaitDashboardExit();
-          dashboardFinished = true;
           return { result, renderedOutput };
         }
         const previousEnd = latestFrameEnd();
         input.write(key);
         const expected = expectedOutput
           ? expectedOutput instanceof RegExp ? expectedOutput : new RegExp(expectedOutput)
-          : null;
+          : key === "m" ? /USER CATALOGS/ : null;
         await waitForOutput(output, latestFrame, (frame) =>
           latestFrameEnd() > previousEnd && (!expected || expected.test(frame)),
         `latest frame after ${JSON.stringify(key)}`, 5_000);
@@ -2048,14 +2051,21 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
           latestFrameEnd() > previousEnd && expected.test(frame),
         `latest frame after Escape: ${expectedFrame}`, 5_000);
       }
-      input.write("q");
       const result = await awaitDashboardExit();
       dashboardFinished = true;
       return { result, renderedOutput };
     } finally {
       if (!dashboardFinished && !input.destroyed) {
         input.destroy();
-        await done.catch(() => {});
+        let cleanupTimeout;
+        try {
+          await Promise.race([
+            done.then(() => {}, () => {}),
+            new Promise((resolve) => { cleanupTimeout = setTimeout(resolve, 1_000); }),
+          ]);
+        } finally {
+          clearTimeout(cleanupTimeout);
+        }
       } else if (!input.destroyed) {
         input.destroy();
       }
@@ -2182,13 +2192,13 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   };
   const transferManager = await driveRefresh([
     ["m", /USER CATALOGS/],
-    ["i", /IMPORT CATALOGS/],
-    pastedConfiguration,
+    ["i", /Paste the JSON catalog configuration below/],
+    [pastedConfiguration, /CTRL\+S REVIEW/],
     ["\x13", /SPACE\/ENTER TOGGLE/],
-    "\x1b[B",
-    "\r",
+    ["\x1b[B", /› \[x\] Catalog Two/],
+    ["\r", /› \[ \] Catalog Two/],
     ["\x13", /Added \(1\): Imported/],
-    "\r",
+    ["\r", /USER CATALOGS/],
     "q",
   ], refresh, {
     transferCatalogs: async (action, content) => {
@@ -2222,7 +2232,15 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.match(transferManager.renderedOutput, /Catalog One/);
   assert.match(transferManager.renderedOutput, /Catalog Two/);
   let cancelledImport = false;
-  const cancelImportManager = await driveRefresh(["m", "i", pastedConfiguration, "\x13", "\x1b", "\x1b", "q"], refresh, {
+  const cancelImportManager = await driveRefresh([
+    ["m", /USER CATALOGS/],
+    ["i", /CTRL\+S REVIEW/],
+    [pastedConfiguration, /CTRL\+S REVIEW/],
+    ["\x13", /SPACE\/ENTER TOGGLE/],
+    ["\x1b", /Paste the JSON catalog configuration below/],
+    ["\x1b", /USER CATALOGS/],
+    "q",
+  ], refresh, {
     transferCatalogs: async () => {
       cancelledImport = true;
       return {};

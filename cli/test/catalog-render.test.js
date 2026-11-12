@@ -86,18 +86,19 @@ async function captureDashboardFrame(
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output, [], actions);
-  const waitForDashboardExit = () => new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(
-      new Error("Dashboard did not exit after q within 5 seconds"),
-    ), 5_000);
-    done.then((result) => {
+  const waitForDashboardExit = async () => {
+    let timeout;
+    try {
+      return await Promise.race([
+        done,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Dashboard did not exit after q within 5 seconds")), 5_000);
+        }),
+      ]);
+    } finally {
       clearTimeout(timeout);
-      resolve(result);
-    }, (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-  });
+    }
+  };
   const latestFrame = () => {
     const start = rendered.lastIndexOf("\u001b[?2026h");
     const end = rendered.indexOf("\u001b[?2026l", start);
@@ -151,13 +152,18 @@ async function captureDashboardFrame(
     for (const key of keys) {
       const previousFrame = latestFrame();
       input.write(key);
-      await waitForFrame((frame) => frame !== previousFrame, `the frame after ${JSON.stringify(key)}`);
+      const expectedScreen = key === "v" ? "RESOURCE REVISIONS" : null;
+      await waitForFrame((frame) => frame !== previousFrame &&
+        (!expectedScreen || frame.includes(expectedScreen)),
+      `the frame after ${JSON.stringify(key)}`);
     }
     const frame = latestFrame();
     for (const key of cleanupKeys) {
       const previousFrame = latestFrame();
       input.write(key);
-      await waitForFrame((nextFrame) => nextFrame !== previousFrame, "dashboard cleanup");
+      await waitForFrame((nextFrame) => nextFrame !== previousFrame &&
+        nextFrame.includes("INVENTORY") && !nextFrame.includes("RESOURCE REVISIONS"),
+      "the inventory frame after dashboard cleanup");
     }
     input.write("q");
     assert.equal(await waitForDashboardExit(), true);
