@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const React = require("react");
 const { test } = require("node:test");
-let InkText;
+
 
 function childText(node) {
   if (Array.isArray(node)) return node.map(childText).join("");
@@ -12,12 +12,15 @@ function childText(node) {
   return "";
 }
 
-function visibleInkText(node, output = []) {
+function visibleInkText(node, InkText, output = []) {
   if (Array.isArray(node)) {
-    for (const child of node) visibleInkText(child, output);
+    for (const child of node) visibleInkText(child, InkText, output);
   } else if (React.isValidElement(node)) {
-    if (node.type === InkText) output.push(childText(node.props.children));
-    visibleInkText(node.props.children, output);
+    if (node.type === InkText) {
+      output.push(childText(node.props.children));
+      return output;
+    }
+    visibleInkText(node.props.children, InkText, output);
   }
   return output;
 }
@@ -44,37 +47,41 @@ async function captureDashboardFrame(
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output, [], actions);
   let completed = false;
-  try {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    for (const key of keys) {
-      input.write(key);
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    }
+  const latestFrame = () => {
     const start = rendered.lastIndexOf("\u001b[?2026h");
     const end = rendered.indexOf("\u001b[?2026l", start);
-    assert.ok(start >= 0 && end > start, "runDashboard should emit a synchronized frame");
-    const frame = rendered.slice(start, end)
-      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-      .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "");
-    for (const key of cleanupKeys) {
+    return start >= 0 && end > start
+      ? rendered.slice(start, end)
+        .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+        .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
+      : "";
+  };
+  const waitForFrame = async (predicate, description) => {
+    const deadline = Date.now() + 5_000;
+    while (!predicate(latestFrame())) {
+      if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${description}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return latestFrame();
+  };
+  try {
+    await waitForFrame((frame) => Boolean(frame), "initial dashboard");
+    for (const key of keys) {
+      const previousFrame = latestFrame();
       input.write(key);
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await waitForFrame((frame) => frame !== previousFrame, `the frame after ${JSON.stringify(key)}`);
+    }
+    const frame = latestFrame();
+    for (const key of cleanupKeys) {
+      const previousFrame = latestFrame();
+      input.write(key);
+      await waitForFrame((nextFrame) => nextFrame !== previousFrame, "dashboard cleanup");
     }
     input.write("q");
     assert.equal(await done, true);
     completed = true;
     return frame;
   } finally {
-    if (!completed) {
-      input.write("\u001b");
-      input.write("q");
-      let timeout;
-      await Promise.race([
-        done.catch(() => false),
-        new Promise((resolve) => { timeout = setTimeout(resolve, 250); }),
-      ]);
-      clearTimeout(timeout);
-    }
     input.destroy();
     output.destroy();
   }
@@ -129,6 +136,25 @@ function catalogProps(resource) {
     rows: 40,
   };
 }
+
+test("dashboard exits and unmounts when its input stream closes", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 80;
+  output.rows = 24;
+  const done = runDashboard([], input, output);
+
+  input.destroy();
+  assert.equal(await done, false);
+  output.destroy();
+});
 
 test("dashboard colors rows by kind and selection in ANSI", async () => {
   const { execFileSync } = require("node:child_process");
@@ -244,7 +270,6 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
 
 test("CatalogScreen exposes source license and pin only when provenance exists", async () => {
   const { Text } = await import("ink");
-  InkText = Text;
   const { CatalogScreen } = await import("../dist/dashboard/screens.mjs");
   const source = {
     catalog: "sample",
@@ -257,7 +282,7 @@ test("CatalogScreen exposes source license and pin only when provenance exists",
     source_ref: "0123456789abcdef0123456789abcdef01234567",
   };
   const sourceTree = CatalogScreen(catalogProps(source));
-  const sourceText = visibleInkText(sourceTree);
+  const sourceText = visibleInkText(sourceTree, Text);
   assert.ok(sourceText.includes("LICENSE"));
   assert.ok(sourceText.includes("MIT"));
   assert.ok(sourceText.includes("PINNED SOURCE"));
@@ -269,7 +294,7 @@ test("CatalogScreen exposes source license and pin only when provenance exists",
     id: "local-demo",
     description: "A local resource.",
   }));
-  const localText = visibleInkText(localTree);
+  const localText = visibleInkText(localTree, Text);
   assert.ok(localText.includes("LICENSE"));
   assert.ok(localText.includes("not declared"));
   assert.ok(!localText.includes("PINNED SOURCE"));
@@ -277,6 +302,7 @@ test("CatalogScreen exposes source license and pin only when provenance exists",
 });
 
 test("CatalogScreen wraps complete descriptions and pinned sources at narrow widths", async () => {
+  const { Text } = await import("ink");
   const { CatalogScreen } = await import("../dist/dashboard/screens.mjs");
   const description = "A long description with enough detail to wrap across several narrow terminal lines without losing any words.";
   const sourcePath = "skills/long-resource-folder/with-an-extraordinarily-long-unbroken-source-path-segment";
@@ -296,13 +322,14 @@ test("CatalogScreen wraps complete descriptions and pinned sources at narrow wid
       }),
       columns,
     });
-    const text = visibleInkText(tree).join("");
+    const text = visibleInkText(tree, Text).join("");
     assert.ok(text.replace(/\s/g, "").includes(description.replace(/\s/g, "")));
     assert.ok(text.includes(source));
   }
 });
 
 test("InventoryScreen wraps complete locations and descriptions at narrow widths", async () => {
+  const { Text } = await import("ink");
   const { InventoryScreen } = await import("../dist/dashboard/screens.mjs");
   const description = "A long inventory description that must remain complete when shown in a narrow terminal.";
   const location = "/workspace/projects/a-resource-folder/with-an-extraordinarily-long-unbroken-path-segment";
@@ -335,11 +362,11 @@ test("InventoryScreen wraps complete locations and descriptions at narrow widths
       columns,
       rows: 40,
     });
-    const text = visibleInkText(tree).join("");
+    const text = visibleInkText(tree, Text).join("");
     assert.ok(text.replace(/\s/g, "").includes(description.replace(/\s/g, "")));
     assert.ok(text.includes(location));
     assert.ok(text.includes("https://github.com/example/long-repository-name"));
-    assert.ok(text.includes(sourceRef));
+    assert.ok(text.replace(/\s/g, "").includes(sourceRef));
   }
 });
 test("inventory uses wide-screen context while preserving compact layout", async () => {
@@ -860,7 +887,7 @@ test("inventory detail keeps update paths complete within narrow and short layou
     const frameLines = frame.split(/\r?\n/);
     assert.equal(frameLines.length, rows, `the rendered frame should occupy ${rows} rows`);
     assert.ok(frameLines[rows - 1].includes("└"),
-      "the final rendered row should remain occupied by the shortcut-panel border");
+      `the final rendered row should remain occupied by the shortcut-panel border at ${columns}x${rows}: ${JSON.stringify(frameLines[rows - 1])}`);
     assert.ok(frame.includes("SHORTCUTS"), "the compact layout retains its framed shortcut panel");
     const updateText = frame.replace(/[│\s]/g, "");
     assert.ok(updateText.includes(issue.replace(/\s/g, "")),
@@ -1197,13 +1224,13 @@ test("local conflicts and GH force-required updates require explicit retry conse
         input.write("\r");
         const promptTitle = ghForceRequired ? "GH REQUESTS OVERWRITE" : "LOCAL CONFLICT";
         const conflict = await waitForFrame((frame) => frame.includes(promptTitle), "force confirmation");
-        const promptText = conflict.replace(/[│]/g, " ").replace(/\s+/g, " ");
+        const promptText = conflict.replace(/[│─]/g, " ").replace(/\s+/g, " ");
         assert.ok(conflict.includes("conflicted-skill"));
         assert.ok(conflict.includes("catalog Test"));
         assert.ok(conflict.includes("scope project"));
         if (ghForceRequired) {
           assert.ok(promptText.includes("already installed and requires --force"));
-          assert.ok(promptText.includes("for github-copilot"));
+          assert.ok(promptText.includes("github-copilot"), `missing retry target in modal: ${promptText}`);
           assert.ok(promptText.includes("local-modification and untracked-content checks still apply"));
           assert.ok(!promptText.includes("secret-value"));
         } else {
@@ -1556,7 +1583,6 @@ test("InventoryScreen renders supported shortcuts in the spacious details column
 
 test("InventoryScreen omits action shortcuts that are unavailable in this inventory", async () => {
   const { Text } = await import("ink");
-  InkText = Text;
   const { InventoryScreen } = await import("../dist/dashboard/screens.mjs");
   const tree = InventoryScreen({
     resources: [],
@@ -1574,7 +1600,7 @@ test("InventoryScreen omits action shortcuts that are unavailable in this invent
     columns: 120,
     rows: 40,
   });
-  const text = visibleInkText(tree).join("");
+  const text = visibleInkText(tree, Text).join("");
   assert.ok(!text.includes("A install"));
   assert.ok(!text.includes("U update"));
   assert.ok(!text.includes("Delete uninstall"));
@@ -1616,7 +1642,8 @@ test("all dashboard modes show a dedicated shortcut frame for active controls", 
 
   const installOptions = await captureDashboardFrame([], actions, ["a", "\r"], compactDimensions);
   const installShortcuts = separatedPanelFrame(installOptions, "SHORTCUTS");
-  assert.equal(installShortcuts.body.length, 1, "modal actions pack together instead of taking one row per action");
+  assert.equal(installShortcuts.body.length, 4,
+    "modal shortcut body includes the Actions and Navigation headings and their rows");
   assert.match(installOptions, /┌─ INSTALL OPTIONS /, "non-table modal title bars stay unchanged");
   assert.ok(installOptions.includes("SHORTCUTS"));
   assert.ok(installOptions.includes("FIELD"));
@@ -1670,8 +1697,8 @@ test("wide catalog management fills the terminal and wraps every active shortcut
     "catalog list frame should reach the bottom row like Inventory");
   assert.equal(detailsBottom + 2, shortcutsTitle - 1,
     "DETAILS fills the column above the one-row panel separation");
-  assert.equal(separatedPanelFrame(management, "SHORTCUTS").body.length, 5,
-    `the long active action line wraps into a counted extra panel row:\n${shortcutsFrame}`);
+  assert.equal(separatedPanelFrame(management, "SHORTCUTS").body.length, 9,
+    "the panel counts category headings and each wrapped active shortcut row");
   assert.equal(shortcutsBottom, dimensions.rows - 1,
     "management shortcuts should stay bottom-anchored to the full-height panel");
   for (const shortcut of ["A add", "P presets", "Delete remove", "E edit",

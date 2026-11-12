@@ -129,6 +129,10 @@ export function Dashboard({
   const [versionLabel, setVersionLabel] = useState("Checking version update");
   const [versionNotice, setVersionNotice] = useState<VersionNotice | null>(null);
   useEffect(() => {
+    if (installedVersion === "unknown") {
+      setVersionLabel(installedVersion);
+      return;
+    }
     let active = true;
     void checkInstalledVersion(installedVersion).then(({ label, notice }) => {
       if (!active) return;
@@ -1385,9 +1389,12 @@ export async function runDashboard(
     const onFinish = (success) => {
       if (finished) return;
       finished = true;
+      input.removeListener("close", onInputClose);
       resolve(success);
       app.unmount();
     };
+    const onInputClose = () => onFinish(false);
+    input.once("close", onInputClose);
     app = render(h(Dashboard, { resources, errors, actions, onFinish }), {
       stdin: input,
       stdout: output,
@@ -1396,7 +1403,11 @@ export async function runDashboard(
       interactive: true,
     });
     app.waitUntilExit().catch((error) => {
-      if (!finished) reject(error);
+      if (!finished) {
+        input.removeListener("close", onInputClose);
+        finished = true;
+        reject(error);
+      }
     });
   });
 }

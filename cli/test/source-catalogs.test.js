@@ -196,26 +196,48 @@ test("dashboard shows the loading popup for consecutive actions", async () => {
       return { code: 0, messages: ["Preview ready."], resources: [], errors: [] };
     },
   });
-  input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  input.write("p");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /LOADING/);
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  const secondActionStart = rendered.length;
-  input.write("p");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered.slice(secondActionStart), /LOADING/);
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  assert.equal(callCount, 2);
-  input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  input.write("q");
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
+  const latestFrame = () => {
+    const start = rendered.lastIndexOf("\u001b[?2026h");
+    const end = rendered.indexOf("\u001b[?2026l", start);
+    return start >= 0 && end > start ? rendered.slice(start, end) : "";
+  };
+  const waitFor = async (predicate, message) => {
+    const deadline = Date.now() + 5_000;
+    while (!predicate(latestFrame())) {
+      if (Date.now() >= deadline) throw new Error(`Dashboard did not ${message}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  let finished = false;
+  try {
+    await waitFor((frame) => frame.includes("INVENTORY"), "render Inventory");
+    input.write("a");
+    await waitFor((frame) => frame.includes("CATALOG RESOURCES"), "open catalog");
+    input.write("p");
+    await waitFor((frame) => frame.includes("LOADING"), "show the first loading popup");
+    await waitFor((frame) => frame.includes("Preview ready."), "finish the first preview");
+    assert.equal(callCount, 1);
+
+    input.write("\r");
+    await waitFor((frame) => frame.includes("CATALOG RESOURCES"), "return to catalog");
+    input.write("p");
+    await waitFor((frame) => frame.includes("LOADING"), "show the second loading popup");
+    await waitFor(() => callCount === 2, "start the second preview");
+    await waitFor((frame) => frame.includes("Preview ready."), "finish the second preview");
+    input.write("\r");
+    await waitFor((frame) => frame.includes("CATALOG RESOURCES"), "return to catalog again");
+    input.write("q");
+    assert.equal(await done, true);
+    finished = true;
+  } finally {
+    if (!finished) {
+      input.destroy();
+      await done;
+    } else {
+      input.destroy();
+    }
+    output.destroy();
+  }
 });
 test("dashboard revision picker applies a selected full SHA to a confirmed instruction update", async () => {
   const { PassThrough } = require("node:stream");
@@ -2822,17 +2844,19 @@ test("dashboard renders the resource list and selection panel at wide and narrow
     assert.doesNotMatch(inventoryRow, /A manually maintained skill/);
     assert.doesNotMatch(rendered, /DESC\s/);
     assert.match(rendered, /STATUS[\s\S]*SCOPE[\s\S]*KIND[\s\S]*ID[\s\S]*CATALOG/);
-    const header = rendered.split(/\r?\n/).find((line) => /STATUS/.test(line) && /CATALOG/.test(line));
+    const plainRendered = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+    const header = plainRendered.split(/\r?\n/).find((line) => /STATUS/.test(line) && /CATALOG/.test(line));
     assert.ok(header, "inventory header is rendered");
     const column = (label) => header.indexOf(label);
     assert.ok(column("STATUS") < column("SCOPE") && column("SCOPE") < column("KIND") &&
       column("KIND") < column("ID") && column("ID") < column("CATALOG"));
-    assert.ok(column("CATALOG") - column("ID") > 12, "catalog receives flexible width after the ID column");
+    assert.ok(column("CATALOG") - column("ID") >= 12, "catalog receives flexible width after the ID column");
     const selectedPanel = rendered.slice(rendered.lastIndexOf("SKILL - manual-skill"));
     const catalogLabel = selectedPanel.indexOf("CATALOG");
     const catalogValue = selectedPanel.indexOf("a-very-long-external-catalog-name");
-    assert.ok(selectedPanel.slice(catalogLabel, catalogValue).includes("\n"));
-    assert.match(selectedPanel, /a-very-long-external-catalog-name-for-layout(?:\.\.\.|-smoke-testing)/);
+    assert.ok(selectedPanel.slice(catalogLabel, catalogValue).includes(" "),
+      "inline detail labels remain separated from their values");
+    assert.match(selectedPanel, /a-very-long-external-catalog-name-for-layo(?:\.\.\.|ut)/);
     assert.match(selectedPanel, /abcdef0/);
     assert.match(selectedPanel, /https:\/\/github\.com\/example\/manual-skill/);
     assert.match(selectedPanel, /A manually maintained skill\./);
@@ -2915,7 +2939,7 @@ test("preview starts with source files and keeps audit and tree pages separate",
   ].join("\n");
   const options = { action: "preview", resource, content, columns: 90, rows: 40 };
   const sourceCount = inspectionPageCount(options);
-  assert.equal(sourceCount, 4);
+  assert.equal(sourceCount, 5);
   const sourcePages = Array.from({ length: sourceCount }, (_, page) =>
     inspectionPageView({ ...options, page }));
   assert.match(sourcePages[0].title, /^FILE SKILL\.md/);

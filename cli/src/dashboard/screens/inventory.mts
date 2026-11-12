@@ -148,7 +148,7 @@ export function InventoryScreen({
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
   const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
   const compactDetails = rows < 40;
-  const inlineDetails = rows >= 40 && rows < 50;
+  const inlineDetails = columns < 76 && rows >= 36 && rows < 50;
   const largeScreenContext = selected && columns >= 112 && rows >= 50
     ? [
       ...(selected.category ? [{ label: "CATEGORY", value: selected.category, maxLines: 2 }] : []),
@@ -214,29 +214,36 @@ export function InventoryScreen({
             row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
           )
         : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
-  const shortcutLines = modalActive ? [] : filterMode
-    ? categorizedShortcutLines({
-      Filters: ["TYPE to search", "BACKSPACE edit", "ENTER apply", "ESC clear"],
-      Navigation: ["↑↓ navigate"],
-    })
-    : categorizedShortcutLines({
-      Actions: [
-        ...(catalogAvailable ? ["A install"] : []),
-        ...(canExecute && selected && selected.scope && (
-          selected.managed === false
-            ? Boolean(selected.paths?.length)
-            : Boolean(selected.source_repository && selected.source_path)
-        ) ? ["P preview"] : []),
-        ...(canExecute && selected && selected.managed !== false &&
-            selected.source_repository && selected.source_path ? ["V revision"] : []),
-        ...(canExecute && selected
-          ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
-          : []),
-      ],
-      Filters: ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])],
-      Display: ["D details"],
-      Navigation: ["M catalogs", "↑↓ navigate", "? guide", "Q quit"],
-    });
+  const compactShortcuts = columns < 76 && rows < 40 && showDetails;
+  const shortcutLines = modalActive ? [] : compactShortcuts
+    ? filterMode
+      ? ["ENTER apply · ESC clear"]
+      : selected && canExecute
+        ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall", "Q quit"]
+        : ["F filter", "Q quit"]
+    : filterMode
+      ? categorizedShortcutLines({
+        Filters: ["TYPE to search", "BACKSPACE edit", "ENTER apply", "ESC clear"],
+        Navigation: ["↑↓ navigate"],
+      })
+      : categorizedShortcutLines({
+        Actions: [
+          ...(catalogAvailable ? ["A install"] : []),
+          ...(canExecute && selected && selected.scope && (
+            selected.managed === false
+              ? Boolean(selected.paths?.length)
+              : Boolean(selected.source_repository && selected.source_path)
+          ) ? ["P preview"] : []),
+          ...(canExecute && selected && selected.managed !== false &&
+              selected.source_repository && selected.source_path ? ["V revision"] : []),
+          ...(canExecute && selected
+            ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
+            : []),
+        ],
+        Filters: ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])],
+        Display: ["D details"],
+        Navigation: ["M catalogs", "↑↓ navigate", "? guide", "Q quit"],
+      });
   const inventoryShortcutWidth = inventorySideBySide ? inventoryDetailsWidth : columns - 2;
   const fullSummaryPanelRows = sideBySide ? 5 : 17;
   const warningPanelRows = errors.length ? errors.length + 4 : 0;
@@ -267,7 +274,8 @@ export function InventoryScreen({
     (showDetails ? 1 - selectionMarginTop : 0) + (shortcutsPanelRows ? 1 - shortcutsMarginTop : 0);
   const viewport = Math.max(
     1,
-    rows - (6 + summaryPanelRows + warningPanelRows + 7 + (inventoryFilterLines.length - 1) + detailsVerticalOverhead - reclaimedRows),
+    rows - (6 + summaryPanelRows + warningPanelRows + 7 + (inventoryFilterLines.length - 1) +
+      detailsVerticalOverhead - reclaimedRows),
   );
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
   const page = visible.slice(first, first + viewport);

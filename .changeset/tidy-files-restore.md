@@ -26,3 +26,6 @@ Improve source catalog safety and dashboard parity
   - Centralize dashboard row-color resolution: known kinds keep their palette, selection overrides with blue, and unknown kinds retain inventory-status or proprietary-license fallbacks.
   - Mark the selected row with a consistent `›` across inventory, catalog browsing, and catalog management.
   - Centralize dashboard semantic colors, modal RGB values, the title gradient, and terminal ANSI codes in one editable theme module.
+  - Exit and unmount the interactive dashboard when its input stream closes.
+  - Skip the npm update lookup when the installed version is unknown.
+  - Use compact inline details and shortcuts on short stacked inventory screens so panel borders and complete issue paths remain visible.
