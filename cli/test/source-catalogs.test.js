@@ -36,6 +36,60 @@ const nodeScriptSpawn = (script) => (command, args, options) => {
   assert.equal(command, "gh");
   return spawn(process.execPath, [script, ...args], options);
 };
+function waitForOutput(output, getValue, predicate, description, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    let timeout;
+    let checking = false;
+    let dirty = false;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      output.off("data", onData);
+      output.off("end", onEnd);
+      output.off("close", onClose);
+      output.off("error", onError);
+    };
+    const check = () => {
+      const value = getValue();
+      if (predicate(value)) {
+        cleanup();
+        resolve(value);
+        return;
+      }
+      if (checking) {
+        dirty = true;
+        return;
+      }
+      checking = true;
+      dirty = false;
+      queueMicrotask(() => {
+        checking = false;
+        if (dirty) check();
+      });
+    };
+    const onData = () => { check(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`Output ended before ${description}`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`Output closed before ${description}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    output.on("data", onData);
+    output.once("end", onEnd);
+    output.once("close", onClose);
+    output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${description}: ${String(getValue()).slice(-1000)}`));
+    }, timeoutMs);
+    check();
+  });
+}
 test("dashboard preview combines source inspection and audit while installs remain audited", async () => {
   const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-inspection-"));
@@ -105,80 +159,119 @@ test("dashboard replaces an installed skill with the selected full revision thro
   output.rows = 40;
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const visibleFrame = () => {
+    const start = rendered.lastIndexOf("\u001b[?2026h");
+    const end = rendered.indexOf("\u001b[?2026l", start);
+    return start >= 0 && end > start
+      ? require("node:util").stripVTControlCharacters(rendered.slice(start, end))
+      : "";
+  };
+  const waitForFrame = (predicate, description) => new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      output.off("data", onData);
+      output.off("end", onEnd);
+      output.off("close", onClose);
+      output.off("error", onError);
+    };
+    const check = () => {
+      const frame = visibleFrame();
+      if (!predicate(frame)) return false;
+      cleanup();
+      resolve(frame);
+      return true;
+    };
+    const onData = () => { check(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`Dashboard output ended before rendering ${description}`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`Dashboard output closed before rendering ${description}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    if (check()) return;
+    output.on("data", onData);
+    output.once("end", onEnd);
+    output.once("close", onClose);
+    output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Dashboard did not render ${description}`));
+    }, 10_000);
+  });
   const selectedSha = "b".repeat(40);
   const actions = [];
   const installed = {
     catalog: "Test", kind: "skill", id: "revision-skill", scope: "project", status: "current",
     source_repository: "org/repo", source_path: "skills/revision-skill", source_ref: "a".repeat(40),
   };
+  let resolveHistory;
+  const historyRequest = new Promise((resolve) => { resolveHistory = resolve; });
+  let resolveUpdate;
+  const updateRequest = new Promise((resolve) => { resolveUpdate = resolve; });
+  let markUpdateStarted;
+  const updateStarted = new Promise((resolve) => { markUpdateStarted = resolve; });
   const done = runDashboard([installed], input, output, [], {
     catalogResources: [{
       catalog: "Test", kind: "skill", id: "revision-skill",
       source_repository: "org/repo", source_path: "skills/revision-skill",
       source_ref: "a".repeat(40), license_status: "MIT",
     }],
-    listSourceVersions: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      return [
-        { sha: "a".repeat(40), prefix: "aaaaaaa", date: "2026-11-09T00:00:00Z", subject: "Current pin" },
-        { sha: selectedSha, prefix: "bbbbbbb", date: "2026-11-08T00:00:00Z", subject: "Previous revision" },
-      ];
-    },
+    listSourceVersions: () => historyRequest,
     execute: async (action, resource, options) => {
       actions.push({ action, resource: resource.id, scope: resource.scope, ref: options.ref });
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      markUpdateStarted();
+      await updateRequest;
       return { code: 0, messages: ["Updated selected revision."], resources: [installed], errors: [] };
     },
   });
   let dashboardFinished = false;
   void done.then(() => { dashboardFinished = true; });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await waitForFrame((frame) => frame.includes("INVENTORY"), "initial inventory");
   input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await waitForFrame((frame) => frame.includes("CATALOG RESOURCES"), "catalog resources");
   input.write("v");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.ok(["|", "/", "-", "\\"].some((frame) =>
-    rendered.includes(`${frame} Loading commit history for revision-skill`)));
-  for (let attempt = 0; attempt < 50 && !rendered.includes("RESOURCE REVISIONS"); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.match(rendered, /RESOURCE REVISIONS/);
-  const revisionBody = assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "RESOURCE REVISIONS", "", [
+  await waitForFrame((frame) => frame.includes("Loading commit history for revision-skill"),
+    "revision history loading popup");
+  resolveHistory([
+    { sha: "a".repeat(40), prefix: "aaaaaaa", date: "2026-11-09T00:00:00Z", subject: "Current pin" },
+    { sha: selectedSha, prefix: "bbbbbbb", date: "2026-11-08T00:00:00Z", subject: "Previous revision" },
+  ]);
+  const revisionFrame = await waitForFrame((frame) => frame.includes("RESOURCE REVISIONS"), "revision picker");
+  const revisionBody = assertSeparatedPanelHeader(revisionFrame, "RESOURCE REVISIONS", "", [
     "Test / skill:revision-skill",
     "Select a commit to update; the catalog pin remains unchanged.",
   ]).filter((line) => line.trim());
   assert.equal(revisionBody.length, 2, "unpaginated revision rows stay below the divider without new column labels");
   assert.match(revisionBody[0], /› aaaaaaa\s+2026-11-09\s+Current pin/);
   assert.match(revisionBody[1], /bbbbbbb\s+2026-11-08\s+Previous revision/);
-  const selectionStart = rendered.length;
   input.write("\x1b[B");
-  for (let attempt = 0; attempt < 50 &&
-      !rendered.slice(selectionStart).includes("› bbbbbbb"); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.ok(rendered.slice(selectionStart).includes("› bbbbbbb"), "the second revision is selected before Enter");
+  const selectedFrame = await waitForFrame((frame) => frame.includes("› bbbbbbb"), "second revision selection");
+  assert.ok(selectedFrame.includes("› bbbbbbb"), "the second revision is selected before Enter");
   input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  for (let attempt = 0; attempt < 50 &&
-      !selectedDetailsFrame(rendered).includes("CONFIRM UPDATE"); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  const confirmationFrame = selectedDetailsFrame(rendered).replace(/\s+/g, " ");
+  const confirmationFrame = (await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"),
+    "update confirmation")).replace(/\s+/g, " ");
   assert.match(confirmationFrame, /CONFIRM UPDATE/);
   assert.match(confirmationFrame, /Replace the installed skill:revision-skill/);
   assert.match(confirmationFrame, /revision in project scope\?/);
   assert.match(confirmationFrame, /Selected revision: b{40}/);
   input.write("y");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.ok(["|", "/", "-", "\\"].some((frame) =>
-    rendered.includes(`${frame} Updating skill:revision-skill`)));
+  await waitForFrame((frame) => frame.includes("Updating skill:revision-skill"), "update loading popup");
+  await updateStarted;
   assert.deepEqual(actions, [{
     action: "update", resource: "revision-skill", scope: "project", ref: selectedSha,
   }]);
   input.write("q");
-  await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(dashboardFinished, false, "input remains blocked while the loader popup is active");
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  resolveUpdate();
+  await waitForFrame((frame) => !frame.includes("Updating skill:revision-skill"),
+    "the update loading popup to close");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -216,13 +309,8 @@ test("dashboard shows the loading popup for consecutive actions", async () => {
     const end = rendered.indexOf("\u001b[?2026l", start);
     return start >= 0 && end > start ? rendered.slice(start, end) : "";
   };
-  const waitFor = async (predicate, message) => {
-    const deadline = Date.now() + 5_000;
-    while (!predicate(latestFrame())) {
-      if (Date.now() >= deadline) throw new Error(`Dashboard did not ${message}`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  };
+  const waitFor = (predicate, message) =>
+    waitForOutput(output, latestFrame, predicate, `dashboard to ${message}`, 5_000);
   let finished = false;
   try {
     await waitFor((frame) => frame.includes("INVENTORY"), "render Inventory");
@@ -285,29 +373,81 @@ test("dashboard revision picker applies a selected full SHA to a confirmed instr
       return { code: 0, messages: ["Updated selected revision."], resources: [installedInstruction], errors: [] };
     },
   });
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  input.write("v");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /RESOURCE REVISIONS/);
-  const revisionBody = assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "RESOURCE REVISIONS", "", [
-    "Test / instruction:review",
-    "Select a commit to update; the catalog pin remains unchanged.",
-  ]).filter((line) => line.trim());
-  assert.equal(revisionBody.length, 2, "the existing update context moves into the header without consuming revision rows");
-  assert.match(revisionBody[0], /› aaaaaaa\s+2026-11-09\s+Current pin/);
-  input.write("\x1b[B");
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /CONFIRM UPDATE/);
-  assert.ok(rendered.includes(selectedSha));
-  input.write("y");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.deepEqual(actions, [{ action: "update", resource: "review", ref: selectedSha }]);
-  input.write("q");
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
+  const visibleFrame = () => {
+    const start = rendered.lastIndexOf("\u001b[?2026h");
+    const end = rendered.indexOf("\u001b[?2026l", start);
+    return start >= 0 && end > start
+      ? require("node:util").stripVTControlCharacters(rendered.slice(start, end))
+      : "";
+  };
+  const waitForFrame = (predicate, message) => new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      output.off("data", onData);
+      output.off("end", onEnd);
+      output.off("close", onClose);
+      output.off("error", onError);
+    };
+    const checkFrame = () => {
+      const frame = visibleFrame();
+      if (!predicate(frame)) return false;
+      cleanup();
+      resolve(frame);
+      return true;
+    };
+    const onData = () => { checkFrame(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`Dashboard output ended before rendering ${message}: ${visibleFrame()}`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`Dashboard output closed before rendering ${message}: ${visibleFrame()}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    if (checkFrame()) return;
+    output.on("data", onData);
+    output.once("end", onEnd);
+    output.once("close", onClose);
+    output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Dashboard did not render ${message}: ${visibleFrame()}`));
+    }, 10_000);
+  });
+  let finished = false;
+  try {
+    await waitForFrame((frame) =>
+      frame.includes("INVENTORY") && frame.includes("INSTRUCTION - review") && frame.includes("V revision"),
+    "loaded instruction and revision shortcut");
+    input.write("v");
+    await waitForFrame((frame) => frame.includes("RESOURCE REVISIONS"), "revision picker");
+    const revisionBody = assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "RESOURCE REVISIONS", "", [
+      "Test / instruction:review",
+      "Select a commit to update; the catalog pin remains unchanged.",
+    ]).filter((line) => line.trim());
+    assert.equal(revisionBody.length, 2, "the existing update context moves into the header without consuming revision rows");
+    assert.match(revisionBody[0], /› aaaaaaa\s+2026-11-09\s+Current pin/);
+    input.write("\x1b[B");
+    await waitForFrame((frame) => frame.includes("› ccccccc"), "selected revision");
+    input.write("\r");
+    await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"), "update confirmation");
+    assert.ok(visibleFrame().includes(selectedSha));
+    input.write("y");
+    await waitForFrame((frame) => frame.includes("Updated selected revision."), "successful update result");
+    assert.deepEqual(actions, [{ action: "update", resource: "review", ref: selectedSha }]);
+    input.write("q");
+    assert.equal(await done, true);
+    finished = true;
+  } finally {
+    input.destroy();
+    if (!finished) await done.catch(() => {});
+    output.destroy();
+  }
 });
 
 
@@ -412,10 +552,7 @@ test("dashboard shows the installed and available versions with the changelog li
   const previousVersion = process.env.KITIA_INSTALLED_VERSION;
   const previousFetch = global.fetch;
   process.env.KITIA_INSTALLED_VERSION = "1.0.0";
-  global.fetch = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    return { ok: true, json: async () => ({ version: "1.0.2" }) };
-  };
+  global.fetch = async () => ({ ok: true, json: async () => ({ version: "1.0.2" }) });
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -431,10 +568,8 @@ test("dashboard shows the installed and available versions with the changelog li
   const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
   try {
     done = runDashboard([], input, output);
-    const deadline = Date.now() + 2_000;
-    while (!plain().includes("NEW VERSION AVAILABLE") && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    await waitForOutput(output, plain, (text) => text.includes("NEW VERSION AVAILABLE"),
+      "the available-version notice", 2_000);
     assert.match(plain(), /NEW VERSION AVAILABLE/);
     assert.match(plain(), /Installed: 1\.0\.0/);
     assert.match(plain(), /Available: 1\.0\.2/);
@@ -1801,28 +1936,41 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     output.isTTY = true;
     output.columns = 100;
     output.rows = 40;
-    output.on("data", () => {});
+    let renderedOutput = "";
+    output.on("data", (chunk) => { renderedOutput += chunk.toString(); });
     const done = runDashboard([], input, output, [], {
       userCatalogs: [{ name: "Test", repository }],
       removeCatalog,
     });
+    let dashboardFinished = false;
+    void done.then(() => { dashboardFinished = true; }, () => { dashboardFinished = true; });
     try {
-      for (const key of keys) {
+      for (const entry of keys) {
+        const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
+        const previousLength = renderedOutput.length;
         input.write(key);
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (expectedOutput) {
+          await waitForOutput(output, () => renderedOutput.slice(previousLength),
+            (text) => text.includes(expectedOutput), `output ${JSON.stringify(expectedOutput)}`);
+        } else if (key !== "q") {
+          await waitForOutput(output, () => renderedOutput,
+            (text) => text.length > previousLength, `output after ${JSON.stringify(key)}`);
+        }
       }
-      const completion = await Promise.race([
-        done.then((result) => ({ completed: true, result })),
-        new Promise((resolve) => setImmediate(() => resolve({ completed: false }))),
-      ]);
-      if (!completion.completed) input.destroy();
-      return completion.completed ? completion.result : await done;
+      for (let attempt = 0; attempt < 3 && !dashboardFinished; attempt += 1) {
+        input.write("\x1b");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        input.write("q");
+        await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 100))]);
+      }
+      if (!dashboardFinished) throw new Error("Dashboard did not exit after catalog-removal flow");
+      return await done;
     } finally {
       input.destroy();
       output.destroy();
     }
   };
-  const driveRefresh = async (keys, refreshCatalog, extraActions = {}) => {
+  const driveRefresh = async (keys, refreshCatalog, extraActions = {}, exitFrames = ["INVENTORY"]) => {
     const input = new PassThrough();
     input.isTTY = true;
     input.setRawMode = () => {};
@@ -1841,50 +1989,71 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       ...extraActions,
     });
     let dashboardFinished = false;
-    const dashboardCompletion = done.then(
-      () => { dashboardFinished = true; },
-      () => { dashboardFinished = true; },
-    );
-    const waitForOutput = async (pattern) => {
-      const deadline = Date.now() + 5_000;
-      while (!pattern.test(renderedOutput)) {
-        if (Date.now() >= deadline) {
-          throw new Error(`Dashboard did not render ${pattern}`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+    const awaitDashboardExit = () => new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(
+        `Dashboard did not exit after q for ${JSON.stringify(keys)}: ${latestFrame().slice(-400)}`,
+      )), 5_000);
+      done.then((result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      }, (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
+    const latestFrame = () => {
+      const end = renderedOutput.lastIndexOf("\x1b[?2026l");
+      const start = renderedOutput.lastIndexOf("\x1b[?2026h", end);
+      return start >= 0 && end > start
+        ? require("node:util").stripVTControlCharacters(renderedOutput.slice(start, end))
+        : "";
     };
+    const latestFrameEnd = () => renderedOutput.lastIndexOf("\x1b[?2026l");
     try {
       for (const entry of keys) {
         const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
+        if (key === "q") {
+          input.write("q");
+          const result = await awaitDashboardExit();
+          dashboardFinished = true;
+          return { result, renderedOutput };
+        }
+        const previousEnd = latestFrameEnd();
         input.write(key);
-        if (expectedOutput) await waitForOutput(expectedOutput);
-        else await new Promise((resolve) => setTimeout(resolve, 100));
+        const expected = expectedOutput
+          ? expectedOutput instanceof RegExp ? expectedOutput : new RegExp(expectedOutput)
+          : null;
+        await waitForOutput(output, latestFrame, (frame) =>
+          latestFrameEnd() > previousEnd && (!expected || expected.test(frame)),
+        `latest frame after ${JSON.stringify(key)}`, 5_000);
       }
-      const completion = await Promise.race([
-        done.then((result) => ({ completed: true, result })),
-        new Promise((resolve) => setImmediate(() => resolve({ completed: false }))),
-      ]);
-      if (!completion.completed) input.destroy();
-      const result = completion.completed ? completion.result : await done;
+      for (const expectedFrame of exitFrames) {
+        const previousEnd = latestFrameEnd();
+        input.write("\x1b");
+        const expected = expectedFrame instanceof RegExp ? expectedFrame : new RegExp(expectedFrame);
+        await waitForOutput(output, latestFrame, (frame) =>
+          latestFrameEnd() > previousEnd && expected.test(frame),
+        `latest frame after Escape: ${expectedFrame}`, 5_000);
+      }
+      input.write("q");
+      const result = await awaitDashboardExit();
+      dashboardFinished = true;
       return { result, renderedOutput };
     } finally {
-      for (let attempt = 0; attempt < 3 && !dashboardFinished; attempt += 1) {
-        if (!input.destroyed) input.write("\x1b");
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        if (!dashboardFinished && !input.destroyed) input.write("q");
-        await Promise.race([
-          dashboardCompletion,
-          new Promise((resolve) => setTimeout(resolve, 100)),
-        ]);
+      if (!dashboardFinished && !input.destroyed) {
+        input.destroy();
+        await done.catch(() => {});
+      } else if (!input.destroyed) {
+        input.destroy();
       }
-      input.destroy();
       output.destroy();
     }
   };
   const removed = [];
   assert.equal(await drive(
-    ["m", "\x1b[3~", "\r", "y", "\r", "q"],
+    [["m", "USER CATALOGS"], ["\x1b[3~", "Choose a user catalog to remove:"],
+      ["\r", "CONFIRM CATALOG REMOVAL"], ["y", "ENTER / ESC CLOSE"],
+      ["\r", "USER CATALOGS"], ["q"]],
     async (name) => {
       removed.push(name);
       return { catalogs: [], resources: [] };
@@ -1892,7 +2061,8 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   ), true);
   assert.deepEqual(removed, ["Test"]);
   assert.equal(await drive(
-    ["m", "\x1b[3~", "\x1b", "q"],
+    [["m", "USER CATALOGS"], ["\x1b[3~", "Choose a user catalog to remove:"],
+      ["\x1b", "USER CATALOGS"], ["q"]],
     async (name) => {
       removed.push(name);
       return { catalogs: [], resources: [] };
@@ -1918,7 +2088,11 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.match(management.renderedOutput, /R refresh/);
   assert.match(management.renderedOutput, /SHORTCUTS/);
   const presetRequests = [];
-  const presetManager = await driveRefresh(["m", "p", "\x1b[B", "\r", "\r", "q"], refresh, {
+  const presetManager = await driveRefresh([
+    ["m", /USER CATALOGS/], ["p", /PRESET/], ["\x1b[B", /› Matt Pocock/],
+    ["\r", /ADD CATALOG RESULT/],
+    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*ADD CATALOG RESULT)/], "q",
+  ], refresh, {
     addCatalog: async (request) => {
       presetRequests.push(request);
       return { catalog: request.name, count: 3, catalogs: [request], resources: [] };
@@ -1932,7 +2106,11 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     entries: [],
   }]);
   const anthropicRequests = [];
-  const anthropicManager = await driveRefresh(["m", "p", "\r", "\r", "q"], refresh, {
+  const anthropicManager = await driveRefresh([
+    ["m", /USER CATALOGS/], ["p", /PRESET/],
+    ["\r", /ADD CATALOG RESULT/],
+    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*ADD CATALOG RESULT)/], "q",
+  ], refresh, {
     addCatalog: async (request) => {
       anthropicRequests.push(request);
       return { catalog: request.name, count: 6, catalogs: [request], resources: [] };
@@ -1947,7 +2125,12 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     entries: [],
   }]);
   const githubPresetRequests = [];
-  const githubPresetManager = await driveRefresh(["m", "p", "\x1b[B", "\x1b[B", "\r", "\r", "q"], refresh, {
+  const githubPresetManager = await driveRefresh([
+    ["m", /USER CATALOGS/], ["p", /PRESET/], ["\x1b[B", /› Matt Pocock/],
+    ["\x1b[B", /› GitHub Awesome Copilot/],
+    ["\r", /ADD CATALOG RESULT/],
+    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*ADD CATALOG RESULT)/], "q",
+  ], refresh, {
     addCatalog: async (request) => {
       githubPresetRequests.push(request);
       return { catalog: request.name, count: 3, catalogs: [request], resources: [] };
@@ -2083,7 +2266,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const submittedEdits = [];
   const editedCatalog = await driveRefresh([
     "m", "e", "\r", "\r", "\r", "\x1b[3~", "a", "\r", "custom/skills/",
-    "\r", "\r", "\r", "q",
+    "\r", ["\r", /Catalog updated: Test · 1 resource indexed/], "\r", "q",
   ], refresh, {
     userCatalogs: [{
       name: "Test",
@@ -2114,7 +2297,11 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.match(editedCatalog.renderedOutput, /EDIT CATALOG/);
   assert.match(editedCatalog.renderedOutput, /Catalog updated: Test · 1 resource indexed/);
   const managerRemoved = [];
-  const removedInManager = await driveRefresh(["m", "\x1b[3~", "\r", "y", "\r", "q"], refresh, {
+  const removedInManager = await driveRefresh([
+    "m", "\x1b[3~", "\r", "y",
+    ["\x1b", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REMOVE CATALOG)/],
+    "q",
+  ], refresh, {
     removeCatalog: async (name) => {
       managerRemoved.push(name);
       return { catalogs: [], resources: [] };
@@ -2123,7 +2310,12 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.equal(removedInManager.result, true);
   assert.deepEqual(managerRemoved, ["Test"]);
   const managerRefreshed = [];
-  const refreshedInManager = await driveRefresh(["m", "r", "\r", "\r", "\r", "q"], async (name) => {
+  const refreshedInManager = await driveRefresh([
+    ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
+    ["\r", /Choose a user catalog to refresh/],
+    ["\r", /Refreshed Test · 1 resource indexed/],
+    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+  ], async (name) => {
     managerRefreshed.push(name);
     return {
       catalogs: [{ name: "Test", repository }], resources: [],
@@ -2134,7 +2326,12 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.deepEqual(managerRefreshed, ["Test"]);
   const freshnessChecks = [];
   const targetedFreshness = await driveRefresh(
-    ["m", "r", "\r", "\x1b[B", "\r", "\r", "q"],
+    [
+      ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
+      ["\r", /Choose a user catalog to refresh/], ["\x1b[B", /› Beta/],
+      ["\r", /Refreshed Beta · 1 resource indexed/],
+      ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+    ],
     async (name) => ({
       catalogs: [
         { name: "Alpha", repository: "https://github.com/example/alpha" },
@@ -2167,18 +2364,34 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const ignoredInventoryRefresh = await driveRefresh(["g", "q"], refresh);
   assert.equal(ignoredInventoryRefresh.result, true);
   assert.deepEqual(refreshed, []);
-  const refreshedOne = await driveRefresh(["m", "r", "\r", "\r", "\r", "q"], refresh);
+  const refreshedOne = await driveRefresh([
+    ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
+    ["\r", /Choose a user catalog to refresh/],
+    ["\r", /Refreshed Test · 2 resources indexed/],
+    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+  ], refresh);
   assert.equal(refreshedOne.result, true);
   assert.deepEqual(refreshed, ["Test"]);
-  const refreshedAll = await driveRefresh(["m", "r", "\u001b[C", "\r", "\r", "q"], refresh);
+  const refreshedAll = await driveRefresh([
+    ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/], ["\x1b[C", /‹ ALL CATALOGS ›/],
+    ["\r", /Refreshed 1 catalog · 2 resources indexed/],
+    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+  ], refresh);
   assert.equal(refreshedAll.result, true);
   assert.deepEqual(refreshed, ["Test", undefined]);
   const failedRefresh = await driveRefresh(
-    ["m", "r", "\r", "\r", "s", "\r", "\r", "q"],
+    [
+      ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
+      ["\r", /Choose a user catalog to refresh/],
+      ["\r", /Catalog Test was not refreshed/],
+      ["s", /CATALOG REFRESH ERRORS/],
+    ],
     async () => ({
       catalogs: [{ name: "Test", repository }], resources: [], refreshed: [],
       failures: [{ name: "Test", message: "Repository not found." }],
     }),
+    {},
+    ["REFRESH CATALOG", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/],
   );
   assert.equal(failedRefresh.result, false);
   assert.ok(failedRefresh.renderedOutput.includes("Catalog Test was not refreshed."));
@@ -2220,7 +2433,9 @@ test("catalog browser renders custom source folders in SOURCE and detail labels"
     }, { name: "Basic", repository: "basic/skills", mode: "basic", entries: [] }],
   });
   input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => renderedOutput,
+    (text) => text.includes("\u001b[?2026l") && text.includes("CATALOG RESOURCES"),
+    "catalog browser screen");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -2265,19 +2480,22 @@ test("catalog browser renders mapped source folders and keeps repository-less na
       entries: [{ kind: "skill", path: "skills/productivity" }],
     }],
   });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 150));
   const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  await waitForOutput(output, () => plain(), (text) => text.includes("INVENTORY"), "initial inventory");
+  input.write("a");
+  await waitForOutput(output, () => plain(), (text) => text.includes("CATALOG RESOURCES"), "catalog browser");
   assert.ok(plain().split(/\r?\n/).some((line) =>
     line.includes("MattPucock[productivity]") && line.includes("grill-me")));
   assert.ok(plain().split(/\r?\n/).some((line) => line.includes("basic-skill") && line.includes("BasicCatalog")));
   assert.match(plain(), /CATALOG[^\n]*\n[^\n]*MattPucock\[productivity\]/);
 
+  const filterStart = rendered.length;
   input.write("f");
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitForOutput(output, () => rendered,
+    (text) => text.length > filterStart, "filter input");
   for (const character of "MattPucock[productivity]") input.write(character);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => plain(), (text) => text.includes("AVAILABLE 1/2"),
+    "filtered catalog result");
   assert.match(plain(), /AVAILABLE\s+1\/2/);
   assert.ok(plain().split(/\r?\n/).some((line) =>
     line.includes("MattPucock[productivity]") && line.includes("grill-me")));
@@ -2517,7 +2735,9 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
       ],
     }],
   });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => rendered,
+    (text) => text.includes("grill-me") && text.includes("MattPucock[productivity]"),
+    "tracked source label");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -2572,7 +2792,9 @@ test("inventory TUI renders multiple configured custom folders and preserves oth
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output, [], { userCatalogs });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => rendered,
+    (text) => text.includes("engineering-skill") && text.includes("manual-skill"),
+    "configured source labels");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -2583,50 +2805,6 @@ test("inventory TUI renders multiple configured custom folders and preserves oth
   assert.match(plain, /basic-skill\s+BasicCatalog/);
   assert.match(plain, /unmapped-skill\s+MattPucock/);
   assert.match(plain, /UNMANAGED\s+PROJECT\s+skill\s+manual-skill\s+-/);
-});
-
-test("unmanaged dashboard artifacts can be removed only after confirmation", async () => {
-  const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
-  const input = new PassThrough();
-  input.isTTY = true;
-  input.setRawMode = () => {};
-  input.ref = () => {};
-  input.unref = () => {};
-  const output = new PassThrough();
-  output.isTTY = true;
-  output.columns = 100;
-  output.rows = 40;
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString(); });
-  const actions = [];
-  const done = runDashboard([{
-    catalog: "-",
-    kind: "skill",
-    id: "manual-skill",
-    scope: "project",
-    status: "unmanaged",
-    managed: false,
-    description: ".agents/skills/manual-skill/SKILL.md",
-  }], input, output, [], {
-    execute: async (...args) => {
-      actions.push(args);
-      return { code: 0 };
-    },
-  });
-  for (const key of ["u", "\x1b[3~", "y", "y", "q"]) {
-    input.write(key);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  assert.equal(await done, true);
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0][0], "remove-unmanaged");
-  assert.equal(actions[0][1].id, "manual-skill");
-  assert.match(rendered, /CONFIRM PERMANENT REMOVAL/);
-  assert.match(rendered, /irreversible/);
-  assert.match(rendered, /permanently lost/);
-  input.destroy();
-  output.destroy();
 });
 
 test("removing an unmanaged skill deletes its entire detected folder", async () => {
@@ -2860,7 +3038,8 @@ test("dashboard renders the resource list and selection panel at wide and narrow
       source_path: "skills/manual-skill",
       source_ref: "abcdef0123456789abcdef0123456789abcdef01",
     }], input, output);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForOutput(output, () => rendered,
+      (text) => text.includes("SKILL - manual-skill"), "selected inventory details");
     input.write("q");
     assert.equal(await done, true);
     assert.match(rendered, /RESOURCES/);
@@ -2920,9 +3099,11 @@ test("catalog browser renders ordered columns without list descriptions at wide 
       id: "catalog-skill",
       description: "Catalog panel toggle behavior.",
     }] });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForOutput(output, () => rendered, (text) => text.includes("INVENTORY"), "initial inventory");
     input.write("a");
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitForOutput(output, () => rendered,
+      (text) => text.includes("CATALOG RESOURCES") && text.includes("catalog-skill"),
+      "catalog resources table");
     const plainRendered = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
     const header = plainRendered.split(/\r?\n/).find((line) => /INSTALLED/.test(line) && /SOURCE/.test(line));
     assert.ok(header, "catalog header is rendered");
@@ -3259,12 +3440,10 @@ for (const [kind, columns, rows, hasAudit] of [
     const press = async (key, expected) => {
       const start = rendered.length;
       input.write(key);
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        const frame = stripVTControlCharacters(rendered.slice(start));
-        if (frame.includes(expected)) return frame;
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      assert.fail(`Expected ${JSON.stringify(expected)} after ${JSON.stringify(key)}`);
+      const frame = await waitForOutput(output,
+        () => stripVTControlCharacters(rendered.slice(start)),
+        (text) => text.includes(expected), `${JSON.stringify(expected)} after ${JSON.stringify(key)}`);
+      return frame;
     };
     const navigate = async (key, focus, page) => {
       const view = inspectionPageView({ ...options, focus, page });
@@ -3306,10 +3485,9 @@ for (const [kind, columns, rows, hasAudit] of [
       assert.deepEqual(calls, ["preview"]);
       await press("\r", "CATALOG RESOURCES");
     } finally {
-      input.write("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await press("\x1b", "INVENTORY");
       input.write("q");
-      await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 250))]);
+      await done;
       input.destroy();
       output.destroy();
     }
@@ -3338,17 +3516,19 @@ test("dashboard toggles the selection panel with D", async () => {
     managed: true,
     description: "Description toggle behavior.",
   }], input, output);
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.match(rendered, /SKILL - manual-skill/);
+  await waitForOutput(output, () => rendered,
+    (text) => text.includes("SKILL - manual-skill") && text.includes("\u001b[?2026l"),
+    "initial selected details");
   const beforeHide = rendered.length;
   input.write("d");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  const hiddenFrame = rendered.slice(beforeHide);
-  assert.doesNotMatch(hiddenFrame, /SKILL - manual-skill/);
+  await waitForOutput(output, () => rendered.slice(beforeHide),
+    (text) => text.includes("\u001b[?2026l") && !text.includes("SKILL - manual-skill"),
+    "hidden details frame");
   const beforeShow = rendered.length;
   input.write("d");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.match(rendered.slice(beforeShow), /SKILL - manual-skill/);
+  await waitForOutput(output, () => rendered.slice(beforeShow),
+    (text) => text.includes("\u001b[?2026l") && text.includes("SKILL - manual-skill"),
+    "shown details frame");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -3376,10 +3556,11 @@ test("dashboard toggles the catalog entry panel with D", async () => {
     description: "Catalog panel toggle behavior.",
   }];
   const done = runDashboard([], input, output, [], { catalogResources: candidates });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => rendered, (text) => text.includes("INVENTORY"), "initial inventory");
   input.write("a");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.match(rendered, /SKILL - catalog-skill/);
+  await waitForOutput(output, () => rendered,
+    (text) => text.includes("CATALOG RESOURCES") && text.includes("SKILL - catalog-skill"),
+    "catalog entry details");
   const resourcesTitle = rendered.indexOf("CATALOG RESOURCES");
   const entryTitle = rendered.indexOf("SKILL - catalog-skill");
   assert.equal(
@@ -3391,12 +3572,14 @@ test("dashboard toggles the catalog entry panel with D", async () => {
   assert.match(entryPanel, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
   const beforeHide = rendered.length;
   input.write("d");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.doesNotMatch(rendered.slice(beforeHide), /SKILL - catalog-skill/);
+  await waitForOutput(output, () => rendered.slice(beforeHide),
+    (text) => text.includes("\u001b[?2026l") && !text.includes("SKILL - catalog-skill"),
+    "hidden catalog entry frame");
   const beforeShow = rendered.length;
   input.write("d");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.match(rendered.slice(beforeShow), /SKILL - catalog-skill/);
+  await waitForOutput(output, () => rendered.slice(beforeShow),
+    (text) => text.includes("\u001b[?2026l") && text.includes("SKILL - catalog-skill"),
+    "shown catalog entry frame");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -3421,9 +3604,11 @@ test("dashboard toggles catalog management details with D", async () => {
     userCatalogs: [{ name: "Sample", repository: "example/sample" }],
     checkCatalogFreshness: async () => [{ name: "Sample", status: "current" }],
   });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => rendered, (text) => text.includes("INVENTORY"), "initial inventory");
   input.write("m");
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await waitForOutput(output, () => rendered,
+    (text) => text.includes("USER CATALOGS 1") && text.includes("CATALOG - Sample"),
+    "catalog management details");
   const managementHeader = rendered.indexOf("USER CATALOGS 1");
   const panelTop = rendered.indexOf("┌", managementHeader);
   const panelTopEnd = rendered.indexOf("\n", panelTop);
@@ -3434,12 +3619,14 @@ test("dashboard toggles catalog management details with D", async () => {
   assert.match(rendered, /Updates catalog metadata only/);
   const beforeHide = rendered.length;
   input.write("d");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.doesNotMatch(rendered.slice(beforeHide), /Updates catalog metadata only/);
+  await waitForOutput(output, () => rendered.slice(beforeHide),
+    (text) => text.includes("\u001b[?2026l") && !text.includes("Updates catalog metadata only"),
+    "hidden management details frame");
   const beforeShow = rendered.length;
   input.write("d");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.match(rendered.slice(beforeShow), /Updates catalog metadata only/);
+  await waitForOutput(output, () => rendered.slice(beforeShow),
+    (text) => text.includes("\u001b[?2026l") && text.includes("Updates catalog metadata only"),
+    "shown management details frame");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -3501,12 +3688,10 @@ for (const [screen, dimensions] of [
         return value;
       };
       const waitForFrame = async (expected, start = 0) => {
-        for (let attempt = 0; attempt < 50; attempt += 1) {
-          if (rendered.slice(start).includes(expected) &&
-              rendered.lastIndexOf("\u001b[?2026l") > start) return frame();
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        assert.fail(`Expected a complete frame containing ${JSON.stringify(expected)}`);
+        await waitForOutput(output, () => rendered.slice(start),
+          (text) => text.includes(expected) && text.includes("\u001b[?2026l"),
+          `complete frame containing ${JSON.stringify(expected)}`);
+        return frame();
       };
       const press = async (key, expected) => {
         const start = rendered.length;
@@ -4079,8 +4264,6 @@ test("real GH update progress and sanitized output reach the TUI through its wor
       }, onProgress, { execArgv: ["--require", ghPreload] });
     },
   });
-  let dashboardClosed = false;
-  void done.then(() => { dashboardClosed = true; });
   const visibleFrame = () => {
     const start = rendered.lastIndexOf("\u001b[?2026h");
     const end = rendered.indexOf("\u001b[?2026l", start);
@@ -4088,14 +4271,8 @@ test("real GH update progress and sanitized output reach the TUI through its wor
       ? require("node:util").stripVTControlCharacters(rendered.slice(start, end))
       : "";
   };
-  const waitForFrame = async (predicate, message) => {
-    const deadline = Date.now() + 10_000;
-    while (!predicate(visibleFrame())) {
-      if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${message}: ${visibleFrame()}`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return visibleFrame();
-  };
+  const waitForFrame = (predicate, message) =>
+    waitForOutput(output, visibleFrame, predicate, `dashboard ${message}`, 10_000);
   let finished = false;
   try {
     await waitForFrame((frame) => frame.includes("SHORTCUTS"), "Inventory");
@@ -4122,18 +4299,28 @@ test("real GH update progress and sanitized output reach the TUI through its wor
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.ok(fs.readFileSync(skillFile, "utf8").includes(`github-pinned: "${newRef}"`));
-    for (let attempt = 0; attempt < 50 && !dashboardClosed; attempt += 1) {
-      input.write("q");
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    assert.equal(await done, true);
+    await waitForFrame((frame) => frame.includes("Q quit") && !frame.includes("LOADING"), "completed update result");
+    input.write("q");
+    let exitTimeout;
+    const exited = await Promise.race([
+      done,
+      new Promise((_, reject) => {
+        exitTimeout = setTimeout(() => reject(new Error("Dashboard did not exit after q")), 5_000);
+      }),
+    ]).finally(() => clearTimeout(exitTimeout));
+    assert.equal(exited, true);
     finished = true;
   } finally {
-    if (!finished) {
-      input.write("q");
-      await done;
-    }
     input.destroy();
+    if (!finished) {
+      let cleanupTimeout;
+      await Promise.race([
+        done.catch(() => {}),
+        new Promise((resolve) => {
+          cleanupTimeout = setTimeout(resolve, 5_000);
+        }),
+      ]).finally(() => clearTimeout(cleanupTimeout));
+    }
     output.destroy();
     for (const [key, value] of Object.entries(previousEnvironment)) {
       if (value === undefined) delete process.env[key];

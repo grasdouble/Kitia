@@ -13,7 +13,6 @@ const {
   screenshotOptions,
   screenshotViewport,
   terminalSize,
-  waitForInkOutput,
 } = require("../scripts/screenshots-generator/site-showcase-terminal.js");
 
 
@@ -33,22 +32,141 @@ function assertSourceHeader(session, filename, firstContent, pageCount) {
 }
 
 async function dashboardExit(session) {
-  for (let attempt = 0; attempt < 50 && !session.doneSettled; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+  let timeout;
+  try {
+    return await Promise.race([
+      session.done,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Dashboard exit did not complete within one second")), 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
   }
-  assert.ok(session.doneSettled, "dashboard exit completes within one second");
-  return session.done;
+}
+
+async function waitForInkOutput(session, expected, startByte = 0, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    let timeout;
+    let checking = false;
+    let dirty = false;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      session.output.off("data", onData);
+      session.output.off("end", onEnd);
+      session.output.off("close", onClose);
+      session.output.off("error", onError);
+    };
+    const check = async () => {
+      if (checking) {
+        dirty = true;
+        return;
+      }
+      checking = true;
+      try {
+        do {
+          dirty = false;
+          await session.flushTerminal();
+          const text = session.rawBytes().subarray(startByte).toString("utf8").replace(
+            /\u001b\[[0-?]*[ -/]*[@-~]/g, "",
+          ).replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "");
+          if (text.includes(expected)) {
+            cleanup();
+            resolve(text);
+            return;
+          }
+        } while (dirty);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      } finally {
+        checking = false;
+      }
+    };
+    const onData = () => { void check(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`Dashboard output ended before rendering ${JSON.stringify(expected)}`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`Dashboard output closed before rendering ${JSON.stringify(expected)}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    session.output.on("data", onData);
+    session.output.once("end", onEnd);
+    session.output.once("close", onClose);
+    session.output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${JSON.stringify(expected)}`));
+    }, timeoutMs);
+    void check();
+  });
 }
 
 async function waitForGrid(session, predicate, message) {
-  let grid = "";
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    await session.flushTerminal();
-    grid = session.terminal.screen.getText();
-    if (predicate(grid)) return grid;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.fail(`${message}\n${grid}`);
+  return new Promise((resolve, reject) => {
+    let timeout;
+    let checking = false;
+    let dirty = false;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      session.output.off("data", onData);
+      session.output.off("end", onEnd);
+      session.output.off("close", onClose);
+      session.output.off("error", onError);
+    };
+    const check = async () => {
+      if (checking) {
+        dirty = true;
+        return;
+      }
+      checking = true;
+      try {
+        do {
+          dirty = false;
+          await session.flushTerminal();
+          const grid = session.terminal.screen.getText();
+          if (predicate(grid)) {
+            cleanup();
+            resolve(grid);
+            return;
+          }
+        } while (dirty);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      } finally {
+        checking = false;
+      }
+    };
+    const onData = () => { void check(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`${message}: dashboard output ended`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`${message}: dashboard output closed`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    session.output.on("data", onData);
+    session.output.once("end", onEnd);
+    session.output.once("close", onClose);
+    session.output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`${message}\n${session.terminal.screen.getText()}`));
+    }, 10_000);
+    void check();
+  });
 }
 
 async function assertSeparatedHeader(session, title, firstContent, pageLabel, metadata = []) {
@@ -723,10 +841,12 @@ test("Termless Preview keeps source main, audit above tree, and independent adap
     session.output.rows = terminalSize.rows;
     session.output.emit("resize");
     await press("\r", "CATALOG RESOURCES");
+    let grid = session.terminal.screen.getText();
     session.input.write("\x1b[B");
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await waitForGrid(session, (next) => next !== grid, "first Down selection reaches the grid");
+    grid = session.terminal.screen.getText();
     session.input.write("\x1b[B");
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await waitForGrid(session, (next) => next !== grid, "second Down selection reaches the grid");
     await press("\r", "INSTALL OPTIONS");
     await press("\r", "CONFIRM INSTALL");
     const blocked = await press("y", "INSTALL FAILED");
@@ -1285,13 +1405,23 @@ test("Termless Catalog Catalog/Kind/License filters match visible candidates", {
     await rm(directory, { recursive: true, force: true });
   }
 });
-test("Termless uninstall confirmation keeps every modal border edge inside narrow terminal bounds", {
+
+test("Termless uninstall modal fits narrow bounds and unmanaged removal needs two confirmations", {
   timeout: 15000,
 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "kitia-termless-uninstall-modal-"));
+  const actions = [];
+  let finishAction;
+  const actionGate = new Promise((resolve) => { finishAction = resolve; });
   let session;
   try {
-    session = await launchShowcaseDashboard(directory);
+    session = await launchShowcaseDashboard(directory, {
+      executeOverride: async (...args) => {
+        actions.push(args);
+        await actionGate;
+        return { code: 0, messages: ["Unmanaged skill removed."] };
+      },
+    });
     await waitForGrid(session, (grid) => grid.includes("SKILL - ask-matt"),
       "the managed skill is selected before uninstall");
     const columns = 68;
@@ -1374,10 +1504,43 @@ test("Termless uninstall confirmation keeps every modal border edge inside narro
     assert.ok(uninstall, "the destructive choice remains visible");
     assert.deepEqual(session.terminal.cell(uninstall.row, uninstall.col).fg,
       { r: 224, g: 108, b: 117 }, "the selected destructive choice retains the danger accent");
+    session.input.write("\x1b");
+    await waitForGrid(session, (value) => value.includes("SKILL - ask-matt") &&
+      !value.includes("CONFIRM UNINSTALL"), "the uninstall confirmation closes");
+    session.input.write("\x1b[B");
+    await waitForGrid(session, (value) => value.split("\n").some((line) =>
+      line.includes("›") && line.includes("herdr")), "the unmanaged skill is selected");
+    assertSelectedRow(session, "herdr");
+
+    session.input.write("\x1b[3~");
+    await waitForGrid(session, (value) => value.includes("CONFIRM PERMANENT REMOVAL"),
+      "Delete opens the first unmanaged removal confirmation");
+    session.input.write("y");
+    await waitForGrid(session, (value) => value.includes("permanently lost"),
+      "the first confirmation opens the irreversible warning");
+    assert.equal(actions.length, 0, "the action remains undispatched after one confirmation");
+
+    session.input.write("y");
+    await waitForGrid(session, (value) => value.includes("LOADING") &&
+      value.includes("Removing skill:herdr"), "the second confirmation dispatches removal");
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0][0], "remove-unmanaged");
+    assert.equal(actions[0][1].id, "herdr");
+    const completionStart = session.rawBytes().length;
+    finishAction();
+    await waitForInkOutput(session, "Unmanaged skill removed.", completionStart);
+    await session.flushTerminal();
+    session.input.write("q");
+    assert.equal(await session.done, true);
   } finally {
+    finishAction();
     if (session) {
-      session.input.write("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      if (!session.doneSettled) {
+        session.input.write("\x1b");
+        await waitForGrid(session, (grid) =>
+          !grid.includes("CONFIRM PERMANENT REMOVAL") && !grid.includes("permanently lost"),
+        "the confirmation closes before cleanup");
+      }
       await closeShowcaseDashboard(session);
     }
     await rm(directory, { recursive: true, force: true });

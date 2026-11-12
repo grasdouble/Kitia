@@ -563,7 +563,7 @@ and object/array ordering are deliberately not frozen.
 Historical version-1 inventories are read from committed fixtures rather than
 created by the current writer. Future-version and unsupported-kind scenarios
 verify that files remain byte-for-byte unchanged even when `--force` is used.
-The suite is included in `npm test` and therefore in the existing Node.js 22/24,
+The suite is included in `npm test` and therefore in the existing Node.js 26
 Linux/macOS/Windows CI matrix.
 
 Do not update a baseline merely to make a regression green. Explain whether a

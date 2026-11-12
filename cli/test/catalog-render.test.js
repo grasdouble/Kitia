@@ -24,6 +24,46 @@ function visibleInkText(node, InkText, output = []) {
   }
   return output;
 }
+function waitForOutput(output, read, predicate, description, timeoutMs = 5_000) {
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      output.off("data", onData);
+      output.off("end", onEnd);
+      output.off("close", onClose);
+      output.off("error", onError);
+    };
+    const check = () => {
+      const value = read();
+      if (!predicate(value)) return;
+      cleanup();
+      resolve(value);
+    };
+    const onData = () => { check(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`Output ended before ${description}`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`Output closed before ${description}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    output.on("data", onData);
+    output.once("end", onEnd);
+    output.once("close", onClose);
+    output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${description}`));
+    }, timeoutMs);
+    check();
+  });
+}
 
 async function captureDashboardFrame(
   resources,
@@ -56,14 +96,45 @@ async function captureDashboardFrame(
         .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
       : "";
   };
-  const waitForFrame = async (predicate, description) => {
-    const deadline = Date.now() + 5_000;
-    while (!predicate(latestFrame())) {
-      if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${description}`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return latestFrame();
-  };
+  const waitForFrame = (predicate, description) => new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      output.off("data", onData);
+      output.off("end", onEnd);
+      output.off("close", onClose);
+      output.off("error", onError);
+    };
+    const check = () => {
+      const frame = latestFrame();
+      if (!predicate(frame)) return false;
+      cleanup();
+      resolve(frame);
+      return true;
+    };
+    const onData = () => { check(); };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`Dashboard output ended before rendering ${description}`));
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`Dashboard output closed before rendering ${description}`));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    if (check()) return;
+    output.on("data", onData);
+    output.once("end", onEnd);
+    output.once("close", onClose);
+    output.once("error", onError);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Dashboard did not render ${description}`));
+    }, 5_000);
+  });
   try {
     await waitForFrame((frame) => Boolean(frame), "initial dashboard");
     for (const key of keys) {
@@ -79,10 +150,10 @@ async function captureDashboardFrame(
     }
     input.write("q");
     assert.equal(await done, true);
-    completed = true;
     return frame;
   } finally {
     input.destroy();
+    await done.catch(() => {});
     output.destroy();
   }
 }
@@ -192,11 +263,19 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
         output.columns = 120;
         output.rows = 40;
         let frame = "";
-        output.on("data", (chunk) => { frame += chunk.toString(); });
+        let resolveFrame;
+        const frameReady = new Promise((resolve) => { resolveFrame = resolve; });
+        const write = output.write.bind(output);
+        output.write = (chunk, ...args) => {
+          frame += chunk.toString();
+          const result = write(chunk, ...args);
+          return result;
+        };
         const instance = render(React.createElement(component, { ...common, ...props, selectedIndex }), {
           stdout: output, stdin: new PassThrough(), stderr: output, exitOnCtrlC: false,
+          onRender: resolveFrame,
         });
-        await new Promise((resolve) => setTimeout(resolve, 120));
+        await frameReady;
         instance.unmount();
         frames.push(frame);
       }
@@ -831,7 +910,8 @@ test("narrow inventory terminal links wrapped URL fragments to the complete loca
     source_repository: "grasdouble/AI-Kit",
     description: "Demo resource.",
   }], input, output);
-  await new Promise((resolve) => setTimeout(resolve, 120));
+  await waitForOutput(output, () => rendered, (text) => text.includes("\u001b[?2026l"),
+    "the initial dashboard frame");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -871,7 +951,8 @@ test("inventory detail keeps update paths complete within narrow and short layou
       status: "attention",
       issues: [{ code: "UPDATE_AVAILABLE", paths: [path] }],
     }], input, output);
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await waitForOutput(output, () => rendered, (text) => text.includes("\u001b[?2026l"),
+      "the initial inventory frame");
     input.write("q");
     assert.equal(await done, true);
     input.destroy();
@@ -990,14 +1071,8 @@ test("managed inventory U confirms an update and renders the successful result",
         .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
       : "";
   };
-  const waitForFrame = async (predicate, description) => {
-    const deadline = Date.now() + 5_000;
-    while (!predicate(latestFrame())) {
-      if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${description}`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return latestFrame();
-  };
+  const waitForFrame = (predicate, description) =>
+    waitForOutput(output, latestFrame, predicate, `dashboard ${description}`);
 
   try {
     await waitForFrame((frame) => frame.includes("SHORTCUTS"), "the Inventory screen");
@@ -1083,14 +1158,8 @@ test("managed inventory U selects Update and Enter executes the confirmed action
         .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
       : "";
   };
-  const waitForFrame = async (predicate, description) => {
-    const deadline = Date.now() + 5_000;
-    while (!predicate(latestFrame())) {
-      if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${description}`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return latestFrame();
-  };
+  const waitForFrame = (predicate, description) =>
+    waitForOutput(output, latestFrame, predicate, `dashboard ${description}`);
 
   try {
     await waitForFrame((frame) => frame.includes("SHORTCUTS"), "the Inventory screen");
@@ -1211,14 +1280,8 @@ test("local conflicts and GH force-required updates require explicit retry conse
             .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
           : "";
       };
-      const waitForFrame = async (predicate, label) => {
-        const deadline = Date.now() + 5_000;
-        while (!predicate(latestFrame())) {
-          if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${label}`);
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-        return latestFrame();
-      };
+      const waitForFrame = (predicate, label) =>
+        waitForOutput(output, latestFrame, predicate, `dashboard ${label}`);
 
       try {
         await waitForFrame((frame) => frame.includes("SHORTCUTS"), "inventory");
@@ -1374,14 +1437,8 @@ test("failed managed updates show an actionable error modal in compact and norma
           .replace(/\u001b\]8;;[^\u001b]*(?:\u0007|\u001b\\)/g, "")
         : "";
     };
-    const waitForFrame = async (predicate, description) => {
-      const deadline = Date.now() + 5_000;
-      while (!predicate(latestFrame())) {
-        if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${description}`);
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      return latestFrame();
-    };
+    const waitForFrame = (predicate, description) =>
+      waitForOutput(output, latestFrame, predicate, `dashboard ${description}`);
     const waitForDone = async () => {
       let timer;
       try {
@@ -1458,8 +1515,12 @@ test("side-by-side inventory keeps list viewport stable across detail lengths", 
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output);
-  const waitForFrame = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 120));
+  const waitForFrame = async (selectedId) => {
+    await waitForOutput(output, () => rendered, (text) => {
+      const start = text.lastIndexOf("\u001b[?2026h");
+      const end = text.indexOf("\u001b[?2026l", start);
+      return start >= 0 && end > start && text.slice(start, end).includes(`SKILL - ${selectedId}`);
+    }, `the selected ${selectedId} frame`);
     const start = rendered.lastIndexOf("\u001b[?2026h");
     const end = rendered.indexOf("\u001b[?2026l", start);
     return rendered.slice(start, end)
@@ -1495,9 +1556,9 @@ test("side-by-side inventory keeps list viewport stable across detail lengths", 
       shortcutsRight: lines[shortcutsTitle]?.lastIndexOf("│"),
     };
   };
-  const shortFrame = await waitForFrame();
+  const shortFrame = await waitForFrame("short-detail");
   input.write("\x1b[B");
-  const longFrame = await waitForFrame();
+  const longFrame = await waitForFrame("long-detail");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
@@ -1576,7 +1637,8 @@ test("InventoryScreen renders supported shortcuts in the spacious details column
     catalogResources: [{ catalog: "engineering", kind: "skill", id: "available" }],
     execute: async () => ({ success: true }),
   });
-  await new Promise((resolve) => setTimeout(resolve, 120));
+  await waitForOutput(output, () => rendered, (text) =>
+    text.includes("SHORTCUTS") && text.includes("\u001b[?2026l"), "initial shortcuts frame");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();

@@ -8,7 +8,7 @@ Kitia is a terminal user interface (TUI) for discovering and managing skills, ag
 
 ## Quick start
 
-Requires Node.js 22 or newer. For regular use, install Kitia globally:
+Requires Node.js 26 or newer. For regular use, install Kitia globally:
 
 ```sh
 npm install --global @grasdouble/kitia

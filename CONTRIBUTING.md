@@ -4,7 +4,7 @@ Contributions improve Kitia's CLI, catalog integrations, documentation, and reso
 
 ## Development
 
-Kitia requires Node.js 22 or newer and pnpm 12.17.0. Install dependencies and run the standard checks:
+Kitia requires Node.js 26 or newer and pnpm 12.17.0. Install dependencies and run the standard checks:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -18,7 +18,7 @@ pnpm run cli:test:package-smoke
 
 Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; source-history behavior and prefix handling lives in `cli/test/source-history.test.js`. Catalog discovery and dashboard filtering has focused coverage in `cli/test/dashboard-filters.test.js`. Inventory migration behavior is covered by `cli/test/migrations.test.js`; when changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts. `pnpm test` also runs the strict TypeScript boundary configured in `tsconfig.strict.json`.
 
-The Termless dashboard test runs in CI on Ubuntu with Node.js 24. Run it locally with Node.js 23.6 or newer; the test remains separate from `pnpm test` because the package supports Node.js 22:
+The Termless dashboard test runs in CI on Ubuntu with Node.js 26. Run it locally with Node.js 26 or newer:
 
 ```sh
 pnpm run web:test:termless
