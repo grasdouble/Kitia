@@ -43,7 +43,7 @@ jobs:
       - run: pnpm run web:build
       - name: Test Termless dashboard on Node.js ${{ matrix.node }}
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm run web:test:termless
+        run: pnpm run cli:build && node --test web/test/termless-dashboard.test.mjs
 
   # Simple mode checks Kitia's root package and honors empty no-bump Changesets.
   changeset-status:

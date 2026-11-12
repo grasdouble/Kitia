@@ -1,5 +1,4 @@
 ---
 
 ---
-
-Use event-driven rendered-output waits for TUI tests, keep Windows CLI tests portable, isolate user-scope home paths, and ensure failure cleanup.
+Rename the unmanaged dashboard and screenshot fixture to `unmanaged`, removing the obsolete Herdr-specific identifier.

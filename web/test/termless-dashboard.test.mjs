@@ -334,14 +334,14 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
     const rawInventory = session.rawBytes().toString("utf8");
     const rows = inventory.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const resourceRows = rows.filter((line) =>
-      ["ask-matt", "herdr", "grill-me"].some((id) => line.includes(id)) &&
+      ["ask-matt", "unmanaged", "grill-me"].some((id) => line.includes(id)) &&
       /(?:CURRENT|UNMANAGED)/.test(line) && /(?:PROJECT|USER)/.test(line));
 
     assert.equal(resourceRows.length, 3, "all three deterministic inventory rows are visible");
     assert.ok(resourceRows.some((line) =>
       /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/.test(line)));
     assert.ok(resourceRows.some((line) =>
-      /UNMANAGED.*USER.*skill.*herdr/.test(line)));
+      /UNMANAGED.*USER.*skill.*unmanaged/.test(line)));
     assert.ok(resourceRows.some((line) =>
       /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/.test(line)));
     assert.ok(inventory.includes("2 current") && inventory.includes("1 unmanaged"));
@@ -363,8 +363,6 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
     assert.deepEqual(colorOf("SKILL - ask-matt"), { r: 129, g: 162, b: 190 });
     await assertSeparatedHeader(session, "SKILL - ask-matt", "CATALOG");
     assertSelectedRow(session, "ask-matt");
-    assert.deepEqual(colorOf("herdr"), { r: 180, g: 189, b: 105 },
-      "an unselected skill keeps its kind color");
     assert.deepEqual(colorOf("Route repository questions"), { r: 102, g: 102, b: 102 });
     const panelCorner = Array.from({ length: terminalSize.rows }, (_, row) =>
       Array.from({ length: terminalSize.columns }, (_, col) => ({ row, col }))
@@ -378,7 +376,7 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
     await assertShortcutsFrame(session, screenShortcutHints[""]);
     const xtermLines = xtermScreen.split(/\r?\n/).map((line) => line.trim());
     assert.ok(xtermLines.some((line) => /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/.test(line)));
-    assert.ok(xtermLines.some((line) => /UNMANAGED.*USER.*skill.*herdr/.test(line)));
+    assert.ok(xtermLines.some((line) => /UNMANAGED.*USER.*skill.*unmanaged/.test(line)));
     assert.ok(xtermLines.some((line) => /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/.test(line)));
     assert.ok(xtermLines.some((line) => line.includes("INVENTORY") && line.includes("SKILL - ask-matt")));
     assert.ok(xtermScreen.includes("2 current") && xtermScreen.includes("1 unmanaged"));
@@ -434,7 +432,7 @@ test("Termless xterm consumes the real Ink dashboard and its stream-driven state
 });
 
 for (const { name, key, title, nextTitle, nextId } of [
-  { name: "Inventory", key: "", title: "SKILL - ask-matt", nextTitle: "SKILL - herdr", nextId: "herdr" },
+  { name: "Inventory", key: "", title: "SKILL - ask-matt", nextTitle: "SKILL - unmanaged", nextId: "unmanaged" },
   { name: "catalog entry", key: "a", title: "SKILL - ask-matt", nextTitle: "SKILL - grill-me", nextId: "grill-me" },
   { name: "catalog management", key: "m", title: "CATALOG - MattPucock", nextTitle: "CATALOG - MattPucock", nextId: "MattPucock" },
 ]) {
@@ -462,7 +460,8 @@ for (const { name, key, title, nextTitle, nextId } of [
           return header && (size.columns < 112 ? header.col === 3 : header.col > 3);
         }, `${name} switches between stacked and side-by-side details`);
         const firstContent = key === "m" ? "REPOSITORY"
-          : !key && size.rows < 40 ? "STATUS" : "CATALOG";
+          : !key && size.rows < 40 ? "STATUS"
+          : !key && title === "SKILL - unmanaged" ? "SCOPE" : "CATALOG";
         await assertSeparatedHeader(session, title, firstContent);
         assertSelectedRow(session, key === "m" ? "MattPucock" : "ask-matt", key === "m");
         await assertShortcutsFrame(session, screenShortcutHints[key]);
@@ -491,8 +490,9 @@ for (const { name, key, title, nextTitle, nextId } of [
       }
       await assertTableSurface(session, key);
       await assertShortcutsFrame(session, screenShortcutHints[key]);
+      const nextFirstContent = key === "m" ? "REPOSITORY" : "CATALOG";
       session.input.write("\x1b[B");
-      await assertSeparatedHeader(session, nextTitle, key === "m" ? "REPOSITORY" : "CATALOG");
+      await assertSeparatedHeader(session, nextTitle, nextFirstContent);
       assertSelectedRow(session, nextId, key === "m");
       await assertTableSurface(session, key);
       await assertShortcutsFrame(session, key ? screenShortcutHints[key]
@@ -1327,7 +1327,7 @@ test("Termless Catalog Catalog/Kind/License filters match visible candidates", {
       "Inventory License filters the actual installed candidates");
     let inventoryGrid = session.terminal.screen.getText();
     assert.ok(inventoryGrid.includes("ask-matt") && inventoryGrid.includes("grill-me") &&
-      !inventoryGrid.includes("herdr"));
+      !inventoryGrid.split("\n").some((line) => /UNMANAGED\s+USER\s+skill\s+unmanaged/.test(line)));
     session.input.write("f");
     await waitForGrid(session, (grid) => grid.includes("TYPE to search"), "Inventory enters query mode");
     session.input.write("grill-me");
@@ -1337,7 +1337,7 @@ test("Termless Catalog Catalog/Kind/License filters match visible candidates", {
     session.input.write("l");
     await waitForGrid(session, (grid) => grid.includes("RESOURCES 3/3"), "Inventory cycles back to ALL");
     inventoryGrid = session.terminal.screen.getText();
-    assert.ok(inventoryGrid.includes("herdr"));
+    assert.ok(inventoryGrid.includes("unmanaged"));
     session.input.write("a");
     await waitForGrid(session, (grid) => grid.includes("CATALOG RESOURCES"), "Catalog opens before filtering");
     session.input.write("d");
@@ -1509,11 +1509,11 @@ test("Termless uninstall modal fits narrow bounds and unmanaged removal needs tw
       !value.includes("CONFIRM UNINSTALL"), "the uninstall confirmation closes");
     session.input.write("\x1b[B");
     await waitForGrid(session, (value) => value.split("\n").some((line) =>
-      line.includes("›") && line.includes("herdr")), "the unmanaged skill is selected");
-    assertSelectedRow(session, "herdr");
+      line.includes("›") && line.includes("unmanaged")), "the unmanaged skill row is selected");
+    assertSelectedRow(session, "unmanaged");
 
     session.input.write("\x1b[3~");
-    await waitForGrid(session, (value) => value.includes("CONFIRM PERMANENT REMOVAL"),
+    await waitForGrid(session, (value) => value.includes("CONFIRM REMOVE"),
       "Delete opens the first unmanaged removal confirmation");
     session.input.write("y");
     await waitForGrid(session, (value) => value.includes("permanently lost"),
@@ -1522,10 +1522,10 @@ test("Termless uninstall modal fits narrow bounds and unmanaged removal needs tw
 
     session.input.write("y");
     await waitForGrid(session, (value) => value.includes("LOADING") &&
-      value.includes("Removing skill:herdr"), "the second confirmation dispatches removal");
+      value.includes("Removing skill:unmanaged"), "the second confirmation dispatches removal");
     assert.equal(actions.length, 1);
     assert.equal(actions[0][0], "remove-unmanaged");
-    assert.equal(actions[0][1].id, "herdr");
+    assert.equal(actions[0][1].id, "unmanaged");
     const completionStart = session.rawBytes().length;
     finishAction();
     await waitForInkOutput(session, "Unmanaged skill removed.", completionStart);

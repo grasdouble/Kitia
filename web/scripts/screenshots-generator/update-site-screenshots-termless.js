@@ -55,7 +55,7 @@ function missingInventory(screen) {
   const lines = screenRows(screen);
   const requirements = [
     ["project current ask-matt row", /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/],
-    ["unmanaged user herdr row", /UNMANAGED.*USER.*skill.*herdr/],
+    ["unmanaged user unmanaged row", /UNMANAGED.*USER.*skill.*unmanaged/],
     ["current user grill-me row", /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/],
     ["side-by-side inventory and ask-matt detail titles", /INVENTORY.*SKILL - ask-matt/],
   ];
