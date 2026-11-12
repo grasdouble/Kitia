@@ -33,9 +33,13 @@ const {
   renderInstalledResources, browseInstalledResources, colorize,
 } = terminalApi;
 
-function runDashboardWorker(data, onProgress: (message: string) => void = () => {}) {
+function runDashboardWorker(
+  data,
+  onProgress: (message: string) => void = () => {},
+  { execArgv }: { execArgv?: string[] } = {},
+) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(path.join(__dirname, "dashboard-worker.js"), { workerData: data });
+    const worker = new Worker(path.join(__dirname, "dashboard-worker.js"), { workerData: data, execArgv });
     let settled = false;
     worker.on("message", (message) => {
       if (typeof message?.progress === "string") {

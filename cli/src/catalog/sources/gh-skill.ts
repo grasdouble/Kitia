@@ -54,16 +54,18 @@ function runGhSkillAsync(
     nonInteractive = false,
     timeout = DEFAULT_GH_SKILL_TIMEOUT_MS,
     onProgress = () => {},
+    spawnProcess = spawn,
   }: {
     nonInteractive?: boolean;
     timeout?: number;
     onProgress?: (message: string) => void;
+    spawnProcess?: typeof spawn;
   } = {},
 ): Promise<GhSkillResult> {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn("gh", args, {
+      child = spawnProcess("gh", args, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         ...(nonInteractive ? { env: { ...process.env, GH_PROMPT_DISABLED: "1" } } : {}),

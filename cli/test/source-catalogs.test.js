@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -32,6 +32,10 @@ const { main: runCliMain } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 const { executeCommand, runDashboardWorker } = require("../dist/cli/commands.js");
 const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
+const nodeScriptSpawn = (script) => (command, args, options) => {
+  assert.equal(command, "gh");
+  return spawn(process.execPath, [script, ...args], options);
+};
 test("dashboard preview combines source inspection and audit while installs remain audited", async () => {
   const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-inspection-"));
@@ -3851,61 +3855,43 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
 });
 test("async GitHub skill runner relays sanitized output and bounds a hung process", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-gh-timeout-"));
-  const bin = path.join(temporary, "bin");
-  fs.mkdirSync(bin);
-  const executable = path.join(bin, "gh");
-  fs.writeFileSync(executable, `#!${process.execPath}\nprocess.stderr.write("\\u001b[31mDownloading token=verysecretcredential https://user:anothersecret@example.invalid/resource?api_key=querysecret\\u001b[0m\\n"); setTimeout(() => {}, 5000);\n`);
-  fs.chmodSync(executable, 0o755);
-  const previousPath = process.env.PATH;
-  process.env.PATH = `${bin}${path.delimiter}${previousPath || ""}`;
+  const script = path.join(temporary, "gh.js");
+  fs.writeFileSync(script, `process.stderr.write("\\u001b[31mDownloading token=verysecretcredential https://user:anothersecret@example.invalid/resource?api_key=querysecret\\u001b[0m\\n"); setTimeout(() => {}, 5000);\n`);
   const progress = [];
-  try {
-    await assert.rejects(
-      runGhSkillAsync(["skill", "install"], temporary, {
-        nonInteractive: true,
-        timeout: 1500,
-        onProgress: (message) => progress.push(message),
-      }),
-      (error) => error.code === "GH_TIMEOUT" &&
-        /timed out/i.test(error.userMessage) &&
-        /network connectivity/i.test(error.userMessage),
-    );
-    const output = progress.join("\n");
-    assert.match(output, /gh stderr: Downloading token=\[REDACTED\]/i);
-    assert.match(output, /https:\/\/\[REDACTED\]@example\.invalid\/resource\?\[REDACTED\]/);
-    assert.doesNotMatch(output, /verysecretcredential|anothersecret|querysecret|\u001b|\x1b/);
-    assert.ok(progress.some((message) => /timed out/i.test(message)));
-  } finally {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  }
+  await assert.rejects(
+    runGhSkillAsync(["skill", "install"], temporary, {
+      nonInteractive: true,
+      timeout: 1500,
+      onProgress: (message) => progress.push(message),
+      spawnProcess: nodeScriptSpawn(script),
+    }),
+    (error) => error.code === "GH_TIMEOUT" &&
+      /timed out/i.test(error.userMessage) &&
+      /network connectivity/i.test(error.userMessage),
+  );
+  const output = progress.join("\n");
+  assert.match(output, /gh stderr: Downloading token=\[REDACTED\]/i);
+  assert.match(output, /https:\/\/\[REDACTED\]@example\.invalid\/resource\?\[REDACTED\]/);
+  assert.doesNotMatch(output, /verysecretcredential|anothersecret|querysecret|\u001b|\x1b/);
+  assert.ok(progress.some((message) => /timed out/i.test(message)));
 });
 test("async GitHub skill runner coalesces carriage-return status output", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-gh-progress-coalesce-"));
-  const bin = path.join(temporary, "bin");
-  fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, "gh"), [
-    `#!${process.execPath}`,
+  const script = path.join(temporary, "gh.js");
+  fs.writeFileSync(script, [
     "let status = 0;",
     'const timer = setInterval(() => { process.stdout.write(`Status ${++status}\\r`); if (status === 40) { clearInterval(timer); process.stdout.write("Final status\\r"); process.exit(0); } }, 5);',
-
+    "",
   ].join("\n"));
-  fs.chmodSync(path.join(bin, "gh"), 0o755);
-  const previousPath = process.env.PATH;
-  process.env.PATH = `${bin}${path.delimiter}${previousPath || ""}`;
   const progress = [];
-  try {
-    const result = await runGhSkillAsync(["skill", "install"], temporary, {
-      timeout: 3000,
-      onProgress: (message) => progress.push(message),
-    });
-    assert.equal(result.status, 0);
-    assert.ok(progress.length <= 4, `expected coalesced events, received ${progress.length}`);
-    assert.equal(progress.at(-1), "gh stdout: Final status");
-  } finally {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  }
+  const result = await runGhSkillAsync(["skill", "install"], temporary, {
+    timeout: 3000,
+    onProgress: (message) => progress.push(message),
+    spawnProcess: nodeScriptSpawn(script),
+  });
+  assert.equal(result.status, 0);
+  assert.ok(progress.length <= 4, `expected coalesced events, received ${progress.length}`);
+  assert.equal(progress.at(-1), "gh stdout: Final status");
 });
 test("progress-enabled source install preserves the injected GitHub runner", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-async-gh-injection-"));
@@ -3977,15 +3963,23 @@ test("real GH update progress and sanitized output reach the TUI through its wor
   const sourceIndexDirectory = path.join(configDirectory, "source-catalogs");
   const target = path.join(temporary, "project");
   const userTarget = path.join(temporary, "user");
-  const fakeBin = path.join(temporary, "bin");
+  const ghScript = path.join(temporary, "gh.js");
+  const ghPreload = path.join(temporary, "gh-spawn-preload.cjs");
   const repository = "https://github.com/example/worker-progress";
   const previousEnvironment = Object.fromEntries(
-    ["KITIA_CONFIG_DIR", "PATH", "KITIA_TEST_SKILL_FILE", "KITIA_TEST_SKILL_CONTENT"]
+    ["KITIA_CONFIG_DIR", "KITIA_TEST_SKILL_FILE", "KITIA_TEST_SKILL_CONTENT", "KITIA_TEST_GH_SCRIPT"]
       .map((key) => [key, process.env[key]]),
   );
   fs.mkdirSync(target, { recursive: true });
   fs.mkdirSync(userTarget, { recursive: true });
-  fs.mkdirSync(fakeBin);
+  fs.writeFileSync(ghPreload, [
+    'const childProcess = require("node:child_process");',
+    "const originalSpawn = childProcess.spawn;",
+    'childProcess.spawn = (command, args, options) => command === "gh"',
+    "  ? originalSpawn(process.execPath, [process.env.KITIA_TEST_GH_SCRIPT, ...args], options)",
+    "  : originalSpawn(command, args, options);",
+    "",
+  ].join("\n"));
   const source = createSource("worker-progress-upstream", repository);
   const oldRef = execFileSync("git", ["-C", source, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   fs.appendFileSync(path.join(source, "skills", "demo-skill", "SKILL.md"), "\nSecond source revision.\n");
@@ -4030,20 +4024,17 @@ test("real GH update progress and sanitized output reach the TUI through its wor
   });
   writeJson(path.join(sourceIndexDirectory, "Test.json"), sourceIndex);
 
-  const ghScript = [
-    `#!${process.execPath}`,
+  fs.writeFileSync(ghScript, [
     'const fs = require("node:fs");',
     `const output = ${JSON.stringify("\u001b[32mFetching https://user:passsecret@example.invalid/resource?token=querysecret token=verysecretcredential\u001b[0m\n")};`,
     "setTimeout(() => process.stdout.write(output), 500);",
     "setTimeout(() => { fs.writeFileSync(process.env.KITIA_TEST_SKILL_FILE, process.env.KITIA_TEST_SKILL_CONTENT); process.exit(0); }, 800);",
     "",
-  ].join("\n");
-  fs.writeFileSync(path.join(fakeBin, "gh"), ghScript);
-  fs.chmodSync(path.join(fakeBin, "gh"), 0o755);
+  ].join("\n"));
   process.env.KITIA_CONFIG_DIR = configDirectory;
-  process.env.PATH = `${fakeBin}${path.delimiter}${previousEnvironment.PATH || ""}`;
   process.env.KITIA_TEST_SKILL_FILE = skillFile;
   process.env.KITIA_TEST_SKILL_CONTENT = makeSkill(newRef);
+  process.env.KITIA_TEST_GH_SCRIPT = ghScript;
 
   const installedResource = {
     ...newResource,
@@ -4079,7 +4070,7 @@ test("real GH update progress and sanitized output reach the TUI through its wor
         dashboardOptions: { target, userTarget },
         catalogs: { sourceResources: [newResource] },
         installOptions,
-      }, onProgress);
+      }, onProgress, { execArgv: ["--require", ghPreload] });
     },
   });
   let dashboardClosed = false;
