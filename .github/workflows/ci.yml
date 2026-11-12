@@ -44,7 +44,7 @@ jobs:
 
   # Simple mode checks Kitia's root package and honors empty no-bump Changesets.
   changeset-status:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +67,7 @@ jobs:
         run: pnpm changeset status
       - name: Check Changesets coverage
         id: changesets
-        uses: grasdouble/Lufa-CICD/actions/check-changesets@c9cf5bde998d803cf7a42e931710257b6cbac03b # check-changesets-v1.1.1
+        uses: grasdouble/Lufa-CICD/actions/check-changesets@e6b2f080ba3bd5d7b8c7140e21623ac06388a245 # check-changesets-v1.1.2
         with:
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
