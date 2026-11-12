@@ -16,7 +16,7 @@ Use this skill when a user requests a Changeset or when repository work requires
 
 ## Write the repository format
 
-A non-empty Changeset has valid YAML frontmatter naming the package and bump, then one short description followed by indented detail bullets:
+A non-empty Changeset has valid YAML frontmatter naming the package and bump, then one short description followed by grouped detail bullets:
 
 ```md
 ---
@@ -24,11 +24,14 @@ A non-empty Changeset has valid YAML frontmatter naming the package and bump, th
 ---
 
 Short description
-  - Details 1
-  - Details 2
+  - **User-Facing**
+    - User-visible detail 1
+    - User-visible detail 2
+  - **Technical**
+    - Release-worthy technical detail
 ```
 
-Use exactly two spaces before each `- ` detail. Keep the summary on one unindented line. Put each detail on its own bullet; do not use free-standing paragraphs, blank lines between details, or nested bullets. Write release notes in English unless the user specifies another language. Empty-frontmatter no-bump Changesets may carry an optional message and do not use this body format.
+Use exactly two spaces before each group label and four spaces before each detail. The User-Facing group MUST come first; keep groups together and omit an empty group. Keep the summary on one unindented line. Do not add ungrouped details, free-standing paragraphs, or blank lines within the grouped details. Write release notes in English unless the user specifies otherwise. Empty-frontmatter no-bump Changesets may carry an optional message and do not use this body format.
 
 ## Create or update safely
 

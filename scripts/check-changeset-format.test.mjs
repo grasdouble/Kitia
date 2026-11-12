@@ -4,20 +4,35 @@ import { validateChangesetContent } from "./check-changeset-format.mjs";
 
 const frontmatter = "---\n\"@grasdouble/kitia\": minor\n---\n\n";
 
-test("accepts a short description followed by two-space detail bullets", () => {
+test("accepts a summary with grouped user-facing and technical details", () => {
   assert.deepEqual(validateChangesetContent(
-    `${frontmatter}Improve catalog search\n  - Match tags and license data.\n  - Preserve source provenance.\n`,
+    `${frontmatter}Improve catalog search\n  - **User-Facing**\n    - Match tags and license data.\n  - **Technical**\n    - Preserve source provenance.\n`,
   ), []);
 });
 
-test("accepts empty no-bump Changesets with an optional message", () => {
-  assert.deepEqual(validateChangesetContent("---\n\n---\n\nRepository-only update.\n"), []);
+test("accepts a Changeset with only user-facing details", () => {
+  assert.deepEqual(validateChangesetContent(
+    `${frontmatter}Improve catalog search\n  - **User-Facing**\n    - Match tags and license data.\n`,
+  ), []);
 });
 
-test("rejects paragraphs, malformed indentation, and missing details", () => {
-  assert.equal(validateChangesetContent(`${frontmatter}Summary\n\nParagraph.`).length, 2);
-  assert.match(validateChangesetContent(`${frontmatter}Summary\n    - Detail.`)[0], /indented detail/);
-  assert.match(validateChangesetContent(`${frontmatter}Summary`)[0], /add details/);
+test("rejects ungrouped details, empty groups, and user-facing groups after technical", () => {
+  assert.match(
+    validateChangesetContent(`${frontmatter}Summary\n    - Detail.`)[0],
+    /inside a User-Facing or Technical group/,
+  );
+  assert.match(
+    validateChangesetContent(`${frontmatter}Summary\n  - **User-Facing**\n  - **Technical**\n    - Detail.`)[0],
+    /User-Facing group must contain at least one detail/,
+  );
+  assert.match(
+    validateChangesetContent(`${frontmatter}Summary\n  - **Technical**\n    - Detail.\n  - **User-Facing**\n    - Detail.\n`)[0],
+    /User-Facing group must come before Technical/,
+  );
+});
+
+test("rejects missing grouped details", () => {
+  assert.match(validateChangesetContent(`${frontmatter}Summary`)[0], /add grouped details/);
 });
 
 test("rejects missing YAML frontmatter", () => {

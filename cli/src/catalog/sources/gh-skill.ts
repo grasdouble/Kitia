@@ -1,9 +1,9 @@
 "use strict";
-
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawnSync, spawn } = require("node:child_process");
 const { CatalogError, SOURCE_SKILL_DIRECTORIES } = require("../resources/index.js");
 import type { CatalogResource } from "../entries.js";
+const DEFAULT_GH_SKILL_TIMEOUT_MS = 120_000;
 
 export type GhSkillResult = { status: number; stdout?: string | Buffer | null; stderr?: string | Buffer | null };
 function buildSourceSkillArgs(
@@ -30,6 +30,162 @@ function buildSourceSkillArgs(
     ];
   }
   throw new CatalogError(`Unsupported source skill action: ${action}`);
+}
+
+
+function safeProgressText(value: string): string {
+  return value
+    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}\b/gi, "[REDACTED]")
+    .replace(/\b(Bearer|token)\s+[A-Za-z0-9._~+/-]{12,}={0,2}\b/gi, "$1 [REDACTED]")
+    .replace(/\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|secret|password)\b["']?\s*[:=]\s*["']?([^\s"',;}&]+)/gi, "$1=[REDACTED]")
+    .replace(/\b(gh[_-]?)?(token|authorization)\b["']?\s*[:=]\s*["']?([^\s"',;}&]+)/gi, "$1$2=[REDACTED]")
+    .replace(/\b(https?:\/\/)[^/?#@\s]+@/gi, "$1[REDACTED]@")
+    .replace(/(https?:\/\/[^?\s]+)\?[^\s]*/gi, "$1?[REDACTED]")
+    .trim()
+    .slice(0, 240);
+}
+
+function runGhSkillAsync(
+  args: string[],
+  cwd = process.cwd(),
+  {
+    nonInteractive = false,
+    timeout = DEFAULT_GH_SKILL_TIMEOUT_MS,
+    onProgress = () => {},
+  }: {
+    nonInteractive?: boolean;
+    timeout?: number;
+    onProgress?: (message: string) => void;
+  } = {},
+): Promise<GhSkillResult> {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn("gh", args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        ...(nonInteractive ? { env: { ...process.env, GH_PROMPT_DISABLED: "1" } } : {}),
+      });
+    } catch (error) {
+      reject(ghSpawnError(error));
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    type ProgressStream = {
+      remainder: string;
+      pendingStatus: string;
+      timer?: NodeJS.Timeout;
+    };
+    const progressStreams: Record<"stdout" | "stderr", ProgressStream> = {
+      stdout: { remainder: "", pendingStatus: "" },
+      stderr: { remainder: "", pendingStatus: "" },
+    };
+    const flushStatus = (stream: "stdout" | "stderr") => {
+      const state = progressStreams[stream];
+      if (state.timer) clearTimeout(state.timer);
+      state.timer = undefined;
+      const safe = safeProgressText(state.pendingStatus);
+      state.pendingStatus = "";
+      if (safe) onProgress(`gh ${stream}: ${safe}`);
+    };
+    const consumeProgress = (chunk: string, stream: "stdout" | "stderr", final = false) => {
+      const state = progressStreams[stream];
+      const text = state.remainder + chunk;
+      let start = 0;
+      for (let index = 0; index < text.length; index += 1) {
+        const char = text[index];
+        if (char !== "\r" && char !== "\n") continue;
+        if (char === "\r" && index === text.length - 1 && !final) break;
+        const isCrLf = char === "\r" && text[index + 1] === "\n";
+        const line = text.slice(start, index);
+        if (char === "\n" || isCrLf) {
+          flushStatus(stream);
+          const safe = safeProgressText(line);
+          if (safe) onProgress(`gh ${stream}: ${safe}`);
+          if (isCrLf) index += 1;
+        } else {
+          state.pendingStatus = line.slice(-2048);
+          if (!state.timer) {
+            state.timer = setTimeout(() => flushStatus(stream), 150);
+            state.timer.unref();
+          }
+        }
+        start = index + 1;
+      }
+      state.remainder = text.slice(start).slice(-2048);
+      if (!final) return;
+      flushStatus(stream);
+      const safeRemainder = safeProgressText(state.remainder);
+      state.remainder = "";
+      if (safeRemainder) onProgress(`gh ${stream}: ${safeRemainder}`);
+    };
+    const clearProgressTimers = () => {
+      for (const state of Object.values(progressStreams)) {
+        if (state.timer) clearTimeout(state.timer);
+        state.timer = undefined;
+      }
+    };
+    child.stdout?.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout = `${stdout}${text}`.slice(-65_536);
+      consumeProgress(text, "stdout");
+    });
+    child.stderr?.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderr = `${stderr}${text}`.slice(-65_536);
+      consumeProgress(text, "stderr");
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      onProgress("GitHub CLI timed out; stopping the operation...");
+      child.kill("SIGTERM");
+      const forceTimer = setTimeout(() => child.kill("SIGKILL"), 2_000);
+      forceTimer.unref();
+    }, timeout);
+    timer.unref();
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearProgressTimers();
+      reject(ghSpawnError(error));
+    });
+    child.once("close", (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      consumeProgress("", "stdout", true);
+      consumeProgress("", "stderr", true);
+      clearProgressTimers();
+      if (timedOut) {
+        const error = new CatalogError(
+          `GitHub CLI did not finish within ${Math.ceil(timeout / 1000)} seconds; check network connectivity and retry.`,
+          "GH_TIMEOUT",
+          { category: "github-cli", userMessage: "GitHub CLI timed out while installing or updating the source skill. Check network connectivity and retry." },
+        );
+        reject(error);
+        return;
+      }
+      resolve({ status: status ?? 1, stdout, stderr });
+    });
+  });
+}
+
+function ghSpawnError(error: Error & { code?: string }): Error {
+  const code = error.code || "process launch failed";
+  return new CatalogError(
+    `Could not start GitHub CLI for source skill update: ${code}. Check that gh is installed and available on PATH.`,
+    "GH_SPAWN_FAILED",
+    {
+      category: "github-cli",
+      userMessage: "Could not start GitHub CLI for the source skill update. Check that gh is installed and available on PATH.",
+    },
+  );
 }
 
 function runGhSkill(
@@ -103,5 +259,5 @@ function describeGhFailure(diagnostic: string): string {
 }
 
 module.exports = {
-  buildSourceSkillArgs, runGhSkill, formatGhDiagnostics, describeGhFailure,
+  buildSourceSkillArgs, runGhSkill, runGhSkillAsync, formatGhDiagnostics, describeGhFailure,
 };

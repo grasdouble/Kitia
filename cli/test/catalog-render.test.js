@@ -1017,8 +1017,9 @@ test("managed inventory U confirms an update and renders the successful result",
     assert.equal(executions.length, 1);
     assert.equal(executions[0][0], "update");
     assert.deepEqual(executions[0][1], resource);
-    assert.deepEqual(executions[0][2], { scope: undefined, tool: undefined });
-    assert.ok(completed.includes("Update complete"));
+    assert.equal(executions[0][2].scope, undefined);
+    assert.equal(executions[0][2].tool, undefined);
+    assert.equal(typeof executions[0][2].onProgress, "function");
     assert.ok(completed.includes("CURRENT"), "the returned refreshed resource replaces its old status");
     input.write("q");
     assert.equal(await done, true);
@@ -1105,7 +1106,9 @@ test("managed inventory U selects Update and Enter executes the confirmed action
     assert.equal(executions.length, 1);
     assert.equal(executions[0][0], "update");
     assert.deepEqual(executions[0][1], resource);
-    assert.deepEqual(executions[0][2], { scope: undefined, tool: undefined });
+    assert.equal(executions[0][2].scope, undefined);
+    assert.equal(executions[0][2].tool, undefined);
+    assert.equal(typeof executions[0][2].onProgress, "function");
     assert.ok(completed.includes("Update complete"));
     assert.ok(completed.includes("CURRENT"), "the refreshed resource replaces its old status");
     input.write("q");
@@ -1240,7 +1243,9 @@ test("local conflicts and GH force-required updates require explicit retry conse
         }
         assert.ok(conflict.includes("YES, RETRY WITH --FORCE"));
         assert.equal(calls.length, 1, "the first update attempt has no retry flag");
-        assert.deepEqual(calls[0][2], { scope: undefined, tool: undefined });
+        assert.equal(calls[0][2].scope, undefined);
+        assert.equal(calls[0][2].tool, undefined);
+        assert.equal(typeof calls[0][2].onProgress, "function");
 
         if (accept) {
           input.write("\x1b[C");
@@ -1257,7 +1262,9 @@ test("local conflicts and GH force-required updates require explicit retry conse
             const nextPromptText = nextPrompt.replace(/[│]/g, " ").replace(/\s+/g, " ");
             assert.ok(nextPromptText.includes("already installed and requires --force"));
             assert.equal(calls.length, 2);
-            assert.deepEqual(calls[1][2], {
+            const { onProgress: firstProgress, ...firstRetryOptions } = calls[1][2];
+            assert.equal(typeof firstProgress, "function");
+            assert.deepEqual(firstRetryOptions, {
               scope: undefined, tool: undefined, ghForce: true, ghForceAgent: "github-copilot",
             });
             input.write("\x1b[C");
@@ -1265,7 +1272,9 @@ test("local conflicts and GH force-required updates require explicit retry conse
             input.write("\r");
             await waitForFrame((frame) => frame.includes("Update complete"), "second agent forced update");
             assert.equal(calls.length, 3);
-            assert.deepEqual(calls[2][2], {
+            const { onProgress: secondProgress, ...secondRetryOptions } = calls[2][2];
+            assert.equal(typeof secondProgress, "function");
+            assert.deepEqual(secondRetryOptions, {
               scope: undefined, tool: undefined, ghForce: true, ghForceAgent: "claude-code",
             });
             input.write("q");
@@ -1281,7 +1290,9 @@ test("local conflicts and GH force-required updates require explicit retry conse
           } else {
             await waitForFrame((frame) => frame.includes("Update complete"), "forced update result");
             assert.equal(calls.length, 2);
-            assert.deepEqual(calls[1][2], ghForceRequired
+            const { onProgress: retryProgress, ...retryOptions } = calls[1][2];
+            assert.equal(typeof retryProgress, "function");
+            assert.deepEqual(retryOptions, ghForceRequired
               ? { scope: undefined, tool: undefined, ghForce: true, ghForceAgent: "github-copilot" }
               : { scope: undefined, tool: undefined, force: true });
             input.write("q");

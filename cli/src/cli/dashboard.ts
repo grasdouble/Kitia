@@ -190,6 +190,7 @@ function localPreviewFiles(targetRoot: string, state: InstallState, resource: Ca
 
 function createDashboardActionHandler(
   executeCommand: (options: CliOptions, report: CliReport | null) => Promise<number>,
+  onProgress: (message: string) => void = () => {},
 ) {
   return async function executeDashboardAction(
     action: string,
@@ -330,6 +331,7 @@ function createDashboardActionHandler(
           },
           error: (message: string) => messages.push(message),
         };
+        options.onProgress = onProgress;
         code = await executeCommand(options, null);
       }
     } finally {

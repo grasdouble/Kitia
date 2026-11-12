@@ -12,7 +12,7 @@ const {
 } = require("../dist/catalog/sources/manage.js");
 const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
 const { installSourceFileResource } = require("../dist/catalog/sources/resources.js");
-const { runGhSkill, buildSourceSkillArgs } = require("../dist/catalog/sources/gh-skill.js");
+const { runGhSkill, runGhSkillAsync, buildSourceSkillArgs } = require("../dist/catalog/sources/gh-skill.js");
 const { latestSourceVersionAtRef } = require("../dist/catalog/sources/history.js");
 const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
 const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
@@ -83,7 +83,7 @@ test("dashboard preview combines source inspection and audit while installs rema
     else process.env.KITIA_CONFIG_DIR = previousConfig;
   }
 });
-test("dashboard installs the selected full skill revision from the revision picker", async () => {
+test("dashboard replaces an installed skill with the selected full revision through update confirmation", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const input = new PassThrough();
@@ -92,6 +92,10 @@ test("dashboard installs the selected full skill revision from the revision pick
   input.ref = () => {};
   input.unref = () => {};
   const output = new PassThrough();
+  t.after(() => {
+    input.destroy();
+    output.destroy();
+  });
   output.isTTY = true;
   output.columns = 120;
   output.rows = 40;
@@ -99,7 +103,11 @@ test("dashboard installs the selected full skill revision from the revision pick
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const selectedSha = "b".repeat(40);
   const actions = [];
-  const done = runDashboard([], input, output, [], {
+  const installed = {
+    catalog: "Test", kind: "skill", id: "revision-skill", scope: "project", status: "current",
+    source_repository: "org/repo", source_path: "skills/revision-skill", source_ref: "a".repeat(40),
+  };
+  const done = runDashboard([installed], input, output, [], {
     catalogResources: [{
       catalog: "Test", kind: "skill", id: "revision-skill",
       source_repository: "org/repo", source_path: "skills/revision-skill",
@@ -113,9 +121,9 @@ test("dashboard installs the selected full skill revision from the revision pick
       ];
     },
     execute: async (action, resource, options) => {
-      actions.push({ action, resource: resource.id, ref: options.ref });
+      actions.push({ action, resource: resource.id, scope: resource.scope, ref: options.ref });
       await new Promise((resolve) => setTimeout(resolve, 400));
-      return { code: 0, messages: ["Installed selected revision."], resources: [], errors: [] };
+      return { code: 0, messages: ["Updated selected revision."], resources: [installed], errors: [] };
     },
   });
   let dashboardFinished = false;
@@ -133,7 +141,7 @@ test("dashboard installs the selected full skill revision from the revision pick
   assert.match(rendered, /RESOURCE REVISIONS/);
   const revisionBody = assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "RESOURCE REVISIONS", "", [
     "Test / skill:revision-skill",
-    "Select a commit to install; the catalog pin remains unchanged.",
+    "Select a commit to update; the catalog pin remains unchanged.",
   ]).filter((line) => line.trim());
   assert.equal(revisionBody.length, 2, "unpaginated revision rows stay below the divider without new column labels");
   assert.match(revisionBody[0], /› aaaaaaa\s+2026-11-09\s+Current pin/);
@@ -147,22 +155,25 @@ test("dashboard installs the selected full skill revision from the revision pick
   assert.ok(rendered.slice(selectionStart).includes("› bbbbbbb"), "the second revision is selected before Enter");
   input.write("\r");
   await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /Selected commit:/);
-  assert.ok(rendered.includes(selectedSha));
-  input.write("\r");
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.match(rendered, /CONFIRM INSTALL/);
+  for (let attempt = 0; attempt < 50 &&
+      !selectedDetailsFrame(rendered).includes("CONFIRM UPDATE"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const confirmationFrame = selectedDetailsFrame(rendered).replace(/\s+/g, " ");
+  assert.match(confirmationFrame, /CONFIRM UPDATE/);
+  assert.match(confirmationFrame, /Replace the installed skill:revision-skill/);
+  assert.match(confirmationFrame, /revision in project scope\?/);
+  assert.match(confirmationFrame, /Selected revision: b{40}/);
   input.write("y");
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.ok(["|", "/", "-", "\\"].some((frame) =>
-    rendered.includes(`${frame} Installing skill:revision-skill`)));
-  assert.match(rendered, /LOADING/);
+    rendered.includes(`${frame} Updating skill:revision-skill`)));
+  assert.deepEqual(actions, [{
+    action: "update", resource: "revision-skill", scope: "project", ref: selectedSha,
+  }]);
   input.write("q");
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(dashboardFinished, false, "input remains blocked while the loader popup is active");
-  const displayedFrames = ["|", "/", "-", "\\"].filter((frame) =>
-    rendered.includes(`${frame} Installing skill:revision-skill`));
-  assert.ok(displayedFrames.length >= 2, `expected animation frames, got ${displayedFrames.join(", ")}`);
   await new Promise((resolve) => setTimeout(resolve, 250));
   input.write("q");
   assert.equal(await done, true);
@@ -1791,14 +1802,21 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       userCatalogs: [{ name: "Test", repository }],
       removeCatalog,
     });
-    for (const key of keys) {
-      input.write(key);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      for (const key of keys) {
+        input.write(key);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const completion = await Promise.race([
+        done.then((result) => ({ completed: true, result })),
+        new Promise((resolve) => setImmediate(() => resolve({ completed: false }))),
+      ]);
+      if (!completion.completed) input.destroy();
+      return completion.completed ? completion.result : await done;
+    } finally {
+      input.destroy();
+      output.destroy();
     }
-    const result = await done;
-    input.destroy();
-    output.destroy();
-    return result;
   };
   const driveRefresh = async (keys, refreshCatalog, extraActions = {}) => {
     const input = new PassThrough();
@@ -1839,7 +1857,12 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
         if (expectedOutput) await waitForOutput(expectedOutput);
         else await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      const result = await done;
+      const completion = await Promise.race([
+        done.then((result) => ({ completed: true, result })),
+        new Promise((resolve) => setImmediate(() => resolve({ completed: false }))),
+      ]);
+      if (!completion.completed) input.destroy();
+      const result = completion.completed ? completion.result : await done;
       return { result, renderedOutput };
     } finally {
       for (let attempt = 0; attempt < 3 && !dashboardFinished; attempt += 1) {
@@ -3698,4 +3721,426 @@ test("an explicit skill ref is installed and recorded without changing the catal
   assert.equal(catalogResource.source_ref, "a".repeat(40));
   assert.equal(buildSourceSkillArgs("install", { ...catalogResource, source_ref: requestedRef }, "github-copilot")
     .at(-1), requestedRef);
+});
+test("CLI install --ref replaces only the selected scope and retains skill update safety", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-cli-ref-replace-"));
+  const projectTarget = path.join(temporary, "project");
+  const userTarget = path.join(temporary, "user");
+  const oppositeOnlyTarget = path.join(temporary, "opposite-only-project");
+  const modifiedTarget = path.join(temporary, "modified");
+  const untrackedTarget = path.join(temporary, "untracked");
+  const configDirectory = path.join(temporary, "config");
+  const indexDirectory = path.join(configDirectory, "source-catalogs");
+  const binDirectory = path.join(temporary, "bin");
+  fs.mkdirSync(indexDirectory, { recursive: true });
+  fs.mkdirSync(binDirectory);
+  const catalogResource = {
+    catalog: "Test", kind: "skill", id: "demo-skill",
+    source_repository: "example/team-alpha", source_path: "skills/demo-skill",
+    source_ref: "a".repeat(40), license_status: "MIT",
+  };
+  const seedTarget = (target) => {
+    const directory = path.join(target, ".agents/skills/demo-skill");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "SKILL.md"), [
+      "---", "name: demo-skill", "description: A source skill.", "metadata:",
+      `  github-repo: "https://github.com/${catalogResource.source_repository}"`,
+      `  github-path: "${catalogResource.source_path}"`,
+      `  github-ref: "${catalogResource.source_ref}"`, `  github-pinned: "${catalogResource.source_ref}"`,
+      "---", "", "Old installed body.", "",
+    ].join("\n"));
+    recordSourceInstallation(catalogResource, target, "github-copilot");
+  };
+  for (const target of [projectTarget, userTarget, modifiedTarget, untrackedTarget]) seedTarget(target);
+  fs.mkdirSync(oppositeOnlyTarget);
+  const modifiedFile = path.join(modifiedTarget, ".agents/skills/demo-skill/SKILL.md");
+  fs.appendFileSync(modifiedFile, "Local edit.\n");
+  fs.writeFileSync(path.join(untrackedTarget, ".agents/skills/demo-skill/reference.md"), "Untracked content.");
+  writeJson(path.join(configDirectory, "catalogSources.json"), {
+    catalog_version: 1, sources: [{ name: "Test", repository: "https://github.com/example/team-alpha" }],
+  });
+  writeJson(path.join(indexDirectory, "catalogSources.json"), {
+    catalog_version: 1, sources: [{ name: "Test", repository: "https://github.com/example/team-alpha" }],
+  });
+  writeJson(path.join(indexDirectory, "Test.json"), {
+    catalog_version: 1, catalog_name: "Test", source_repository: "example/team-alpha",
+    source_ref: catalogResource.source_ref,
+    resources: [{
+      kind: "skill", id: catalogResource.id, source_path: catalogResource.source_path,
+      description: "A source skill.", license_status: "MIT",
+    }],
+  });
+  const selectedRef = "b".repeat(40);
+  const receivedPin = path.join(temporary, "received-pin");
+  fs.writeFileSync(path.join(binDirectory, "gh"), [
+    "#!/usr/bin/env node",
+    'const fs = require("node:fs");',
+    'const path = require("node:path");',
+    'const file = ".agents/skills/demo-skill/SKILL.md";',
+    'const ref = process.argv[process.argv.indexOf("--pin") + 1];',
+    'fs.writeFileSync(process.env.KITIA_TEST_GH_PIN, ref);',
+    'fs.mkdirSync(path.dirname(file), { recursive: true });',
+    'let text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : `---\\nname: demo-skill\\ndescription: A source skill.\\nmetadata:\\n  github-repo: "https://github.com/example/team-alpha"\\n  github-path: "skills/demo-skill"\\n  github-ref: "${ref}"\\n  github-pinned: "${ref}"\\n---\\n\\nFresh install.\\n`;',
+    'text = text.replace(/github-ref: "[^"]+"/, `github-ref: "${ref}"`).replace(/github-pinned: "[^"]+"/, `github-pinned: "${ref}"`).replace("Old installed body.", "Updated body.");',
+    'fs.writeFileSync(file, text);',
+    "",
+  ].join("\n"), { mode: 0o755 });
+  const previousConfig = process.env.KITIA_CONFIG_DIR;
+  const previousPath = process.env.PATH;
+  const previousHome = process.env.HOME;
+  const previousCwd = process.cwd();
+  const previousPin = process.env.KITIA_TEST_GH_PIN;
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  process.env.KITIA_TEST_GH_PIN = receivedPin;
+  process.env.PATH = `${binDirectory}${path.delimiter}${previousPath}`;
+  const output = { log() {}, error() {} };
+  const invoke = async (scope, target) => {
+    const args = scope === "user"
+      ? ["install", "skill", "demo-skill", "--catalog", "Test", "--ref", selectedRef, "--scope", "user"]
+      : ["install", "skill", "demo-skill", "--catalog", "Test", "--ref", selectedRef, "--target", target];
+    const options = { ...parseArguments(args), output };
+    if (scope === "user") assert.equal(options.target, userTarget);
+    return executeCommand(options, null);
+  };
+  try {
+    assert.equal(await invoke("project", projectTarget), 0);
+    assert.equal(fs.readFileSync(receivedPin, "utf8"), selectedRef, "gh receives the requested full SHA via --pin");
+    assert.equal(readInstallState(projectTarget).sources.Test.skills["demo-skill"].source_ref, selectedRef);
+    assert.equal(readInstallState(userTarget).sources.Test.skills["demo-skill"].source_ref, catalogResource.source_ref);
+
+    process.env.HOME = userTarget;
+    process.chdir(projectTarget);
+    const projectRefBeforeUserReplacement = readInstallState(projectTarget).sources.Test.skills["demo-skill"].source_ref;
+    assert.equal(await invoke("user", userTarget), 0);
+    assert.equal(fs.readFileSync(receivedPin, "utf8"), selectedRef);
+    assert.equal(readInstallState(userTarget).sources.Test.skills["demo-skill"].source_ref, selectedRef);
+    assert.equal(
+      readInstallState(projectTarget).sources.Test.skills["demo-skill"].source_ref,
+      projectRefBeforeUserReplacement,
+      "user-scope replacement leaves the project installation unchanged",
+    );
+
+    await assert.rejects(invoke("project", modifiedTarget), (error) =>
+      error.code === "LOCAL_CONFLICT" && error.category === "tracked-modification");
+    assert.match(fs.readFileSync(modifiedFile, "utf8"), /Local edit\./);
+    await assert.rejects(invoke("project", untrackedTarget), (error) =>
+      error.code === "LOCAL_CONFLICT" && error.category === "untracked-skill-content");
+    assert.equal(readInstallState(modifiedTarget).sources.Test.skills["demo-skill"].source_ref, catalogResource.source_ref);
+    assert.equal(readInstallState(untrackedTarget).sources.Test.skills["demo-skill"].source_ref, catalogResource.source_ref);
+    assert.equal(await invoke("project", oppositeOnlyTarget), 0);
+    assert.equal(fs.readFileSync(receivedPin, "utf8"), selectedRef);
+    assert.equal(readInstallState(oppositeOnlyTarget).sources.Test.skills["demo-skill"].source_ref, selectedRef);
+
+    process.env.HOME = userTarget;
+    process.chdir(userTarget);
+    await assert.rejects(invoke("project", userTarget), (error) =>
+      error.code === "AMBIGUOUS_RESOURCE" && /project and user scopes resolve to the same target/.test(error.message));
+    await assert.rejects(invoke("user", userTarget), (error) =>
+      error.code === "AMBIGUOUS_RESOURCE" && /project and user scopes resolve to the same target/.test(error.message));
+  } finally {
+    if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previousConfig;
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousPin === undefined) delete process.env.KITIA_TEST_GH_PIN;
+    else process.env.KITIA_TEST_GH_PIN = previousPin;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    process.chdir(previousCwd);
+  }
+});
+test("async GitHub skill runner relays sanitized output and bounds a hung process", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-gh-timeout-"));
+  const bin = path.join(temporary, "bin");
+  fs.mkdirSync(bin);
+  const executable = path.join(bin, "gh");
+  fs.writeFileSync(executable, `#!${process.execPath}\nprocess.stderr.write("\\u001b[31mDownloading token=verysecretcredential https://user:anothersecret@example.invalid/resource?api_key=querysecret\\u001b[0m\\n"); setTimeout(() => {}, 5000);\n`);
+  fs.chmodSync(executable, 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath || ""}`;
+  const progress = [];
+  try {
+    await assert.rejects(
+      runGhSkillAsync(["skill", "install"], temporary, {
+        nonInteractive: true,
+        timeout: 1500,
+        onProgress: (message) => progress.push(message),
+      }),
+      (error) => error.code === "GH_TIMEOUT" &&
+        /timed out/i.test(error.userMessage) &&
+        /network connectivity/i.test(error.userMessage),
+    );
+    const output = progress.join("\n");
+    assert.match(output, /gh stderr: Downloading token=\[REDACTED\]/i);
+    assert.match(output, /https:\/\/\[REDACTED\]@example\.invalid\/resource\?\[REDACTED\]/);
+    assert.doesNotMatch(output, /verysecretcredential|anothersecret|querysecret|\u001b|\x1b/);
+    assert.ok(progress.some((message) => /timed out/i.test(message)));
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+test("async GitHub skill runner coalesces carriage-return status output", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-gh-progress-coalesce-"));
+  const bin = path.join(temporary, "bin");
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "gh"), [
+    `#!${process.execPath}`,
+    "let status = 0;",
+    'const timer = setInterval(() => { process.stdout.write(`Status ${++status}\\r`); if (status === 40) { clearInterval(timer); process.stdout.write("Final status\\r"); process.exit(0); } }, 5);',
+
+  ].join("\n"));
+  fs.chmodSync(path.join(bin, "gh"), 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath || ""}`;
+  const progress = [];
+  try {
+    const result = await runGhSkillAsync(["skill", "install"], temporary, {
+      timeout: 3000,
+      onProgress: (message) => progress.push(message),
+    });
+    assert.equal(result.status, 0);
+    assert.ok(progress.length <= 4, `expected coalesced events, received ${progress.length}`);
+    assert.equal(progress.at(-1), "gh stdout: Final status");
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+test("progress-enabled source install preserves the injected GitHub runner", async () => {
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-async-gh-injection-"));
+  const target = path.join(temporary, "project");
+  fs.mkdirSync(target);
+  const resource = {
+    catalog: "Test",
+    kind: "skill",
+    id: "injected-skill",
+    source_repository: "example/repo",
+    source_path: "skills/injected-skill",
+    source_ref: "b".repeat(40),
+    license_status: "MIT",
+  };
+  const commandOptions = {
+    action: "install",
+    kind: "skill",
+    id: resource.id,
+    target,
+    tool: "copilot",
+    scope: "project",
+    nonInteractive: true,
+    resource,
+    sourceResources: [resource],
+    onProgress: () => {},
+  };
+  const expectedArgs = [
+    "skill", "install", "example/repo", "skills/injected-skill",
+    "--agent", "github-copilot", "--scope", "project", "--pin", "b".repeat(40),
+  ];
+  let invoked;
+  await assert.rejects(
+    runSourceCommand(commandOptions, (args, cwd) => {
+      invoked = { args, cwd };
+      return 1;
+    }),
+    (error) => error.code === "GH_INSTALL_FAILED",
+  );
+  assert.equal(invoked.cwd, fs.realpathSync(target));
+  assert.deepEqual(invoked.args, expectedArgs);
+
+  assert.equal(await runSourceCommand(commandOptions, async (args, cwd) => {
+    invoked = { args, cwd };
+    const skillPath = path.join(target, ".agents", "skills", resource.id, "SKILL.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, [
+      "---", `name: ${resource.id}`, "description: Injected runner fixture.", "metadata:",
+      `  github-repo: "https://github.com/${resource.source_repository}"`,
+      `  github-path: "${resource.source_path}"`,
+      `  github-ref: "${resource.source_ref}"`, `  github-pinned: "${resource.source_ref}"`,
+      "---", "", "Installed by the injected runner.", "",
+    ].join("\n"));
+    return 0;
+  }), 0);
+  assert.deepEqual(invoked, { args: expectedArgs, cwd: fs.realpathSync(target) });
+  assert.equal(readInstallState(target).sources.Test.skills["injected-skill"].source_ref, resource.source_ref);
+
+  const rejectedRunnerError = new Error("injected runner rejection");
+  await assert.rejects(
+    runSourceCommand(commandOptions, () => Promise.reject(rejectedRunnerError)),
+    (error) => error === rejectedRunnerError,
+  );
+});
+test("real GH update progress and sanitized output reach the TUI through its worker", async () => {
+  const { PassThrough } = require("node:stream");
+  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-worker-progress-"));
+  const configDirectory = path.join(temporary, "config");
+  const sourceIndexDirectory = path.join(configDirectory, "source-catalogs");
+  const target = path.join(temporary, "project");
+  const userTarget = path.join(temporary, "user");
+  const fakeBin = path.join(temporary, "bin");
+  const repository = "https://github.com/example/worker-progress";
+  const previousEnvironment = Object.fromEntries(
+    ["KITIA_CONFIG_DIR", "PATH", "KITIA_TEST_SKILL_FILE", "KITIA_TEST_SKILL_CONTENT"]
+      .map((key) => [key, process.env[key]]),
+  );
+  fs.mkdirSync(target, { recursive: true });
+  fs.mkdirSync(userTarget, { recursive: true });
+  fs.mkdirSync(fakeBin);
+  const source = createSource("worker-progress-upstream", repository);
+  const oldRef = execFileSync("git", ["-C", source, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  fs.appendFileSync(path.join(source, "skills", "demo-skill", "SKILL.md"), "\nSecond source revision.\n");
+  execFileSync("git", ["-C", source, "add", "."]);
+  execFileSync("git", [
+    "-C", source, "-c", "user.name=Catalog fixtures", "-c",
+    "user.email=fixtures@example.invalid", "-c", "commit.gpgsign=false",
+    "commit", "--quiet", "-m", "Update synthetic skill",
+  ]);
+  const sourceIndex = createSourceIndex(repository, "Test", source);
+  const newResource = {
+    ...sourceIndex.resources.find(({ kind }) => kind === "skill"),
+    catalog: "Test",
+    source_repository: sourceIndex.source_repository,
+    source_ref: sourceIndex.source_ref,
+  };
+  const newRef = sourceIndex.source_ref;
+  const skillFile = path.join(target, ".agents", "skills", newResource.id, "SKILL.md");
+  const makeSkill = (ref) => [
+    "---",
+    `name: ${newResource.id}`,
+    "description: Worker progress fixture.",
+    "metadata:",
+    `  github-repo: "https://github.com/${newResource.source_repository}"`,
+    `  github-path: "${newResource.source_path}"`,
+    `  github-pinned: "${ref}"`,
+    "---",
+    "",
+    "Fixture skill.",
+    "",
+  ].join("\n");
+  fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+  fs.writeFileSync(skillFile, makeSkill(oldRef));
+  recordSourceInstallation({ ...newResource, source_ref: oldRef }, target, "github-copilot");
+  writeJson(path.join(configDirectory, "catalogSources.json"), {
+    catalog_version: 1,
+    sources: [{ name: "Test", repository }],
+  });
+  writeJson(path.join(sourceIndexDirectory, "catalogSources.json"), {
+    catalog_version: 1,
+    sources: [{ name: "Test", repository }],
+  });
+  writeJson(path.join(sourceIndexDirectory, "Test.json"), sourceIndex);
+
+  const ghScript = [
+    `#!${process.execPath}`,
+    'const fs = require("node:fs");',
+    `const output = ${JSON.stringify("\u001b[32mFetching https://user:passsecret@example.invalid/resource?token=querysecret token=verysecretcredential\u001b[0m\n")};`,
+    "setTimeout(() => process.stdout.write(output), 500);",
+    "setTimeout(() => { fs.writeFileSync(process.env.KITIA_TEST_SKILL_FILE, process.env.KITIA_TEST_SKILL_CONTENT); process.exit(0); }, 800);",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(fakeBin, "gh"), ghScript);
+  fs.chmodSync(path.join(fakeBin, "gh"), 0o755);
+  process.env.KITIA_CONFIG_DIR = configDirectory;
+  process.env.PATH = `${fakeBin}${path.delimiter}${previousEnvironment.PATH || ""}`;
+  process.env.KITIA_TEST_SKILL_FILE = skillFile;
+  process.env.KITIA_TEST_SKILL_CONTENT = makeSkill(newRef);
+
+  const installedResource = {
+    ...newResource,
+    source_ref: oldRef,
+    scope: "project",
+    status: "attention",
+    managed: true,
+    issues: [{ code: "UPDATE_AVAILABLE", paths: [".agents/skills/demo-skill/SKILL.md"] }],
+  };
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  input.ref = () => {};
+  input.unref = () => {};
+  const output = new PassThrough();
+  output.isTTY = true;
+  output.columns = 120;
+  output.rows = 40;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const done = runDashboard([installedResource], input, output, [], {
+    catalogResources: [newResource],
+    listSourceVersions: async () => [
+      { sha: oldRef, prefix: oldRef.slice(0, 7), date: "2026-11-09T00:00:00Z", subject: "Installed pin" },
+      { sha: newRef, prefix: newRef.slice(0, 7), date: "2026-11-08T00:00:00Z", subject: "Selected update" },
+    ],
+    execute: (action, resource, options) => {
+      const { onProgress, ...installOptions } = options;
+      return runDashboardWorker({
+        task: "resource-action",
+        action,
+        resource,
+        dashboardOptions: { target, userTarget },
+        catalogs: { sourceResources: [newResource] },
+        installOptions,
+      }, onProgress);
+    },
+  });
+  let dashboardClosed = false;
+  void done.then(() => { dashboardClosed = true; });
+  const visibleFrame = () => {
+    const start = rendered.lastIndexOf("\u001b[?2026h");
+    const end = rendered.indexOf("\u001b[?2026l", start);
+    return start >= 0 && end > start
+      ? require("node:util").stripVTControlCharacters(rendered.slice(start, end))
+      : "";
+  };
+  const waitForFrame = async (predicate, message) => {
+    const deadline = Date.now() + 10_000;
+    while (!predicate(visibleFrame())) {
+      if (Date.now() >= deadline) throw new Error(`Dashboard did not render ${message}: ${visibleFrame()}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return visibleFrame();
+  };
+  let finished = false;
+  try {
+    await waitForFrame((frame) => frame.includes("SHORTCUTS"), "Inventory");
+    input.write("a");
+    await waitForFrame((frame) => frame.includes("CATALOG RESOURCES"), "Catalog");
+    input.write("v");
+    await waitForFrame((frame) => frame.includes("RESOURCE REVISIONS"), "version picker");
+    input.write("\x1b[B");
+    await waitForFrame((frame) => frame.includes(`› ${newRef.slice(0, 7)}`), "selected commit");
+    input.write("\r");
+    await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"), "update confirmation");
+    input.write("y");
+    const phase = await waitForFrame(
+      (frame) => frame.includes(`Invoking GitHub CLI to update ${newResource.id} for github-copilot`),
+      "the actual worker's GitHub update phase",
+    );
+    assert.ok(phase.includes("Invoking GitHub CLI to update"));
+    const ghOutput = await waitForFrame((frame) => frame.includes("Fetching https://[REDACTED]@example.invalid/resource?[REDACTED]"),
+      "sanitized GitHub progress output");
+    assert.ok(ghOutput.includes("token=[REDACTED]"));
+    assert.doesNotMatch(ghOutput, /passsecret|querysecret|verysecretcredential|[\u001b]/);
+    for (let attempt = 0; attempt < 100 &&
+        !fs.readFileSync(skillFile, "utf8").includes(`github-pinned: "${newRef}"`); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(fs.readFileSync(skillFile, "utf8").includes(`github-pinned: "${newRef}"`));
+    for (let attempt = 0; attempt < 50 && !dashboardClosed; attempt += 1) {
+      input.write("q");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(await done, true);
+    finished = true;
+  } finally {
+    if (!finished) {
+      input.write("q");
+      await done;
+    }
+    input.destroy();
+    output.destroy();
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

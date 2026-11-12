@@ -30,7 +30,10 @@ function refreshDashboardCatalogs() {
 
 async function execute(data) {
   if (data.task === "resource-action") {
-    const handler = createDashboardActionHandler((options, report) => executeCommand(options, report));
+    const handler = createDashboardActionHandler(
+      (options, report) => executeCommand(options, report),
+      (message) => parentPort?.postMessage({ progress: message }),
+    );
     return handler(
       data.action,
       data.resource,

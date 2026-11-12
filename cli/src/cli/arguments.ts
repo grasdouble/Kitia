@@ -38,6 +38,7 @@ export interface CliOptions {
   onAction?: (action: PlanAction) => void;
   captureOutput?: boolean;
   onResource?: (resource: { catalog: string; kind: string; id: string; status?: string; source?: boolean }) => void;
+  onProgress?: (message: string) => void;
 }
 const os = require("node:os");
 const path = require("node:path");

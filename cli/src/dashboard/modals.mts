@@ -159,7 +159,12 @@ export function optionsModal({
     ...(scopeError
       ? [{ text: `${scope.toUpperCase()} unavailable: ${scopeError.code}`, color: semantic.accents.error }]
       : alreadyInstalled
-        ? [{ text: `Already installed in ${scope} scope.`, color: semantic.inventoryStatus.attention }]
+        ? [{
+          text: ref
+            ? `Selected revision will replace the installed resource in ${scope} scope.`
+            : `Already installed in ${scope} scope.`,
+          color: semantic.inventoryStatus.attention,
+        }]
         : []),
     ...(resource.kind === "instruction"
       ? [{ text: "Instructions are project-scoped.", dimColor: true }]
@@ -170,9 +175,11 @@ export function optionsModal({
     choiceGroup("CLIENT", toolChoices, toolChoices.indexOf(tool), focus === 1),
     ...(ref ? [{ text: `Selected commit: ${ref}. The catalog pin remains unchanged.`, color: semantic.selected }] : []),
     { text: "Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.", color: semantic.accents.warning },
-    scopeError || alreadyInstalled
+    scopeError || (alreadyInstalled && !ref)
       ? "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ESC BACK"
-      : "↑↓ FIELD · ←→ CHOOSE · ENTER REVIEW · ESC BACK",
+      : alreadyInstalled
+        ? "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REPLACE · ESC BACK"
+        : "↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REVIEW · ESC BACK"
   ], columns, semantic.selected);
 }
 
@@ -219,11 +226,13 @@ export function confirmationModal({
       ? `Conflict detected while updating ${confirmation.resource.kind}:${confirmation.resource.id}${targetContext ? ` (${targetContext})` : ""}. Force update and retry?`
       : confirmation.action === "install"
         ? `Install ${confirmation.resource.kind}:${confirmation.resource.id}?`
-        : confirmation.action === "remove-unmanaged"
-          ? permanentRemoval
-            ? `Permanently remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
-            : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
-          : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
+        : confirmation.action === "update" && confirmation.ref
+          ? `Replace the installed ${confirmation.resource.kind}:${confirmation.resource.id} with the selected revision in ${confirmation.resource.scope} scope?`
+          : confirmation.action === "remove-unmanaged"
+            ? permanentRemoval
+              ? `Permanently remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
+              : `Remove unmanaged ${confirmation.resource.kind}:${confirmation.resource.id}?`
+            : `${actionLabel} ${confirmation.resource.kind}:${confirmation.resource.id} from ${confirmation.resource.scope}?`;
   const removalWarning = permanentRemoval
     ? `This artifact is not managed by a Kitia catalog. This action is irreversible; ${
       confirmation.resource.kind === "skill" ? "all data in its skill directory" : "the artifact file"

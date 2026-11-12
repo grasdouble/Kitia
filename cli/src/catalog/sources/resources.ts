@@ -18,7 +18,7 @@ const {
   recordSourceResourceInstallation,
 } = require("./installed.js");
 const {
-  buildSourceSkillArgs, runGhSkill, formatGhDiagnostics, describeGhFailure,
+  buildSourceSkillArgs, runGhSkill, runGhSkillAsync, formatGhDiagnostics, describeGhFailure,
 } = require("./gh-skill.js");
 import type { GhSkillResult } from "./gh-skill.js";
 import type { CatalogResource } from "../entries.js";
@@ -93,13 +93,14 @@ function installSourceFileResource(
   target: string,
   tool: string,
   {
-    scope = "project", force = false, dryRun = false, onAction = () => {},
+    scope = "project", force = false, dryRun = false, onAction = () => {}, onProgress = () => {},
     destinations: requestedDestinations,
   }: {
     scope?: string;
     force?: boolean;
     dryRun?: boolean;
     onAction?: (action: PlanAction) => void;
+    onProgress?: (message: string) => void;
     destinations?: string[];
   } = {},
 ): string[] {
@@ -107,6 +108,7 @@ function installSourceFileResource(
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new CatalogError(`Target must be an existing directory: ${target}`);
   const targetRoot = fs.realpathSync(target);
   const destinations = requestedDestinations || sourceFileDestinations(resource, tool, scope);
+  if (!dryRun) onProgress(`Retrieving pinned ${resource.kind} ${resource.id} from GitHub...`);
   const content = dryRun ? null : readPinnedSourceFile(resource);
   const plan = new Map<string, InstallPlanEntry>();
   const previous = readInstallState(targetRoot).sources?.[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id];
@@ -135,6 +137,7 @@ function installSourceFileResource(
     });
   }
   if (dryRun) return destinations;
+  onProgress("Updating installed files...");
   writeInstallPlan(plan, targetRoot, { force });
   recordSourceResourceInstallation(resource, targetRoot, destinations);
   return destinations;
@@ -248,11 +251,13 @@ function updateSourceFileResources(
     dryRun = false,
     force = false,
     onAction = () => {},
+    onProgress = () => {},
     scope = "project",
   }: {
     dryRun?: boolean;
     force?: boolean;
     onAction?: (action: PlanAction) => void;
+    onProgress?: (message: string) => void;
     scope?: string;
   } = {},
 ): string[] {
@@ -276,8 +281,9 @@ function updateSourceFileResources(
       });
       messages.push(`Would update ${catalogLabel(resource)} ${resource.kind}: ${resource.id}`);
     } else {
+      onProgress(`Updating files for ${resource.id}...`);
       installSourceFileResource(resource, targetRoot, "both", {
-        scope, force, destinations: stale.map((item) => item.path), onAction,
+        scope, force, destinations: stale.map((item) => item.path), onAction, onProgress,
       });
       messages.push(`Updated ${catalogLabel(resource)} ${resource.kind}: ${resource.id}`);
     }
@@ -410,6 +416,104 @@ function updateSourceResources(
   if (!hasUpdates && installed.length) {
     messages.push("No source skill updates available.");
   }
+  return messages;
+}
+
+async function updateSourceResourcesAsync(
+  installed: InstalledSourceResource[],
+  target: string,
+  {
+    dryRun = false,
+    force = false,
+    ghForce = false,
+    ghForceAgent,
+    onAction = () => {},
+    onProgress = () => {},
+    nonInteractive = true,
+    scope = "project",
+  }: {
+    dryRun?: boolean;
+    force?: boolean;
+    ghForce?: boolean;
+    ghForceAgent?: string;
+    onAction?: (action: PlanAction) => void;
+    onProgress?: (message: string) => void;
+    nonInteractive?: boolean;
+    scope?: string;
+  } = {},
+): Promise<string[]> {
+  onProgress("Validating installed resource and local file state...");
+  const targetRoot = fs.realpathSync(target);
+  if (ghForce && !ghForceAgent) {
+    throw new CatalogError("A GitHub force retry must identify the failed agent.", "INVALID_ARGUMENT");
+  }
+  validateSourceUpdates(installed, { force, target: targetRoot, scope });
+  const fileResources = installed.filter(({ resource }) => resource.kind !== "skill");
+  const messages = updateSourceFileResources(fileResources, target, {
+    dryRun, force, onAction, onProgress, scope,
+  });
+  const skills = installed.filter(({ resource }) => resource.kind === "skill");
+  const installOptions = { scope, target: targetRoot };
+  for (const { resource, installations } of skills) {
+    const stale = installations.filter((installation) =>
+      installation.missing || installation.modified ||
+      installation.ref?.toLowerCase() !== resource.source_ref.toLowerCase());
+    for (const installation of stale) {
+      if (dryRun) {
+        onAction({
+          action: "delegate_install", path: installation.path,
+          resource: { catalog: sourceCatalogName(resource), kind: "skill", id: resource.id },
+          command: { program: "gh", args: buildSourceSkillArgs("install", resource, installation.agent, {
+            ...installOptions, force: force || (ghForce && installation.agent === ghForceAgent),
+          }) },
+        });
+        continue;
+      }
+      onProgress(`Invoking GitHub CLI to update ${resource.id} for ${installation.agent}...`);
+      let result: GhSkillResult;
+      try {
+        result = await runGhSkillAsync(
+          buildSourceSkillArgs("install", resource, installation.agent, {
+            ...installOptions, force: force || (ghForce && installation.agent === ghForceAgent),
+          }),
+          targetRoot,
+          { nonInteractive, onProgress },
+        );
+      } catch (error) {
+        if ((error as Error & { code?: string }).code === "GH_SPAWN_FAILED") {
+          const userMessage = `Could not start GitHub CLI while updating ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}. Check that gh is installed and available on PATH.`;
+          throw new CatalogError(userMessage, "GH_SPAWN_FAILED", { category: "github-cli", userMessage });
+        }
+        throw error;
+      }
+      if (result.status !== 0) {
+        const diagnostic = formatGhDiagnostics(result);
+        const ghForceRequired = /^Skills already installed: [^\r\n]+ \(Use --force to overwrite\)$/im.test(diagnostic);
+        const cause = ghForceRequired
+          ? "GitHub CLI says this skill is already installed and requires --force to overwrite it."
+          : describeGhFailure(diagnostic);
+        const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}: gh exited with status ${result.status}. ${cause}`;
+        if (ghForceRequired) {
+          throw new CatalogError(
+            `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
+            "GH_FORCE_REQUIRED",
+            {
+              category: "github-force-required", recoverable: true, agent: installation.agent,
+              userMessage, technicalDetail: diagnostic || undefined,
+            },
+          );
+        }
+        throw new CatalogError(
+          `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
+          "GH_UPDATE_FAILED",
+          { category: "github-cli", userMessage, technicalDetail: diagnostic || undefined },
+        );
+      }
+      recordSourceInstallation(resource, targetRoot, installation.agent);
+      messages.push(`Updated ${catalogLabel(resource)} skill: ${resource.id}`);
+    }
+  }
+  onProgress("Resource update complete.");
   return messages;
 }
 
@@ -620,6 +724,6 @@ function uninstallSourceResource(
 
 module.exports = {
   assertSourceResourceCanBeInstalled, readPinnedSourceFile, catalogLabel,
-  installSourceFileResource, validateSourceUpdates, updateSourceResources,
+  installSourceFileResource, validateSourceUpdates, updateSourceResources, updateSourceResourcesAsync,
   uninstallSourceResource,
 };

@@ -28,6 +28,7 @@
     "cli/dist/cli/",
     "cli/dist/catalog/",
     "cli/dist/dashboard/",
+    "cli/dist/table-layout.js",
     "cli/bin/kitia.js",
     "cli/migrations/",
     "cli/schemas/",

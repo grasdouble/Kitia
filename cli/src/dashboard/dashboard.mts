@@ -110,7 +110,15 @@ export function Dashboard({
     execute?: (
       operation: string,
       resource: CatalogResource,
-      options: { scope?: string; tool?: string; force?: boolean; ref?: string },
+      options: {
+        scope?: string;
+        tool?: string;
+        force?: boolean;
+        ref?: string;
+        ghForce?: boolean;
+        ghForceAgent?: string;
+        onProgress?: (message: string) => void;
+      },
     ) => Promise<DashboardActionResult>;
     listSourceVersions?: (resource: CatalogResource) => SourceVersionOption[] | Promise<SourceVersionOption[]>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;
@@ -454,6 +462,7 @@ export function Dashboard({
         ...(requested.ghForceRetry
           ? { ghForce: true, ghForceAgent: requested.ghForceAgent }
           : {}),
+        onProgress: (message) => setActionMessage(message),
       });
       if (Array.isArray(result.resources)) setInstalledResources([...result.resources]);
       if (Array.isArray(result.errors)) setScanErrors([...result.errors]);
@@ -527,13 +536,25 @@ export function Dashboard({
           setConfirmationStage(1);
           setActionMessage("");
         } else {
-          setInstallResource(resource);
-          setInstallRef(ref);
-          setInstallScope("project");
-          setInstallTool("copilot");
-          setInstallFocus(0);
-          setScreenMode("install-options");
-          setActionMessage("");
+          const installedScopes = ["project", "user"].filter((scope) =>
+            installedResources.some((installed) =>
+              installed.scope === scope && installed.catalog === resource.catalog &&
+              installed.kind === resource.kind && installed.id === resource.id));
+          if (installedScopes.length === 1) {
+            const scope = installedScopes[0];
+            setConfirmation({ action: "update", resource: { ...resource, scope }, scope, ref });
+            setConfirmationChoice(1);
+            setConfirmationStage(1);
+            setActionMessage("");
+          } else {
+            setInstallResource(resource);
+            setInstallRef(ref);
+            setInstallScope("project");
+            setInstallTool("copilot");
+            setInstallFocus(0);
+            setScreenMode("install-options");
+            setActionMessage("");
+          }
         }
       }
       return;
@@ -1067,7 +1088,15 @@ export function Dashboard({
       } else if (character === "v") {
         const resource = visibleCatalog[activeCatalogIndex];
         if (resource?.source_repository && resource.source_path) {
-          openSourceVersions(resource);
+          const installedScopes = ["project", "user"].filter((scope) =>
+            installedResources.some((installed) =>
+              installed.scope === scope && installed.catalog === resource.catalog &&
+              installed.kind === resource.kind && installed.id === resource.id));
+          const replacementScope = installedScopes.length === 1 ? installedScopes[0] : null;
+          openSourceVersions(
+            replacementScope ? { ...resource, scope: replacementScope } : resource,
+            replacementScope ? "update" : "install",
+          );
         }
       } else if (character === "p") {
         const resource = visibleCatalog[activeCatalogIndex];
@@ -1106,15 +1135,16 @@ export function Dashboard({
           resource.scope === installScope && resource.catalog === installResource.catalog &&
           resource.kind === installResource.kind && resource.id === installResource.id);
         const scopeError = scanErrors.find((error) => error.scope === installScope);
-        if (!alreadyInstalled && !scopeError) {
+        if ((!alreadyInstalled || installRef) && !scopeError) {
+          const replacement = alreadyInstalled && Boolean(installRef);
           setConfirmation({
-            action: "install",
+            action: replacement ? "update" : "install",
             resource: { ...installResource, scope: installScope },
             scope: installScope,
             tool: installTool,
             ...(installRef ? { ref: installRef } : {}),
           });
-          setConfirmationChoice(0);
+          setConfirmationChoice(replacement ? 1 : 0);
         }
       }
       return;
@@ -1369,7 +1399,15 @@ export async function runDashboard(
     execute?: (
       operation: string,
       resource: CatalogResource,
-      options: { scope?: string; tool?: string; force?: boolean; ref?: string },
+      options: {
+        scope?: string;
+        tool?: string;
+        force?: boolean;
+        ref?: string;
+        ghForce?: boolean;
+        ghForceAgent?: string;
+        onProgress?: (message: string) => void;
+      },
     ) => Promise<DashboardActionResult>;
     listSourceVersions?: (resource: CatalogResource) => SourceVersionOption[] | Promise<SourceVersionOption[]>;
     addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;

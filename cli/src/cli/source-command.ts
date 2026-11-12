@@ -10,11 +10,11 @@ const {
   assertSourceResourceCanBeInstalled, readPinnedSourceFile, installSourceFileResource,
   catalogLabel,
 } = require("../catalog/sources/resources.js");
-const { buildSourceSkillArgs, runGhSkill } = require("../catalog/sources/gh-skill.js");
-const { auditTextResources } = require("../catalog/audit.js");
+const { buildSourceSkillArgs, runGhSkill, runGhSkillAsync, formatGhDiagnostics, describeGhFailure } = require("../catalog/sources/gh-skill.js");
 import type { CatalogResource } from "../catalog/entries.js";
 import type { CliOptions } from "./arguments.js";
 import type { GhSkillResult } from "../catalog/sources/gh-skill.js";
+const { auditTextResources } = require("../catalog/audit.js");
 function formatSourceResource(resource: CatalogResource): string {
   return [
     `id: ${resource.id}`,
@@ -59,7 +59,8 @@ function auditPinnedResource(
 function runSourceCommand(
   options: CliOptions,
   invokeGhSkill?: (args: string[], cwd: string) => number | GhSkillResult,
-): number {
+): number | Promise<number> {
+  const injectedInvokeGhSkill = invokeGhSkill;
   invokeGhSkill ||= (args, cwd) => runGhSkill(args, cwd, undefined, {
     nonInteractive: options.nonInteractive,
     captureOutput: options.captureOutput,
@@ -83,6 +84,7 @@ function runSourceCommand(
 
   options.onResource?.({ catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id, status: "planned", source: true });
 
+  if (options.action === "install") options.onProgress?.("Validating resource and installation target...");
   let target = process.cwd();
   if (options.action === "install") {
     if (!fs.existsSync(options.target) || !fs.statSync(options.target).isDirectory()) {
@@ -127,6 +129,7 @@ function runSourceCommand(
       force: Boolean(options.force),
       dryRun: Boolean(options.dryRun),
       onAction: options.onAction,
+      onProgress: options.onProgress,
     });
     output.log(`${options.dryRun ? "Would install" : "Installed"} ${catalogLabel(resource)} ${resource.kind}: ${resource.id}${options.dryRun ? ` at ${resource.source_ref}` : ""} (${paths.join(", ")})`);
     return 0;
@@ -159,6 +162,36 @@ function runSourceCommand(
     return typeof result === "number" ? result : result.status;
   }
 
+  if (options.onProgress) {
+    return (async () => {
+      const completed = [];
+      for (const agent of agents) {
+        const args = buildSourceSkillArgs("install", resource, agent, options);
+        const result = injectedInvokeGhSkill
+          ? await injectedInvokeGhSkill(args, target)
+          : await runGhSkillAsync(
+            args,
+            target,
+            { nonInteractive: options.nonInteractive, onProgress: options.onProgress },
+          );
+        const status = typeof result === "number" ? result : result.status;
+        if (status !== 0) {
+          const diagnostic = typeof result === "number" ? "" : formatGhDiagnostics(result);
+          const cause = describeGhFailure(diagnostic);
+          const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${agent}: gh exited with status ${status}. ${cause}`;
+          throw new CatalogError(
+            `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
+            "GH_INSTALL_FAILED",
+            { category: "github-cli", userMessage, technicalDetail: diagnostic || undefined },
+          );
+        }
+        recordSourceInstallation(resource, target, agent);
+        completed.push(agent);
+      }
+      options.onProgress?.(`Installed ${catalogLabel(resource)} skill ${resource.id} for ${completed.join(", ")}.`);
+      return 0;
+    })();
+  }
   const completed = [];
   for (const agent of agents) {
     const result = invokeGhSkill(buildSourceSkillArgs("install", resource, agent, options), target);

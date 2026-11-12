@@ -26,18 +26,23 @@ const { catalogEntries, listCatalogResources, formatDashboardRows } = require(".
 const { parseArguments, printHelp } = require("./arguments.js");
 const { readInstalledSourceSkills, readInstalledSourceResources } = sourceInventoryApi;
 const { runSourceCommand, formatSourceResource } = sourceCommandApi;
-const { validateSourceUpdates, updateSourceResources, uninstallSourceResource } = sourceResourcesApi;
+const { validateSourceUpdates, updateSourceResources, updateSourceResourcesAsync, uninstallSourceResource } = sourceResourcesApi;
 const { checkInstalledResources, collectInstalledScopes } = lifecycleApi;
 const {
   formatCatalogTable, resolveCatalogResource, selectCatalogResource,
   renderInstalledResources, browseInstalledResources, colorize,
 } = terminalApi;
 
-function runDashboardWorker(data) {
+function runDashboardWorker(data, onProgress: (message: string) => void = () => {}) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, "dashboard-worker.js"), { workerData: data });
     let settled = false;
-    worker.once("message", (message) => {
+    worker.on("message", (message) => {
+      if (typeof message?.progress === "string") {
+        onProgress(message.progress);
+        return;
+      }
+      if (settled) return;
       settled = true;
       if (message.ok) {
         resolve(message.result);
@@ -260,18 +265,20 @@ async function executeCommand(options, report) {
         refreshCatalog: (name) => runDashboardWorker({ task: "catalog-refresh", name }),
         transferCatalogs: (action, content) =>
           runDashboardWorker({ task: "catalog-transfer", action, content }),
-        execute: (operation, resource, installOptions) => runDashboardWorker({
-          task: "resource-action",
-          action: operation,
-          resource,
-          dashboardOptions: {
-            target: options.target,
-            userTarget: os.homedir(),
-
-          },
-          catalogs: { sourceResources, warnings: catalogWarnings },
-          installOptions,
-        }),
+        execute: (operation, resource, installOptions) => {
+          const { onProgress, ...workerOptions } = installOptions;
+          return runDashboardWorker({
+            task: "resource-action",
+            action: operation,
+            resource,
+            dashboardOptions: {
+              target: options.target,
+              userTarget: os.homedir(),
+            },
+            catalogs: { sourceResources, warnings: catalogWarnings },
+            installOptions: workerOptions,
+          }, onProgress);
+        },
         listSourceVersions: async (resource) => {
           const versions = await sourceHistoryApi.listSourceVersionsAsync(resource);
           const prefixes = sourceHistoryApi.uniqueSourceVersionPrefixes(versions);
@@ -337,7 +344,10 @@ async function executeCommand(options, report) {
     for (const resource of sourceToUpdateResources) {
       options.onResource?.({ catalog: resource.catalog || "source", kind: resource.kind, id: resource.id, status: "planned", source: true });
     }
-    for (const message of updateSourceResources(sourceToUpdate, target, options)) output.log(message);
+    const messages = options.onProgress
+      ? await updateSourceResourcesAsync(sourceToUpdate, target, options)
+      : updateSourceResources(sourceToUpdate, target, options);
+    for (const message of messages) output.log(message);
     return 0;
   }
   if (["show", "preview", "install"].includes(options.command)) {
@@ -354,12 +364,50 @@ async function executeCommand(options, report) {
       throw new CatalogError("--scope user supports source skills and agents; instructions are project-only", "INVALID_ARGUMENT");
     }
     if (options.ref) {
+      const target = fs.realpathSync(options.target);
       if (!resource.source_repository || !resource.source_path) {
         throw new CatalogError("--ref supports only GitHub source resources.");
       }
+      const selectedResource = {
+        ...resource,
+        source_ref: resolveListedSourceRef(resource, options.ref),
+      };
+      const projectTarget = options.scope === "user" ? fs.realpathSync(process.cwd()) : target;
+      const userTarget = fs.realpathSync(os.homedir());
+      const targetRootsOverlap = projectTarget === userTarget;
+      const matchingInstalled = [
+        ...readInstalledSourceSkills(target, sourceResources, { catalog: options.catalog }),
+        ...readInstalledSourceResources(target, sourceResources, { catalog: options.catalog }),
+      ].filter(({ resource: current }) =>
+        current.catalog === resource.catalog && current.kind === resource.kind && current.id === resource.id &&
+        current.source_repository === resource.source_repository && current.source_path === resource.source_path);
+      if (targetRootsOverlap && matchingInstalled.length) {
+        throw new CatalogError(
+          `Cannot safely replace ${resource.catalog}:${resource.kind}:${resource.id}: project and user scopes resolve to the same target (${target}), and the install record does not distinguish them.`,
+          "AMBIGUOUS_RESOURCE",
+        );
+      }
+      if (matchingInstalled.length > 1) {
+        throw new CatalogError(
+          `Multiple tracked installations found for ${resource.catalog}:${resource.kind}:${resource.id} in ${options.scope || "project"} scope.`,
+          "AMBIGUOUS_RESOURCE",
+        );
+      }
+      if (matchingInstalled.length === 1) {
+        const replacement = {
+          ...matchingInstalled[0],
+          resource: { ...matchingInstalled[0].resource, ...selectedResource },
+        };
+        validateSourceUpdates([replacement], { ...options, target });
+        const messages = options.onProgress
+          ? await updateSourceResourcesAsync([replacement], target, options)
+          : updateSourceResources([replacement], target, options);
+        for (const message of messages) output.log(message);
+        return 0;
+      }
       return runSourceCommand({
         ...options, action: "install", id: resource.id,
-        resource: { ...resource, source_ref: resolveListedSourceRef(resource, options.ref) },
+        resource: selectedResource,
       });
     }
     return runSourceCommand({ ...options, action: "install", id: resource.id, resource });
