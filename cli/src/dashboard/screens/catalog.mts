@@ -9,7 +9,8 @@ import {
   catalogTableColumns, detailPanelLayout, filterCatalogResources, fitText, inventoryCatalogLabels, tableLine, wrapText,
 } from "../helpers.mjs";
 import {
-  DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailValue, wrappedShortcutLines,
+  categorizedShortcutLines, DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailValue,
+  wrappedShortcutLines,
 } from "./shared.mjs";
 
 const h = React.createElement;
@@ -89,25 +90,35 @@ export function CatalogScreen({
         : []),
     ]
     : [];
+  const compactDetails = rows < 40;
   const entryContent = selected
-    ? detailRows.flatMap((row, index) =>
-      detailField(`catalog-entry-${index}`, row.label, row.value, detailsContentWidth, row.maxLines))
+    ? detailRows.flatMap((row, index) => compactDetails
+      ? detailValue(
+        `catalog-entry-${index}`,
+        row.label ? `${row.label}: ${row.value}` : row.value,
+        detailsContentWidth,
+        row.maxLines,
+      )
+      : detailField(`catalog-entry-${index}`, row.label, row.value, detailsContentWidth, row.maxLines))
     : detailValue("catalog-entry-empty", "No matching catalog resources.", detailsContentWidth);
   const filterLines = wrapText(
     `Filter ${filterMode ? `${query}▏` : query || "(F to filter)"} · Catalog ${catalogFilter.toUpperCase()} · Kind ${kindFilter.toUpperCase()} · License ${licenseFilter.toUpperCase()}`,
     contentWidth,
   );
   const tableOverhead = 13 + filterLines.length;
-  const catalogShortcutLines = modalActive ? [] : screenName === "INSTALL OPTIONS"
+  const catalogShortcutLines = modalActive || screenName === "INSTALL OPTIONS"
     ? []
     : filterMode
-      ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
-      : [
-        "F filter · C catalog · K kind · L license",
-        "V revisions · P preview/audit · D details",
-        "↑↓ navigate · ENTER install · ESC back",
-        "? guide · Q quit",
-      ];
+      ? categorizedShortcutLines({
+        Filters: ["TYPE to search", "BACKSPACE edit", "ENTER apply", "ESC clear"],
+        Navigation: ["↑↓ navigate"],
+      })
+      : categorizedShortcutLines({
+        Actions: ["ENTER install", "V revisions", "P preview/audit"],
+        Filters: ["F filter", "C catalog", "K kind", "L license"],
+        Display: ["D details"],
+        Navigation: ["↑↓ navigate", "ESC back", "? guide", "Q quit"],
+      });
   const shortcutLines = catalogShortcutLines;
   const catalogShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
   const shortcutsPanelRows = modalActive || !shortcutLines.length

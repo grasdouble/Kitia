@@ -40,6 +40,7 @@ export const DASHBOARD_THEME = {
       detailPanel: "blue",
       muted: "gray",
       label: "white",
+      shortcutCategory: "magenta",
       warning: "yellow",
       success: "green",
       error: "redBright",

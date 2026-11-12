@@ -7,7 +7,7 @@ import type { ScanError } from "../catalog/lifecycle.js";
 import { adaptiveColumnWidths } from "../table-layout.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
 import { DASHBOARD_THEME } from "./colors.js";
-import { Panel, ShortcutsPanel, wrappedShortcutLines } from "./screens/shared.mjs";
+import { Panel, ShortcutsPanel, categorizedShortcutLines, wrappedShortcutLines } from "./screens/shared.mjs";
 
 export interface PendingDashboardAction {
   action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview";
@@ -46,6 +46,27 @@ function choiceGroup(label, choices, selectedIndex, focused = true) {
     selectedIndex,
     focused,
   };
+}
+
+function categorizeShortcutHint(hint: string) {
+  const groups: Record<"Actions" | "Filters" | "Display" | "Navigation", string[]> = {
+    Actions: [],
+    Filters: [],
+    Display: [],
+    Navigation: [],
+  };
+  for (const shortcut of hint.split(" · ")) {
+    const value = shortcut.toUpperCase();
+    const category = /FILTER|SEARCH|TYPE TO|BACKSPACE|APPLY|CLEAR/.test(value)
+      ? "Filters"
+      : /DETAILS|SHOW DETAILS|PANEL/.test(value)
+        ? "Display"
+        : /↑|↓|←|→|PGUP|PGDN|TAB|NAVIGATE|SELECT|CHOOSE|MOVE|GUIDE|QUIT|BACK|NEXT|FINISH|INVENTORY/.test(value)
+          ? "Navigation"
+          : "Actions";
+    groups[category].push(shortcut);
+  }
+  return categorizedShortcutLines(groups);
 }
 
 function selectableOption(label, selected) {
@@ -98,7 +119,7 @@ function modalFrame(title, content, columns, accent, maxWidth = 64, headerConten
       ...body,
       { text: `└${"─".repeat(width - 2)}┘`, color: accent, bold: true },
     ],
-    shortcuts: shortcutHint ? [shortcutHint.replaceAll(" | ", " · ")] : [],
+    shortcuts: shortcutHint ? categorizeShortcutHint(shortcutHint.replaceAll(" | ", " · ")) : [],
   };
 }
 
@@ -306,11 +327,16 @@ export function sourceVersionsModal({
   const width = Math.max(20, columns - 4);
   const lineWidth = width - 4;
   const shortcutHint = `↑↓ SELECT · ENTER ${action.toUpperCase()} · ESC BACK`;
-  const shortcutsRows = wrappedShortcutLines([shortcutHint], width).length + 4;
-  const rangeRows = wrapText(`Showing ${versions.length}-${versions.length} of ${versions.length} commits.`, lineWidth).length;
-  const instruction = `Select a commit to ${action}; the catalog pin remains unchanged.`;
+  const shortcutsRows = wrappedShortcutLines(categorizeShortcutHint(shortcutHint), width).length + 4;
+  const compactContext = rows <= 18;
+  const rangeRows = compactContext ? 0 : wrapText(
+    `Showing ${versions.length}-${versions.length} of ${versions.length} commits.`, lineWidth,
+  ).length;
+  const instruction = compactContext
+    ? ""
+    : `Select a commit to ${action}; the catalog pin remains unchanged.`;
   const resourceLabel = `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`;
-  const instructionRows = wrapText(instruction, lineWidth);
+  const instructionRows = instruction ? wrapText(instruction, lineWidth) : [];
   const contextBudget = rows - 4 - shortcutsRows - 1 - rangeRows - 1;
   const resourceRows = wrapText(resourceLabel, lineWidth);
   const context = [
@@ -348,7 +374,9 @@ export function sourceVersionsModal({
     shortcutHint,
   ], columns, semantic.selected, width, [
     ...context,
-    ...(versions.length > count ? [`Showing ${first + 1}-${first + count} of ${versions.length} commits.`] : []),
+    ...(!compactContext && versions.length > count
+      ? [`Showing ${first + 1}-${first + count} of ${versions.length} commits.`]
+      : []),
   ]);
 }
 

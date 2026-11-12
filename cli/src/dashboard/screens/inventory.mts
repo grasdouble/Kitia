@@ -11,7 +11,8 @@ import {
   issueLine, tableColumns, tableLine, fitText,
 } from "../helpers.mjs";
 import {
-  DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailLocations, detailValue, wrappedShortcutLines,
+  categorizedShortcutLines, DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailLocations,
+  detailValue, wrappedShortcutLines,
 } from "./shared.mjs";
 
 const h = React.createElement;
@@ -147,6 +148,7 @@ export function InventoryScreen({
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
   const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
   const compactDetails = rows < 40;
+  const inlineDetails = rows >= 40 && rows < 50;
   const largeScreenContext = selected && columns >= 112 && rows >= 50
     ? [
       ...(selected.category ? [{ label: "CATEGORY", value: selected.category, maxLines: 2 }] : []),
@@ -193,29 +195,48 @@ export function InventoryScreen({
         ...detailLocations("inventory-locations", locationValues, detailsContentWidth),
       ]
       : row.label
-        ? detailField(
-          `inventory-${index}`,
-          row.label,
-          row.value,
-          detailsContentWidth,
-          row.maxLines,
-          row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
-        )
+        ? inlineDetails && row.label !== "LOCATIONS"
+          ? wrapText(row.value, Math.max(1, detailsContentWidth - row.label.length - 1), row.maxLines)
+            .map((line, lineIndex) => h(Text, { key: `inventory-${index}-inline-${lineIndex}` },
+              h(Text, {
+                color: DASHBOARD_THEME.semantic.accents.label,
+                bold: true,
+              }, lineIndex === 0 ? `${row.label} ` : " ".repeat(row.label.length + 1)),
+              h(Text, {
+                color: row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
+              }, line)))
+          : detailField(
+            `inventory-${index}`,
+            row.label,
+            row.value,
+            detailsContentWidth,
+            row.maxLines,
+            row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
+          )
         : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
   const shortcutLines = modalActive ? [] : filterMode
-    ? ["TYPE to search", "ENTER apply", "BACKSPACE edit", "ESC clear", "↑↓ navigate"]
-    : [
-      ...(catalogAvailable ? ["A install"] : []),
-      ...(canExecute && selected && selected.managed !== false &&
-          selected.source_repository && selected.source_path ? ["V revision"] : []),
-      ...(canExecute && selected
-        ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
-        : []),
-      "M catalogs",
-      ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])].join(" · "),
-      "D details",
-      "↑↓ navigate · ? guide · Q quit",
-    ];
+    ? categorizedShortcutLines({
+      Filters: ["TYPE to search", "BACKSPACE edit", "ENTER apply", "ESC clear"],
+      Navigation: ["↑↓ navigate"],
+    })
+    : categorizedShortcutLines({
+      Actions: [
+        ...(catalogAvailable ? ["A install"] : []),
+        ...(canExecute && selected && selected.scope && (
+          selected.managed === false
+            ? Boolean(selected.paths?.length)
+            : Boolean(selected.source_repository && selected.source_path)
+        ) ? ["P preview"] : []),
+        ...(canExecute && selected && selected.managed !== false &&
+            selected.source_repository && selected.source_path ? ["V revision"] : []),
+        ...(canExecute && selected
+          ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
+          : []),
+      ],
+      Filters: ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])],
+      Display: ["D details"],
+      Navigation: ["M catalogs", "↑↓ navigate", "? guide", "Q quit"],
+    });
   const inventoryShortcutWidth = inventorySideBySide ? inventoryDetailsWidth : columns - 2;
   const fullSummaryPanelRows = sideBySide ? 5 : 17;
   const warningPanelRows = errors.length ? errors.length + 4 : 0;

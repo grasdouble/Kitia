@@ -618,10 +618,15 @@ test("source-version picker adapts SHA, date, and subject columns at 80 and 120 
     ]);
     assert.equal(revisions.body[0].trim(), "", "the existing gap stays in the revision body");
     assert.equal(revisions.body.length, versions.length + 1, "moving metadata preserves both revision rows and the body gap");
-    assert.equal(revisions.topIndex, Math.floor((dimensions.rows - 15) / 2),
-      "header metadata counts once when centering the complete modal");
+    assert.equal(revisions.topIndex, Math.floor((dimensions.rows - 18) / 2),
+      "category headings count in the complete modal height");
     assert.equal(shortcuts.topIndex, revisions.bottomIndex + 2, "modal frames have one gap row");
-    assert.deepEqual(shortcuts.body.map((line) => line.trim()), ["↑↓ SELECT · ENTER UPDATE · ESC BACK"]);
+    assert.deepEqual(shortcuts.body.map((line) => line.trim()), [
+      "Actions",
+      "ENTER UPDATE",
+      "Navigation",
+      "↑↓ SELECT · ESC BACK",
+    ]);
     assert.ok(revisions.body.some((line) => line.startsWith(`› ${versions[0].prefix}`)),
       "the selected revision marker remains visible");
     const first = lines.find((line) => line.includes(versions[0].prefix) && line.includes(versions[0].subject));
@@ -667,14 +672,13 @@ test("revision viewport keeps the selected commit and separated shortcuts bounde
     assert.equal(shortcuts.topIndex, revisions.bottomIndex + 2);
     assert.ok(revisions.body.some((line) => line.startsWith(`› ${versions[selectedIndex].prefix}`)),
       `selection stays in the revision viewport at ${dimensions.columns}x${dimensions.rows}`);
-    const expectedRange = dimensions.columns === 40 ? "Showing 10-10 of 18 commits." : "Showing 8-11 of 18 commits.";
-    assert.equal(revisions.header.at(-1).trim(), expectedRange);
-    assert.ok(revisions.header[0].startsWith("platform-team / skill:"));
-    assert.equal(revisions.header.slice(1, -1).map((line) => line.trim()).join(" "),
-      "Select a commit to update; the catalog pin remains unchanged.");
+    assert.ok(revisions.header.map((line) => line.trim()).join(" ")
+      .includes("platform-team / skill:assistant-helper"));
+    assert.equal(revisions.header.length, dimensions.columns === 40 ? 2 : 1,
+      "short layouts keep the resource label visible without optional metadata");
     assert.doesNotMatch(revisions.body.join("\n"), /Showing|Select a commit|platform-team/);
     const revisionRows = revisions.body.filter((line) => /^\s*(?:› )?[0-9a-f]{7}(?:\s|$)/.test(line));
-    assert.equal(revisionRows.length, dimensions.columns === 40 ? 1 : 4,
+    assert.equal(revisionRows.length, dimensions.columns === 40 ? 1 : 3,
       "metadata relocation preserves the selected revision viewport count");
     assert.equal(revisions.body.length, revisionRows.length + (dimensions.columns === 40 ? 0 : 1),
       "only the existing optional gap remains alongside commit rows below the divider");

@@ -76,6 +76,12 @@ const shortcutKey = /^(?:Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])$/;
 
 function shortcutHint(value: string, width: number) {
   const visible = fitText(value, width);
+  if (visible === "Actions" || visible === "Filters" || visible === "Display" || visible === "Navigation") {
+    return h(Text, {
+      color: DASHBOARD_THEME.semantic.accents.shortcutCategory,
+      bold: true,
+    }, visible);
+  }
   const parts = visible.split(/(Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])/g);
   return h(Text, { dimColor: true }, ...parts.map((part, index) =>
     shortcutKey.test(part)
@@ -160,6 +166,15 @@ export function DetailsPanel({
     separateHeader: true,
   });
 
+}
+export type ShortcutCategory = "Actions" | "Filters" | "Display" | "Navigation";
+export function categorizedShortcutLines(
+  groups: Partial<Record<ShortcutCategory, string[]>>,
+): string[] {
+  return (["Actions", "Filters", "Display", "Navigation"] as const).flatMap((category) => {
+    const shortcuts = groups[category] || [];
+    return shortcuts.length ? [category, shortcuts.join(" · ")] : [];
+  });
 }
 export function wrappedShortcutLines(lines: string[], width?: number) {
   const contentWidth = Math.max(1, (width || 80) - 4);

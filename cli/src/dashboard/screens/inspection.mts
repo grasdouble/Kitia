@@ -5,7 +5,10 @@ import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
 import { DASHBOARD_THEME } from "../colors.js";
 import { fitText, wrapText } from "../helpers.mjs";
-import { DASHBOARD_HEADER_ROWS, DashboardHeader, Panel, PanelHeader } from "./shared.mjs";
+import {
+  categorizedShortcutLines, DASHBOARD_HEADER_ROWS, DashboardHeader, Panel, PanelHeader, ShortcutsPanel,
+  wrappedShortcutLines,
+} from "./shared.mjs";
 import { highlightSource, type SyntaxLine } from "../source-highlighting.mjs";
 
 const h = React.createElement;
@@ -15,11 +18,17 @@ type InspectionScreenState = {
   content: string;
   page: number;
   focus?: InspectionFocus;
+  localFiles?: Array<{ path: string; content: string }>;
+  localTreeLines?: string[];
+  localAuditLines?: string[];
   auditPage?: number;
   treePage?: number;
 };
 
-const inspectionShortcuts = "S source · A audit · T tree · TAB panel · ←/→ PGUP/PGDN page · ENTER/ESC close";
+const inspectionShortcuts = categorizedShortcutLines({
+  Display: ["S source", "A audit", "T tree"],
+  Navigation: ["TAB panel", "←/→ PGUP/PGDN page", "ENTER/ESC close"],
+});
 
 type InspectionPage = { title: string; lines: string[]; syntax?: SyntaxLine[] };
 
@@ -129,15 +138,38 @@ function wrapSourceLine(line: string, width: number): string[] {
   return lines;
 }
 
-type InspectionOptions = Pick<InspectionScreenState, "resource" | "content" | "focus"> & {
+type InspectionOptions = Pick<InspectionScreenState,
+  "resource" | "content" | "focus" | "localFiles" | "localTreeLines" | "localAuditLines"> & {
   columns: number;
   rows: number;
 };
 
 type InspectionFile = { path: string; lines: string[]; syntax?: SyntaxLine[] };
 type InspectionContent = { auditLines: string[]; treeLines: string[]; files: InspectionFile[] };
-
-function inspectionContent(resource: CatalogResource, content: string, highlight = false): InspectionContent {
+function inspectionContent(
+  resource: CatalogResource,
+  content: string,
+  highlight = false,
+  localFiles?: Array<{ path: string; content: string }>,
+  localTreeLines?: string[],
+  localAuditLines?: string[],
+): InspectionContent {
+  if (localFiles?.length) {
+    return {
+      auditLines: localAuditLines?.length
+        ? localAuditLines
+        : ["Audit report unavailable; no result was returned."],
+      treeLines: localTreeLines?.length ? localTreeLines : localFiles.map(({ path }) => path),
+      files: localFiles.map(({ path, content: source }) => {
+        const lines = source.split(/\r?\n/);
+        return {
+          path,
+          lines,
+          ...(highlight ? { syntax: highlightSource(path, lines) } : {}),
+        };
+      }),
+    };
+  }
   const lines = content.split(/\r?\n/);
   const auditStart = lines.findIndex((line) => line.startsWith("Audit coverage:"));
   const auditLines: string[] = [];
@@ -197,16 +229,20 @@ function wrapInspectionFile(file: InspectionFile, width: number) {
 }
 
 function inspectionLayout(
-  { resource, content, columns, rows }: InspectionOptions,
-  model = inspectionContent(resource, content),
+  { resource, content, columns, rows, localFiles, localTreeLines, localAuditLines }: InspectionOptions,
+  model = inspectionContent(resource, content, false, localFiles, localTreeLines, localAuditLines),
 ) {
   const width = Math.max(1, columns - 2);
-  const compact = rows < 18;
-  const headerRows = compact ? 1 : DASHBOARD_HEADER_ROWS;
-  const shortcuts = wrapText(inspectionShortcuts, width);
-  // Reserve body space even on very short terminals. S/A/T always remain usable.
-  const footer = shortcuts.slice(0, Math.max(0, rows - headerRows - 5));
-  const bodyRows = Math.max(4, rows - headerRows - footer.length - 1);
+  const shortcutOnly = rows < 12;
+  const compact = rows < 24;
+  const headerRows = shortcutOnly ? 0 : compact ? 1 : DASHBOARD_HEADER_ROWS;
+  const shortcutRows = wrappedShortcutLines(inspectionShortcuts, width).length + 4;
+  const bodyMarginTop = rows >= 18 ? 1 : 0;
+  const shortcutsMarginTop = rows >= 18 ? 1 : 0;
+  const bodyRows = shortcutOnly ? 0 : Math.max(
+    3,
+    rows - headerRows - shortcutRows - bodyMarginTop - shortcutsMarginTop,
+  );
   const split = columns >= 100 && bodyRows >= 12;
   const sidebarWidth = split ? Math.min(48, Math.floor(width * 0.38)) : width;
   const sourceWidth = split ? width - sidebarWidth - 1 : width;
@@ -240,8 +276,9 @@ function inspectionLayout(
   };
   return {
     metadata: `${resource.catalog || "source"} / ${resource.kind}:${resource.id}`,
-    compact, footer, bodyRows, split, sourceWidth, sidebarWidth,
-    sourceBorder, auditBorder, treeBorder, sourceBodyRows, auditBodyRows, treeBodyRows, panels,
+    compact, shortcutOnly, shortcuts: inspectionShortcuts, bodyMarginTop, shortcutsMarginTop, bodyRows, split,
+    sourceWidth, sidebarWidth, sourceBorder, auditBorder, treeBorder, sourceBodyRows, auditBodyRows,
+    treeBodyRows, panels,
   };
 }
 
@@ -257,13 +294,20 @@ export function inspectionPageView(options: InspectionOptions & { page: number }
 
 export function InspectionScreen({
   resource, content, page, auditPage = 0, treePage = 0, focus = "source",
-  versionLabel, columns, rows,
+  localFiles, localTreeLines, localAuditLines, versionLabel, columns, rows,
 }: InspectionScreenState & { versionLabel: string; columns: number; rows: number }) {
-  const model = useMemo(() => inspectionContent(resource, content, true), [resource, content]);
-  const layout = useMemo(
-    () => inspectionLayout({ resource, content, columns, rows }, model),
-    [resource, content, columns, rows, model],
+  const model = useMemo(
+    () => inspectionContent(resource, content, true, localFiles, localTreeLines, localAuditLines),
+    [resource, content, localFiles, localTreeLines, localAuditLines],
   );
+  const layout = useMemo(
+    () => inspectionLayout({ resource, content, columns, rows, localFiles, localTreeLines, localAuditLines }, model),
+    [resource, content, columns, rows, localFiles, localTreeLines, localAuditLines, model],
+  );
+  if (layout.shortcutOnly) {
+    return h(Box, { flexDirection: "column", paddingX: 1, height: rows, flexShrink: 0 },
+      ShortcutsPanel({ lines: layout.shortcuts, width: columns - 2 }));
+  }
   const panel = (name: InspectionFocus, selectedPage: number, width: number, bodyRows: number) => {
     const pages = layout.panels[name];
     const currentPage = Math.max(0, Math.min(pages.length - 1, selectedPage));
@@ -274,17 +318,21 @@ export function InspectionScreen({
     const title = contentWidth < 28 ? `${pageLabel} · ${label}` : `${label} · ${pageLabel}`;
     const color = focus === name ? DASHBOARD_THEME.semantic.selected : DASHBOARD_THEME.semantic.accents.muted;
     if (name === "source") {
+      const sourceTitle = fitText(`${focus === name ? "› " : ""}${title}`, contentWidth);
+      const compactHeader = layout.bodyRows <= 3;
+      const sourceHeader = compactHeader
+        ? fitText(`${sourceTitle} · ${current.title}`, contentWidth)
+        : sourceTitle;
       return h(Box, {
         flexDirection: "column", width, flexShrink: 0,
         borderStyle: layout.sourceBorder ? "single" : undefined,
         borderColor: color,
         paddingX: layout.sourceBorder ? 1 : 2,
       },
-      h(PanelHeader, {
-        title: fitText(`${focus === name ? "› " : ""}${title}`, contentWidth), color,
-      },
-      h(Text, { color: DASHBOARD_THEME.semantic.accents.label, wrap: "truncate-end" },
-        fitText(current.title, contentWidth))),
+      h(PanelHeader, { title: sourceHeader, color },
+        compactHeader ? undefined : h(Text, {
+          color: DASHBOARD_THEME.semantic.accents.label, wrap: "truncate-end",
+        }, fitText(current.title, contentWidth))),
       ...Array.from({ length: bodyRows }, (_, index) =>
         h(Text, { key: `source-${currentPage}-${index}`, wrap: "truncate-end" },
           current.lines[index] && current.syntax?.[index]?.length
@@ -314,13 +362,15 @@ export function InspectionScreen({
     layout.compact
       ? h(Text, { bold: true, wrap: "truncate-end" }, fitText(`SOURCE PREVIEW · ${layout.metadata}`, columns - 2))
       : h(DashboardHeader, { versionLabel, screenName: "SOURCE PREVIEW", metadata: layout.metadata, columns }),
-    h(Box, { marginTop: 1, height: layout.bodyRows, flexShrink: 0 },
+    h(Box, { marginTop: layout.bodyMarginTop, height: layout.bodyRows, flexShrink: 0 },
       layout.split
         ? h(React.Fragment, null, sourcePanel,
           h(Box, { flexDirection: "column", marginLeft: 1 },
             auditPanel, h(Box, { marginTop: 1 }, treePanel)))
         : focus === "source" ? sourcePanel : focus === "audit" ? auditPanel : treePanel),
-    ...layout.footer.map((line, index) => h(Text, {
-      key: `inspection-shortcut-${index}`, color: DASHBOARD_THEME.semantic.accents.muted, wrap: "truncate-end",
-    }, line)));
+    ShortcutsPanel({
+      lines: layout.shortcuts,
+      width: columns - 2,
+      marginTop: layout.shortcutsMarginTop,
+    }));
 }

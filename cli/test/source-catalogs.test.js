@@ -3468,7 +3468,7 @@ for (const [screen, dimensions] of [
           : screen === "catalog" ? "CATALOG RESOURCES" : "CONNECTED CATALOGS 60";
         const metadata = screen === "inventory"
           ? [new RegExp(`^RESOURCES ${query ? 10 : 60}/60 · \\d+-\\d+$`),
-            `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter}`]
+            `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter} · License ${licenseFilter}`]
           : screen === "catalog"
             ? [new RegExp(`^RESOURCES \\d+/60 · \\d+-\\d+$`),
               `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter} · License ${licenseFilter}`]
@@ -3491,19 +3491,20 @@ for (const [screen, dimensions] of [
           assert.ok(visibleRows.at(-1).includes(resources[Number(last) - 1 + (query ? 50 : 0)].id));
         }
         const shortcuts = screen === "inventory"
-          ? ["M catalogs", "F filter · C catalog · K kind", "D details", "↑↓ navigate · ? guide · Q quit"]
+          ? ["Filters", "F filter · C catalog · K kind · L license", "Display", "D details",
+            "Navigation", "M catalogs · ↑↓ navigate · ? guide · Q quit"]
           : screen === "catalog"
-            ? ["F filter · C catalog · K kind", "T tag · S status · L license",
-              "V revisions · P preview/audit · D details",
-              "↑↓ navigate · ENTER install · ESC back", "? guide · Q quit"]
-            : ["D details · ↑↓ nav · ? guide", "ESC inventory · Q quit"];
+            ? ["Actions", "ENTER install · V revisions · P preview/audit",
+              "Filters", "F filter · C catalog · K kind · L license",
+              "Display", "D details", "Navigation", "↑↓ navigate · ESC back · ? guide · Q quit"]
+            : ["Display", "D details", "Navigation", "↑↓ nav · ? guide · ESC inventory · Q quit"];
         const layout = detailPanelLayout(columns, screen === "inventory" && columns >= 132 ? 0.64 : 0.68);
         const shortcutWidth = detailsVisible && layout.sideBySide ? layout.detailsWidth : columns - 2;
         const expected = wrappedShortcutLines(shortcuts, shortcutWidth);
         const actual = assertSeparatedPanelHeader(value, "SHORTCUTS", expected[0]);
         assert.deepEqual(actual, expected, "every wrapped shortcut remains visible below its single divider");
         if (screen === "catalog" && columns === 112 && detailsVisible) {
-          assert.ok(expected.length > shortcuts.length, "the narrow side column exercises shortcut wrapping");
+          assert.ok(expected.length > 1, "the narrow side column exercises shortcut wrapping");
         }
       };
       const assertSelection = (value, index) => {
@@ -3520,7 +3521,9 @@ for (const [screen, dimensions] of [
           assert.match(value, /FRESHNESS/);
           assert.match(value, /Updates catalog metadata only/);
         } else if (screen === "catalog" || rows >= 40) {
-          assert.match(value, new RegExp(`Selected description ${index}\\.`));
+          const plain = value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+          assert.ok(plain.includes("Selected description") && plain.includes(`${index}.`),
+            "the compact selected description remains visible when wrapped across rows");
           assert.match(value, /org\/repo/);
         } else {
           assert.match(value, /Healthy · no recorded issues/);

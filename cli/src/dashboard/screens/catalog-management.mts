@@ -7,7 +7,8 @@ import { DASHBOARD_THEME } from "../colors.js";
 import type { CatalogFreshnessStatus } from "../catalog-freshness.mjs";
 import { detailPanelLayout, fitColumn, fitText, tableLine, wrapText } from "../helpers.mjs";
 import {
-  DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailValue, wrappedShortcutLines,
+  categorizedShortcutLines, DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailValue,
+  wrappedShortcutLines,
 } from "./shared.mjs";
 import { adaptiveColumnWidths } from "../../table-layout.js";
 
@@ -149,19 +150,17 @@ export function CatalogManagementScreen({
         ),
       ]
     : detailValue("catalog-empty", "Add a user catalog to browse and install external resources.", detailsContentWidth, 2);
-  const managementShortcutLines = modalActive ? [] : [
-    [
+  const managementShortcutLines = modalActive ? [] : categorizedShortcutLines({
+    Actions: [
       ...(canAdd ? ["A add", "P presets"] : []),
       ...(canRemove && selected ? ["Delete remove"] : []),
-    ].join(" · "),
-    [
       ...(canEdit && selected ? ["E edit"] : []),
       ...(canRefresh && selected ? ["R refresh"] : []),
       ...(canTransfer ? ["I import / X export"] : []),
-    ].join(" · "),
-    "D details · ↑↓ nav · ? guide",
-    "ESC inventory · Q quit",
-  ].filter(Boolean);
+    ],
+    Display: ["D details"],
+    Navigation: ["↑↓ nav", "? guide", "ESC inventory", "Q quit"],
+  });
   const shortcuts = managementShortcutLines;
   const managementShortcutWidth = detailsSideBySide ? detailsWidth : columns - 2;
   const shortcutsPanelRows = modalActive

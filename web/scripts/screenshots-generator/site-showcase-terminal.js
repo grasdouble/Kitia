@@ -153,9 +153,12 @@ function createTtyOutput() {
   return output;
 }
 
-async function launchShowcaseDashboard(directory, { executeOverride, listSourceVersionsOverride, catalogResourcesOverride } = {}) {
+async function launchShowcaseDashboard(directory, {
+  executeOverride, actionHandlerOverride, prepareFixture, listSourceVersionsOverride, catalogResourcesOverride,
+} = {}) {
   assertTermlessRuntime();
   const fixture = await seedShowcase(directory);
+  if (prepareFixture) await prepareFixture(fixture);
   const restoreEnvironment = setShowcaseEnvironment(fixture);
   let terminal;
   let input;
@@ -212,10 +215,14 @@ async function launchShowcaseDashboard(directory, { executeOverride, listSourceV
       },
       installOptions,
     );
+    const runAction = actionHandlerOverride
+      ? (operation, resource, installOptions) =>
+        actionHandlerOverride(operation, resource, installOptions, { fixture, loaded, dashboardOptions })
+      : execute;
     done = dashboard.runDashboard(rows, input, output, installed.errors, {
       catalogResources,
       userCatalogs,
-      execute: executeOverride || execute,
+      execute: executeOverride || runAction,
       listSourceVersions: listSourceVersionsOverride,
     });
     done.catch(() => {});

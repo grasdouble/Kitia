@@ -86,7 +86,11 @@ function roleForToken(token: Token): SyntaxRole | undefined {
   return undefined;
 }
 
-function tokenizeLines(lines: readonly string[], language: Language): SyntaxLine[] {
+function tokenizeLines(
+  lines: readonly string[],
+  language: Language,
+  suppressMarkdownEmphasis = false,
+): SyntaxLine[] {
   if (lines.length === 0) return [];
   const environment = {
     code: lines.join("\n"),
@@ -129,11 +133,176 @@ function tokenizeLines(lines: readonly string[], language: Language): SyntaxLine
     } else if (Array.isArray(stream)) {
       for (const token of stream) visit(token, inheritedRole);
     } else {
-      const role = stream.type === "interpolation" ? undefined : roleForToken(stream) ?? inheritedRole;
+      const suppressed = suppressMarkdownEmphasis && (stream.type === "bold" || stream.type === "italic");
+      const role = stream.type === "interpolation" || suppressed
+        ? inheritedRole
+        : roleForToken(stream) ?? inheritedRole;
       visit(stream.content, role);
     }
   }
   visit(environment.tokens);
+  return result;
+}
+
+type Delimiter = { marker: string; length: number; end: number };
+
+function markdownEmphasisMask(source: string): Uint8Array {
+  const emphasis = new Uint8Array(source.length);
+  const delimiterMask = new Uint8Array(source.length);
+  const codeMask = new Uint8Array(source.length);
+  const escaped = (index: number) => {
+    let slashes = 0;
+    while (index > 0 && source[index - 1] === "\\") {
+      slashes += 1;
+      index -= 1;
+    }
+    return slashes % 2 === 1;
+  };
+  let index = 0;
+  while (index < source.length) {
+    if (source[index] !== "`" || escaped(index)) {
+      index += 1;
+      continue;
+    }
+    let length = 1;
+    while (source[index + length] === "`") length += 1;
+    let closing = index + length;
+    while (closing < source.length) {
+      if (source[closing] !== "`" || escaped(closing)) {
+        closing += 1;
+        continue;
+      }
+      let closingLength = 1;
+      while (source[closing + closingLength] === "`") closingLength += 1;
+      if (closingLength === length) break;
+      closing += closingLength;
+    }
+    if (closing < source.length) {
+      let closingLength = 1;
+      while (source[closing + closingLength] === "`") closingLength += 1;
+      codeMask.fill(1, index, closing + closingLength);
+      index = closing + closingLength;
+    } else index += length;
+  }
+
+  const openers: Delimiter[] = [];
+  const ranges: Array<[number, number]> = [];
+  const whitespace = (character: string | undefined) => !character || /\s/u.test(character);
+  const punctuation = (character: string | undefined) =>
+    !!character && /[\p{P}\p{S}]/u.test(character);
+  index = 0;
+  while (index < source.length) {
+    const marker = source[index];
+    if ((marker !== "*" && marker !== "_") || codeMask[index] || escaped(index)) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (source[index] === marker) index += 1;
+    const length = index - start;
+    delimiterMask.fill(1, start, index);
+    const previous = start ? source[start - 1] : undefined;
+    const next = source[index];
+    const leftFlanking = !whitespace(next) &&
+      (!punctuation(next) || whitespace(previous) || punctuation(previous));
+    const rightFlanking = !whitespace(previous) &&
+      (!punctuation(previous) || whitespace(next) || punctuation(next));
+    const canOpen = marker === "*"
+      ? leftFlanking
+      : leftFlanking && (!rightFlanking || punctuation(previous));
+    const canClose = marker === "*"
+      ? rightFlanking
+      : rightFlanking && (!leftFlanking || punctuation(next));
+    let remaining = length;
+    let consumed = 0;
+    while (canClose && openers.length && openers[openers.length - 1].marker === marker &&
+        openers[openers.length - 1].length <= remaining) {
+      const opener = openers.pop()!;
+      ranges.push([opener.end, start + consumed]);
+      consumed += opener.length;
+      remaining -= opener.length;
+    }
+    if (canOpen && remaining > 0 && remaining <= 3) {
+      openers.push({ marker, length: remaining, end: start + length });
+    }
+  }
+  for (const [start, end] of ranges) {
+    for (let offset = start; offset < end; offset += 1) {
+      if (!delimiterMask[offset] && !codeMask[offset]) emphasis[offset] = 1;
+    }
+  }
+  return emphasis;
+}
+
+function highlightMarkdownBlock(lines: readonly string[]): SyntaxLine[] {
+  const tokenized = tokenizeLines(lines, "markdown", true);
+  const emphasis = markdownEmphasisMask(lines.join("\n"));
+  let absolute = 0;
+  return tokenized.map((spans, lineIndex) => {
+    const result: SyntaxLine = [];
+    let spanOffset = 0;
+    for (const span of spans) {
+      let partStart = 0;
+      while (partStart < span.text.length) {
+        const offset = absolute + spanOffset + partStart;
+        const role = span.role ?? (emphasis[offset] ? "emphasis" : undefined);
+        let partEnd = partStart + 1;
+        while (partEnd < span.text.length) {
+          const nextOffset = absolute + spanOffset + partEnd;
+          const nextRole = span.role ?? (emphasis[nextOffset] ? "emphasis" : undefined);
+          if (nextRole !== role) break;
+          partEnd += 1;
+        }
+        const text = span.text.slice(partStart, partEnd);
+        const previous = result[result.length - 1];
+        if (previous && previous.role === role) previous.text += text;
+        else result.push(role ? { text, role } : { text });
+        partStart = partEnd;
+      }
+      spanOffset += span.text.length;
+    }
+    absolute += lines[lineIndex].length + (lineIndex < lines.length - 1 ? 1 : 0);
+    return result;
+  });
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function highlightMarkdownProse(lines: readonly string[]): SyntaxLine[] {
+  const result: SyntaxLine[] = [];
+  let blockStart = 0;
+  const appendBlock = (end: number) => {
+    if (end > blockStart) result.push(...highlightMarkdownBlock(lines.slice(blockStart, end)));
+  };
+  for (let index = 0; index < lines.length;) {
+    const isHeading = /^ {0,3}#{1,6}(?:[\t ]|$)/.test(lines[index]);
+    const beginsTable = lines[index].includes("|") &&
+      index + 1 < lines.length && isMarkdownTableSeparator(lines[index + 1]);
+    if (lines[index].trim() === "") {
+      appendBlock(index);
+      result.push(...tokenizeLines(lines.slice(index, index + 1), "markdown", true));
+      blockStart = ++index;
+      continue;
+    }
+    if (isHeading || beginsTable) {
+      appendBlock(index);
+      if (beginsTable) {
+        let end = index + 2;
+        while (end < lines.length && lines[end].includes("|") && lines[end].trim() !== "") end += 1;
+        result.push(...highlightMarkdownBlock(lines.slice(index, end)));
+        index = end;
+      } else {
+        result.push(...highlightMarkdownBlock(lines.slice(index, index + 1)));
+        index += 1;
+      }
+      blockStart = index;
+      continue;
+    }
+    index += 1;
+  }
+  appendBlock(lines.length);
   return result;
 }
 
@@ -163,7 +332,7 @@ function highlightMarkdown(lines: readonly string[]): SyntaxLine[] {
       index += 1;
       continue;
     }
-    append(tokenizeLines(lines.slice(proseStart, index), "markdown"));
+    append(highlightMarkdownProse(lines.slice(proseStart, index)));
     result.push([{ text: lines[index], role: "code" }]);
     const bodyStart = index + 1;
     const closing = new RegExp(`^ {0,3}${fence.marker}{${fence.length},}[\\t ]*\\r?$`);
@@ -177,7 +346,7 @@ function highlightMarkdown(lines: readonly string[]): SyntaxLine[] {
     }
     proseStart = index;
   }
-  append(tokenizeLines(lines.slice(proseStart), "markdown"));
+  append(highlightMarkdownProse(lines.slice(proseStart)));
   return result;
 }
 

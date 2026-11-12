@@ -130,9 +130,21 @@ code tokens. Colors do not render Markdown or alter source characters, whitespac
 line wrapping, page boundaries, filenames, audit text or tree text. Tokenization
 covers each complete logical file before wrapping and pagination, so multiline
 comments, strings and fenced blocks retain their syntax state across pages.
-Only skill previews use upstream file boundaries: the `SKILL.md` entrypoint
-followed by files declared in the source tree. Agent and instruction previews
-remain single source files with their provenance metadata.
+Unmatched Markdown emphasis delimiters remain literal and do not carry syntax
+color into a later paragraph, heading, or table; valid nested and multiline
+emphasis within a paragraph remains highlighted without changing source text.
+Catalog Preview uses upstream file boundaries: the `SKILL.md` entrypoint
+followed by files declared in the source tree. Catalog agent and instruction
+previews remain single source files with their provenance metadata.
+In Inventory, `P` previews the bytes currently installed in the selected local
+skill, agent, or instruction and audits those same local files using the
+deterministic audit rules. Findings retain their local path and line attribution;
+coverage lists every detected file and any skipped path/reason. Binary,
+unreadable, oversized, invalid-UTF-8, or otherwise unsupported content is
+explicitly skipped rather than audited as a display placeholder. Missing or
+unsafe paths still fail Preview. A clean result is not a safety guarantee.
+Catalog Resources `P` and the `kitia preview` command continue to use pinned
+source content and retain their existing audit behavior.
 
 Supported filename extensions are Markdown (`md`, `markdown`, `mdown`, `mkd`),
 JavaScript (`js`, `mjs`, `cjs`, `jsx`), TypeScript (`ts`, `mts`, `cts`, `tsx`),
@@ -181,14 +193,22 @@ context and, when paginated, its existing Showing range above the divider; no
 column labels are added to revisions. Existing table column headings and data
 rows remain below the divider. Moving these metadata lines reserves header rows
 and can reduce the responsive list row budget; selected-row visibility and
-pagination reflect the available body rows. All framed `SHORTCUTS` panels,
-including modal shortcut frames, keep their metadata-free title/divider/body
-structure and full keyboard hints. Selection colors, navigation, filters, and
-the `D` details toggle are unchanged. Summary cards, warnings, non-table modal
-main title bars, and the five-line global dashboard header are unchanged.
-Preview's unframed one-line keyboard footer stays compact. These presentation
-changes do not change CLI command syntax, options, output contracts, or audit
-semantics.
+pagination reflect the available body rows. Framed `SHORTCUTS` panels, including
+modal shortcut frames, place each nonempty category—Actions, Filters, Display,
+and Navigation—in order on its own purple heading line, followed by its
+shortcuts. Search mode shows only applicable categories. The panels retain their
+metadata-free title/divider/body structure and complete keyboard hints,
+including conditional controls. Shortcut keys, selection colors, navigation,
+filters, and the `D` details toggle are unchanged. Summary cards, warnings,
+non-table modal main title bars, and the five-line global dashboard header are
+unchanged.
+Preview uses the same framed `SHORTCUTS` panel: `Display` lists source, audit,
+and tree controls; `Navigation` lists pane focus, pagination, and close
+controls. The panel reserves its full height before pane pagination is sized.
+Below 12 terminal rows, the shortcut frame temporarily occupies the screen;
+pane contents and independent page state return when the terminal is resized.
+These presentation changes do not change CLI command syntax, options, output
+contracts, or audit semantics.
 Human-readable CLI tables also adapt to terminal width; piped output retains
 complete values.
 The dashboard is the interactive resource-management interface. CLI-only
@@ -226,13 +246,14 @@ Kind, and License filters. While search is active, `L` is query text.
 Choosing a commit in the catalog browser applies that full SHA to this install
 only; choosing one in inventory applies it to the confirmed update. Neither
 changes the catalog pin. `D` toggles the selected resource's details panel.
-`P` previews the selected pinned source and reports deterministic audit findings
-and coverage in the same screen's audit pane, replacing the separate Audit
-action. Skills, agents, and instructions use the same source-first layout and
-independent pane navigation. If no audit result was returned, the audit pane
-explicitly says `Audit report unavailable; no result was returned.`; an absent
-report is not a clean audit. Dashboard installations always audit pinned source
-content first and are blocked on findings or incomplete coverage; audit results
+Catalog Resources `P` previews the selected pinned source and reports
+deterministic audit findings and coverage in the same screen's audit pane,
+replacing the separate Audit action. Catalog skills, agents, and instructions
+use the same source-first layout and independent pane navigation. If no audit
+result was returned, the audit pane explicitly says
+`Audit report unavailable; no result was returned.`; an absent report is not a
+clean audit. Dashboard installations always audit pinned source content first
+and are blocked on findings or incomplete coverage; audit results
 are warnings, not a safety guarantee. These interactive presentation changes do
 not change CLI command syntax, options, output contracts, or audit semantics.
 Selected-resource details expose license status and, when source provenance is

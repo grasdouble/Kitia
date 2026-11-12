@@ -58,6 +58,68 @@ test("Markdown syntax gives headings, emphasis, links and inline code meaningful
   assertRole(lines[2], "the guide", "link");
   assertRole(lines[3], "npm test", "code");
 });
+test("adjacent Markdown emphasis delimiters do not bleed into later paragraphs, headings, or tables", () => {
+  const lines = highlightExact("SKILL.md", [
+    "then collect the four preferences below **before initializing a new**** presentation",
+    "****or writing its narrative**.",
+    "Version 1 supports **English text and captions**, **1080p at 30 fps**, and",
+    "**macOS **say** narration** with any installed voice. A French voice can read",
+    "English text but may pronounce it unnaturally. There is no emotional-style",
+    "parameter; express delivery through the writing, punctuation, and speech rate.",
+    "There is **no fixed maximum presentation duration**. The chosen duration range",
+    "is still enforced; available disk space, render time, and platform resources",
+    "remain practical constraints.",
+    "### Invocation-time questions",
+    "",
+    "Column A | Column B",
+    "--- | ---",
+    "ordinary | table cells",
+  ]);
+  assertRole(lines[0], "before initializing a new", "emphasis");
+  assertRole(lines[0], "presentation", undefined);
+  assertRole(lines[1], "or writing its narrative", undefined);
+  assertRole(lines[2], "English text and captions", "emphasis");
+  assertRole(lines[2], "1080p at 30 fps", "emphasis");
+  assertRole(lines[3], "macOS ", "emphasis");
+  assertRole(lines[3], "say", "emphasis");
+  assertRole(lines[3], "narration", "emphasis");
+  assertRole(lines[3], "with any installed voice.", undefined);
+  assertRole(lines[4], "English text but may pronounce it unnaturally.", undefined);
+  assertRole(lines[5], "parameter; express delivery", undefined);
+  assertRole(lines[6], "no fixed maximum presentation duration", "emphasis");
+  assertRole(lines[7], "available disk space", undefined);
+  assertRole(lines[9], "Invocation-time questions", "heading");
+  assertRole(lines[11], "Column A", "emphasis");
+  assertRole(lines[13], "ordinary", undefined);
+});
+test("valid nested, adjacent, escaped and multiline emphasis stays bounded to its Markdown block", () => {
+  const lines = highlightExact("SKILL.md", [
+    "**one****two** and ***bold italic***.",
+    "**bold *italic* bold**.",
+    "**multiline emphasis",
+    "continues on this line** and then plain.",
+    "**unmatched opener",
+    "",
+    "Plain paragraph after unmatched delimiter.",
+    "\\*\\*escaped markers\\*\\* remain literal.",
+    "### Heading after malformed syntax",
+  ]);
+  assertRole(lines[0], "one", "emphasis");
+  assertRole(lines[0], "two", "emphasis");
+  assertRole(lines[0], "bold italic", "emphasis");
+  assertRole(lines[1], "bold ", "emphasis");
+  assertRole(lines[1], "italic", "emphasis");
+  assertRole(lines[1], " bold", "emphasis");
+  assertRole(lines[2], "multiline emphasis", "emphasis");
+  assertRole(lines[3], "continues on this line", "emphasis");
+  assertRole(lines[3], "and then plain.", undefined);
+  assertRole(lines[4], "unmatched opener", undefined);
+  assertRole(lines[6], "Plain paragraph after unmatched delimiter.", undefined);
+  assertRole(lines[7], "escaped markers", undefined);
+  assertRole(lines[8], "Heading after malformed syntax", "heading");
+});
+
+
 
 for (const [filename, source, text, role] of [
   ["scripts/review.js", "const verdict = 'ready';", "const", "keyword"],

@@ -182,6 +182,9 @@ export function Dashboard({
     focus: "source" | "audit" | "tree";
     auditPage: number;
     treePage: number;
+    localFiles?: Array<{ path: string; content: string }>;
+    localTreeLines?: string[];
+    localAuditLines?: string[];
   } | null>(null);
   const [sourceVersionPicker, setSourceVersionPicker] = useState<{
     resource: CatalogResource;
@@ -471,6 +474,11 @@ export function Dashboard({
           focus: "source",
           auditPage: 0,
           treePage: 0,
+          ...(result.previewFiles ? {
+            localFiles: result.previewFiles,
+            localTreeLines: result.previewTree,
+            localAuditLines: result.previewAuditLines,
+          } : {}),
         });
       } else {
         setActionMessage(outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
@@ -1160,6 +1168,11 @@ export function Dashboard({
         inventoryLicenseFilter, installedResources, inventoryCatalogFilter, inventoryKindFilter, userCatalogs,
       ));
       setSelectedIndex(0);
+    } else if (character === "p" && selectedResource && selectedResource.scope &&
+        (selectedResource.managed === false
+          ? Boolean(selectedResource.paths?.length)
+          : Boolean(selectedResource.source_repository && selectedResource.source_path))) {
+      void runConfirmedAction({ action: "preview", resource: selectedResource });
     } else if (character === "v" && selectedResource &&
         selectedResource.managed !== false && selectedResource.source_repository &&
         selectedResource.source_path &&
