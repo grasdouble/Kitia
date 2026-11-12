@@ -3791,6 +3791,7 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
   ].join("\n"), { mode: 0o755 });
   const previousConfig = process.env.KITIA_CONFIG_DIR;
   const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
   const previousCwd = process.cwd();
   const previousPin = process.env.KITIA_TEST_GH_PIN;
   process.env.KITIA_CONFIG_DIR = configDirectory;
@@ -3816,6 +3817,7 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
     assert.equal(readInstallState(userTarget).sources.Test.skills["demo-skill"].source_ref, catalogResource.source_ref);
 
     process.env.HOME = userTarget;
+    process.env.USERPROFILE = userTarget;
     process.chdir(projectTarget);
     const projectRefBeforeUserReplacement = readInstallState(projectTarget).sources.Test.skills["demo-skill"].source_ref;
     assert.equal(await invoke("user", userTarget), 0);
@@ -3839,6 +3841,7 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
     assert.equal(readInstallState(oppositeOnlyTarget).sources.Test.skills["demo-skill"].source_ref, selectedRef);
 
     process.env.HOME = userTarget;
+    process.env.USERPROFILE = userTarget;
     process.chdir(userTarget);
     await assert.rejects(invoke("project", userTarget), (error) =>
       error.code === "AMBIGUOUS_RESOURCE" && /project and user scopes resolve to the same target/.test(error.message));
@@ -3851,6 +3854,8 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
     else process.env.KITIA_TEST_GH_PIN = previousPin;
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
     process.chdir(previousCwd);
   }
 });
