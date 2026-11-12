@@ -575,17 +575,30 @@ test("dashboard shows the installed and available versions with the changelog li
     assert.match(plain(), /Available: 1\.0\.2/);
     assert.match(plain(), /github\.com\/grasdouble\/Kitia\/blob\/main\/CHANGELOG\.md#102/);
   } finally {
-    if (done) {
-      input.write("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      input.write("q");
-      await done;
+    try {
+      if (done) {
+        const previousOutputLength = plain().length;
+        input.write("\x1b");
+        try {
+          await waitForOutput(output, () => plain().slice(previousOutputLength),
+            (text) => text.includes("INVENTORY"), "inventory after Escape", 2_000);
+        } catch {
+          // Keep cleanup bounded if the dashboard cannot render its inventory screen.
+        }
+        input.write("q");
+        let cleanupTimeout;
+        await Promise.race([
+          done.then(() => {}, () => {}),
+          new Promise((resolve) => { cleanupTimeout = setTimeout(resolve, 2_000); }),
+        ]).finally(() => clearTimeout(cleanupTimeout));
+      }
+    } finally {
+      input.destroy();
+      output.destroy();
+      if (previousVersion === undefined) delete process.env.KITIA_INSTALLED_VERSION;
+      else process.env.KITIA_INSTALLED_VERSION = previousVersion;
+      global.fetch = previousFetch;
     }
-    input.destroy();
-    output.destroy();
-    if (previousVersion === undefined) delete process.env.KITIA_INSTALLED_VERSION;
-    else process.env.KITIA_INSTALLED_VERSION = previousVersion;
-    global.fetch = previousFetch;
   }
 });
 

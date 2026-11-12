@@ -86,7 +86,18 @@ async function captureDashboardFrame(
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output, [], actions);
-  let completed = false;
+  const waitForDashboardExit = () => new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(
+      new Error("Dashboard did not exit after q within 5 seconds"),
+    ), 5_000);
+    done.then((result) => {
+      clearTimeout(timeout);
+      resolve(result);
+    }, (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
   const latestFrame = () => {
     const start = rendered.lastIndexOf("\u001b[?2026h");
     const end = rendered.indexOf("\u001b[?2026l", start);
@@ -149,13 +160,22 @@ async function captureDashboardFrame(
       await waitForFrame((nextFrame) => nextFrame !== previousFrame, "dashboard cleanup");
     }
     input.write("q");
-    assert.equal(await done, true);
+    assert.equal(await waitForDashboardExit(), true);
     return frame;
   } finally {
     input.destroy();
-    await done.catch(() => {});
-    output.destroy();
-  }
+    let cleanupTimeout;
+    try {
+      await Promise.race([
+        done.then(() => {}, () => {}),
+        new Promise((resolve) => { cleanupTimeout = setTimeout(resolve, 1_000); }),
+      ]);
+    } finally {
+      clearTimeout(cleanupTimeout);
+      output.destroy();
+    }
+}
+
 }
 
 function separatedPanelFrame(frame, title, hasMetadata = false) {
