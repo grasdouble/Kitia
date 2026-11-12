@@ -3,7 +3,8 @@ import styles from './Automation.module.css';
 
 const commands = [
   ['Validate catalogs', 'kitia validate', 'Run strict catalog validation as a CI gate; exits non-zero when validation fails.'],
-  ['Check installations', 'kitia check --json', 'Consume a structured status report and use its exit code in CI.'],
+  ['Audit a resource', 'kitia preview skill <id> --audit', 'Review local pattern-match findings and coverage before install; this is not a safety guarantee.'],
+  ['Share pinned selections', 'kitia collection export · kitia collection import', 'Share selected, commit-pinned catalog references from the CLI. Signatures are optional; signed imports can be checked with an approved trusted key.'],
   ['Preview a change', 'kitia install skill <id> --dry-run --json', 'Review a machine-readable plan without changing files.'],
 ];
 

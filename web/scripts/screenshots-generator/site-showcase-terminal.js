@@ -40,11 +40,12 @@ function delay(milliseconds) {
 }
 
 function setShowcaseEnvironment(fixture) {
-  const keys = ["HOME", "USERPROFILE", "KITIA_CONFIG_DIR", "TERM", "COLORTERM", "FORCE_COLOR", "NO_COLOR"];
+  const keys = ["HOME", "USERPROFILE", "KITIA_CONFIG_DIR", "KITIA_INSTALLED_VERSION", "TERM", "COLORTERM", "FORCE_COLOR", "NO_COLOR"];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   process.env.HOME = fixture.home;
   process.env.USERPROFILE = fixture.home;
   process.env.KITIA_CONFIG_DIR = fixture.config;
+  process.env.KITIA_INSTALLED_VERSION = "unknown";
   process.env.TERM = "xterm-256color";
   process.env.COLORTERM = "truecolor";
   process.env.FORCE_COLOR = "3";

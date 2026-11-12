@@ -29,6 +29,7 @@ Improve source catalog workflows and dashboard usability
     - Exit the interactive dashboard when its input stream closes.
     - Skip the npm update lookup when the installed version is unknown.
     - See compact inline details and shortcuts on short stacked inventory screens so panel borders and complete issue paths remain visible.
+    - Search Inventory on small terminals with a visible prompt and apply/clear hints.
     - Load packaged CLI dashboards successfully with the shared table-layout module included in the published package.
     - Keep dashboard semantic colors, modal RGB values, the title gradient, and terminal ANSI codes together in one editable theme module.
   - **Technical**

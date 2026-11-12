@@ -217,7 +217,7 @@ export function InventoryScreen({
   const compactShortcuts = columns < 76 && rows < 40 && showDetails;
   const shortcutLines = modalActive ? [] : compactShortcuts
     ? filterMode
-      ? ["ENTER apply · ESC clear"]
+      ? ["TYPE to search", "ENTER apply · ESC clear"]
       : selected && canExecute
         ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall", "Q quit"]
         : ["F filter", "Q quit"]

@@ -140,6 +140,7 @@ function showcaseEnvironment(fixture) {
     HOME: fixture.home,
     USERPROFILE: fixture.home,
     KITIA_CONFIG_DIR: fixture.config,
+    KITIA_INSTALLED_VERSION: "unknown",
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
     FORCE_COLOR: "1",

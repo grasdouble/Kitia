@@ -1,5 +1,5 @@
 import React from 'react';
-import catalogScreenshot from '../../../assets/catalog-browser-termless.png';
+import catalogScreenshot from '../../../assets/catalog-browser-termless.webp';
 import styles from './DashboardPreview.module.css';
 
 export function DashboardPreview() {
