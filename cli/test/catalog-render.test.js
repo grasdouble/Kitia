@@ -1373,7 +1373,8 @@ test("local conflicts and GH force-required updates require explicit retry conse
             assert.ok(!failure.includes("GH REQUESTS OVERWRITE"), "the same agent must not get an endless force prompt");
             assert.equal(calls.length, 2);
             input.write("\x1b");
-            await waitForFrame((frame) => !frame.includes("UPDATE FAILED"), "dismissed same-agent failure");
+            await waitForFrame((frame) => frame.includes("INVENTORY") && frame.includes("SHORTCUTS") &&
+              !frame.includes("UPDATE FAILED"), "dismissed same-agent failure");
             input.write("q");
             assert.equal(await done, false);
           } else {
@@ -1389,7 +1390,8 @@ test("local conflicts and GH force-required updates require explicit retry conse
           }
         } else {
           input.write(response === "escape" ? "\x1b" : "\r");
-          await waitForFrame((frame) => !frame.includes(promptTitle), "cancelled force prompt");
+          await waitForFrame((frame) => frame.includes("INVENTORY") && frame.includes("SHORTCUTS") &&
+            !frame.includes(promptTitle), "cancelled force prompt");
           assert.equal(calls.length, 1, "declining must not retry");
           input.write("q");
           assert.equal(await done, false);

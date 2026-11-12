@@ -1,4 +1,4 @@
 ---
 
 ---
-Synchronize dashboard tests with visible TUI states and bound teardown waits.
+Synchronize dashboard tests with complete foreground TUI states, including modal dismissal during animation repaints, and bound teardown waits.

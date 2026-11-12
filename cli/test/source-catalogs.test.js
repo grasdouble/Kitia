@@ -1911,6 +1911,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const { addCatalogModal, catalogTransferModal, refreshCatalogModal, removeCatalogModal } =
     await import("../dist/dashboard/modals.mjs");
   const repository = "https://github.com/example/test";
+  const userCatalogsReadyFrame = /^(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|REMOVE CATALOG|IMPORT CATALOGS|REFRESH CATALOG))/;
   const catalogModal = removeCatalogModal({
     catalogs: [{ name: "Test", repository }],
     state: { step: "select", index: 0, name: "Test", message: "", failed: false },
@@ -1963,8 +1964,16 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
         const previousLength = renderedOutput.length;
         input.write(key);
         if (expectedOutput) {
-          await waitForOutput(output, () => renderedOutput.slice(previousLength),
-            (text) => text.includes(expectedOutput), `output ${JSON.stringify(expectedOutput)}`);
+          await waitForOutput(output, () => {
+            const text = renderedOutput.slice(previousLength);
+            const start = text.lastIndexOf("\x1b[?2026h");
+            const end = text.indexOf("\x1b[?2026l", start);
+            return start >= 0 && end > start
+              ? require("node:util").stripVTControlCharacters(text.slice(start, end))
+              : "";
+          }, (frame) => expectedOutput instanceof RegExp
+            ? expectedOutput.test(frame) : frame.includes(expectedOutput),
+          `output ${String(expectedOutput)}`);
         } else if (key !== "q") {
           await waitForOutput(output, () => renderedOutput,
             (text) => text.length > previousLength, `output after ${JSON.stringify(key)}`);
@@ -2085,7 +2094,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.deepEqual(removed, ["Test"]);
   assert.equal(await drive(
     [["m", "USER CATALOGS"], ["\x1b[3~", "Choose a user catalog to remove:"],
-      ["\x1b", "USER CATALOGS"], ["q"]],
+      ["\x1b", userCatalogsReadyFrame], ["q"]],
     async (name) => {
       removed.push(name);
       return { catalogs: [], resources: [] };
@@ -2114,7 +2123,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const presetManager = await driveRefresh([
     ["m", /USER CATALOGS/], ["p", /PRESET/], ["\x1b[B", /› Matt Pocock/],
     ["\r", /ADD CATALOG RESULT/],
-    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*ADD CATALOG RESULT)/], "q",
+    ["\r", userCatalogsReadyFrame], "q",
   ], refresh, {
     addCatalog: async (request) => {
       presetRequests.push(request);
@@ -2132,7 +2141,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const anthropicManager = await driveRefresh([
     ["m", /USER CATALOGS/], ["p", /PRESET/],
     ["\r", /ADD CATALOG RESULT/],
-    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*ADD CATALOG RESULT)/], "q",
+    ["\r", userCatalogsReadyFrame], "q",
   ], refresh, {
     addCatalog: async (request) => {
       anthropicRequests.push(request);
@@ -2152,7 +2161,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     ["m", /USER CATALOGS/], ["p", /PRESET/], ["\x1b[B", /› Matt Pocock/],
     ["\x1b[B", /› GitHub Awesome Copilot/],
     ["\r", /ADD CATALOG RESULT/],
-    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*ADD CATALOG RESULT)/], "q",
+    ["\r", userCatalogsReadyFrame], "q",
   ], refresh, {
     addCatalog: async (request) => {
       githubPresetRequests.push(request);
@@ -2167,7 +2176,10 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     entries: [],
   }]);
   let cancelledPresetAdded = false;
-  const cancelledPreset = await driveRefresh(["m", "p", "\x1b", "q"], refresh, {
+  const cancelledPreset = await driveRefresh([
+    ["m", /USER CATALOGS/], ["p", /ADD CATALOG PRESET/],
+    ["\x1b", userCatalogsReadyFrame], "q",
+  ], refresh, {
     addCatalog: async () => {
       cancelledPresetAdded = true;
       return { catalog: "unexpected", count: 0 };
@@ -2238,7 +2250,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     [pastedConfiguration, /CTRL\+S REVIEW/],
     ["\x13", /SPACE\/ENTER TOGGLE/],
     ["\x1b", /Paste the JSON catalog configuration below/],
-    ["\x1b", /USER CATALOGS/],
+    ["\x1b", userCatalogsReadyFrame],
     "q",
   ], refresh, {
     transferCatalogs: async () => {
@@ -2268,7 +2280,10 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     checkCatalogFreshness: async () => [{ name: "Test", status: "outdated" }],
   });
   assert.match(outdatedManager.renderedOutput, /OUTDATED/);
-  const addFromManager = await driveRefresh(["m", "a", "\x1b", "q"], refresh, {
+  const addFromManager = await driveRefresh([
+    ["m", /USER CATALOGS/], ["a", /ADD CATALOG/],
+    ["\x1b", userCatalogsReadyFrame], "q",
+  ], refresh, {
     addCatalog: async () => ({ catalog: "New", count: 0 }),
   });
   assert.equal(addFromManager.result, true);
@@ -2330,7 +2345,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const managerRemoved = [];
   const removedInManager = await driveRefresh([
     "m", "\x1b[3~", "\r", "y",
-    ["\x1b", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REMOVE CATALOG)/],
+    ["\x1b", userCatalogsReadyFrame],
     "q",
   ], refresh, {
     removeCatalog: async (name) => {
@@ -2345,7 +2360,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
     ["\r", /Choose a user catalog to refresh/],
     ["\r", /Refreshed Test · 1 resource indexed/],
-    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+    ["\r", userCatalogsReadyFrame], "q",
   ], async (name) => {
     managerRefreshed.push(name);
     return {
@@ -2361,7 +2376,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
       ["\r", /Choose a user catalog to refresh/], ["\x1b[B", /› Beta/],
       ["\r", /Refreshed Beta · 1 resource indexed/],
-      ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+      ["\r", userCatalogsReadyFrame], "q",
     ],
     async (name) => ({
       catalogs: [
@@ -2399,14 +2414,14 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/],
     ["\r", /Choose a user catalog to refresh/],
     ["\r", /Refreshed Test · 2 resources indexed/],
-    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+    ["\r", userCatalogsReadyFrame], "q",
   ], refresh);
   assert.equal(refreshedOne.result, true);
   assert.deepEqual(refreshed, ["Test"]);
   const refreshedAll = await driveRefresh([
     ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/], ["\x1b[C", /‹ ALL CATALOGS ›/],
     ["\r", /Refreshed 1 catalog · 2 resources indexed/],
-    ["\r", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/], "q",
+    ["\r", userCatalogsReadyFrame], "q",
   ], refresh);
   assert.equal(refreshedAll.result, true);
   assert.deepEqual(refreshed, ["Test", undefined]);
@@ -2422,7 +2437,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       failures: [{ name: "Test", message: "Repository not found." }],
     }),
     {},
-    ["REFRESH CATALOG", /(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*REFRESH CATALOG)/],
+    ["REFRESH CATALOG", userCatalogsReadyFrame],
   );
   assert.equal(failedRefresh.result, false);
   assert.ok(failedRefresh.renderedOutput.includes("Catalog Test was not refreshed."));
