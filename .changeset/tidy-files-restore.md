@@ -4,16 +4,16 @@
 
 Improve source catalog safety and dashboard parity
   - Restore pre-existing managed files when a multi-file install or update fails partway through.
-  - Add deterministic audits for pinned resources, with per-file findings, explicit coverage, and install blocking when findings or skipped content are reported.
+  - Add deterministic audits for pinned resources with per-file findings and explicit coverage; block installs when findings or skipped content are reported.
   - Support versioned resource-collection export/import with staged publication and rollback; add optional Ed25519 signatures and trusted-key verification.
   - Preserve normalized SPDX license expressions and add `--license` filtering to `list` and `search`.
-  - Expand dashboard search and filters across metadata, tags, status, license, source provenance, and descriptions.
+  - Expand dashboard search across metadata, tags, status, license, source provenance, and descriptions.
+  - Add Catalog/Kind/License filters to the Catalog browser and scoped Inventory License filtering using source catalog metadata.
   - Improve dashboard detail panels so locations, descriptions, pinned sources, and wrapped inventory URLs remain complete and usable.
   - Add contextual update errors and explicit confirmation before retrying GitHub CLI updates with `--force`; retain local-modification safeguards.
   - List GitHub commit history for source skills, agents, and instructions and allow a selected full SHA for installs and targeted updates without changing catalog pins.
   - Compare freshness using commits affecting each resource file, avoiding false updates from unrelated repository commits.
-  - Keep source audit coverage and install blocking for findings or incomplete coverage; TUI Preview combines audit results in its first right-hand panel with the source tree in the second, replacing the separate Audit action.
-  - Retain Catalog and Kind filters in the Catalog browser with License as a primary filter, and add scoped Inventory License filtering using license metadata from its catalog source.
+  - In TUI Preview, show audit results in the first right-hand panel and the source tree in the second, replacing the separate Audit action.
   - Keep resource-collection import/export CLI-only because file paths and optional signing/trust inputs need explicit handling; dashboard transfer remains limited to catalog configuration.
   - Paginate source preview through each file in order, retain complete metadata, color labels and values consistently, and display source, page, and filename as a header visually separated from the source content.
   - Fix Preview file-boundary detection so Markdown table separators are not treated as filenames and pagination follows source files correctly.

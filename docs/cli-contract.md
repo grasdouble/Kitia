@@ -185,13 +185,13 @@ stacked details on narrow terminals. The Inventory, Catalog Resources, Connected
 Catalogs, and Resource Revisions table panels group their existing title first
 and their existing metadata next, above one theme-colored divider. Inventory
 and Catalog Resources show `RESOURCES n/total · range`, then the shared
-`Filter query · Catalog value · Kind value` line; Catalog Resources adds
-`Tag value · Status value · License value`, wrapping this full summary above
-the same divider as needed. Connected Catalogs has no separate metadata lines:
-its count remains in the title. Resource Revisions keeps its resource/action
-context and, when paginated, its existing Showing range above the divider; no
-column labels are added to revisions. Existing table column headings and data
-rows remain below the divider. Moving these metadata lines reserves header rows
+`Filter query · Catalog value · Kind value · License value` line, wrapping
+this full summary above the same divider as needed. Connected Catalogs has no
+separate metadata lines: its count remains in the title. Resource Revisions
+keeps its resource/action context and, when paginated, its existing Showing
+range above the divider; no column labels are added to revisions. Existing
+table column headings and data rows remain below the divider. Moving these
+metadata lines reserves header rows
 and can reduce the responsive list row budget; selected-row visibility and
 pagination reflect the available body rows. Framed `SHORTCUTS` panels, including
 modal shortcut frames, place each nonempty category—Actions, Filters, Display,
