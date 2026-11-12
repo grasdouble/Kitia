@@ -64,7 +64,7 @@ jobs:
       - name: Test Changeset format checker
         run: node --test scripts/check-changeset-format.test.mjs
       - name: Validate Changeset metadata
-        run: pnpm changeset status
+        run: pnpm changeset status --since=origin/main
       - name: Check Changesets coverage
         id: changesets
         uses: grasdouble/Lufa-CICD/actions/check-changesets@e6b2f080ba3bd5d7b8c7140e21623ac06388a245 # check-changesets-v1.1.2
