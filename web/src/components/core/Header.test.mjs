@@ -17,7 +17,7 @@ after(async () => {
   await vite.close();
 });
 
-test('mobile navigation opens and closes when a section is selected', async () => {
+test('mobile page navigation closes after selection and marks the current page', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'https://kitia.test/' });
   const globalNames = ['window', 'document', 'navigator', 'HTMLElement', 'MouseEvent', 'IS_REACT_ACT_ENVIRONMENT'];
   const previousGlobals = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
@@ -47,20 +47,21 @@ test('mobile navigation opens and closes when a section is selected', async () =
     assert.equal(button.getAttribute('aria-expanded'), 'false');
     assert.equal(button.getAttribute('aria-label'), 'Open navigation menu');
     assert.equal(button.getAttribute('aria-controls'), nav.id);
-    const closedClass = nav.className;
+    assert.equal(nav.querySelector('a[aria-current="page"]').getAttribute('href'), '/');
 
     await React.act(async () => button.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
     assert.equal(button.getAttribute('aria-expanded'), 'true');
     assert.equal(button.getAttribute('aria-label'), 'Close navigation menu');
-    assert.notEqual(nav.className, closedClass);
 
     container.addEventListener('click', (event) => {
       if (event.target.closest('a')) event.preventDefault();
     });
-    await React.act(async () => nav.querySelector('a[href="/#dashboard"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+    await React.act(async () => nav.querySelector('a[href="/demo"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true })));
     assert.equal(button.getAttribute('aria-expanded'), 'false');
     assert.equal(button.getAttribute('aria-label'), 'Open navigation menu');
-    assert.equal(nav.className, closedClass);
+    window.history.pushState(null, '', '/demo');
+    await React.act(async () => reactRoot.render(React.createElement(Header)));
+    assert.equal(nav.querySelector('a[aria-current="page"]').getAttribute('href'), '/demo');
   } finally {
     if (reactRoot) await React.act(async () => reactRoot.unmount());
     dom.window.close();

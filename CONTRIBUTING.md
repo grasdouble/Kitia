@@ -29,6 +29,14 @@ pnpm run web:screenshots:update:termless
 
 The CLI lives in `cli/`, the website in `web/`, and shared documentation in `docs/`. The root package builds both; CLI output goes to `cli/dist/` and website output to `web/dist/`.
 
+Homepage section links live in `web/src/HomePage.tsx`: a sticky sidebar on wide screens and a sticky horizontal block below the header on smaller screens. `web/src/sectionScrolling.ts` provides an interruptible 800ms eased transition, respects reduced motion, and preserves sticky-header offsets. The shared header is reserved for pages and external links. When changing section anchors or layout, verify active-section tracking, unobscured anchor destinations, animation cancellation, and keyboard/mobile navigation; section navigation must not appear on the demo or changelog pages.
+
+The website's `/demo` page mounts the shared Ink dashboard in a browser terminal, using the same screen components, layout, modals, and keyboard handlers as the local TUI. Run `pnpm run web:dev` to explore it; click the terminal to type or use the on-page key buttons. The earlier web-style playground remains available at `/demo-keep`.
+
+Only the demo's operation handlers use in-memory fixtures: lifecycle actions, source previews, revision selection, and catalog management never contact GitHub or modify local files. Fixtures cover skills, agents, and instructions; instructions remain project-only, while skills and agents support project and user scope independently. Reset or reload restores the fixtures. Audit text explicitly identifies the simulation; real repository access, filesystem safety checks, and security audits require the installed CLI/TUI. Shared TUI color roles and the screenshot/xterm ANSI palette live in `cli/src/dashboard/colors.ts`; `web/src/components/demo/terminalTheme.ts` resolves those roles for CSS without a separate browser semantic theme. Page surfaces and borders use the site's CSS tokens. No server process is required for the deployed demo.
+
+Use the [dashboard-demo-maintenance skill](.agents/skills/dashboard-demo-maintenance/SKILL.md) when changing the demo or TUI behavior that affects it. It covers shared-renderer parity, fixture contracts, browser lifecycle, route preservation, and focused verification.
+
 ## Versioning and releases
 
 Use [Changesets](https://github.com/changesets/changesets) for user-facing package changes:

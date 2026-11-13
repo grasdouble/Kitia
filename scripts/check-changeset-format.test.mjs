@@ -16,6 +16,25 @@ test("accepts a Changeset with only user-facing details", () => {
   ), []);
 });
 
+test("accepts empty no-bump frontmatter with adjacent delimiters or blank lines", () => {
+  for (const newline of ["\n", "\r\n"]) {
+    for (const yaml of ["", newline, ` \t${newline}`]) {
+      for (const body of ["", `${newline}${newline}Explain a repository-only change.${newline}`]) {
+        assert.deepEqual(
+          validateChangesetContent(`---${newline}${yaml}---${body}`),
+          [],
+        );
+      }
+    }
+  }
+});
+
+test("rejects unterminated frontmatter and delimiters outside their own lines", () => {
+  for (const content of ["---\n", "---\n---invalid\n", "---\n\"@grasdouble/kitia\": minor---\n", "Summary\n---\n---\n"]) {
+    assert.match(validateChangesetContent(content)[0], /frontmatter/);
+  }
+});
+
 test("rejects ungrouped details, empty groups, and user-facing groups after technical", () => {
   assert.match(
     validateChangesetContent(`${frontmatter}Summary\n    - Detail.`)[0],

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export function validateChangesetContent(content, filename = "<changeset>") {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/);
+  const match = content.match(/^---\r?\n((?:[\s\S]*?\r?\n)?)---[ \t]*(?:\r?\n|$)([\s\S]*)$/);
   if (!match) return [`${filename}: expected YAML frontmatter delimited by --- lines`];
   if (!match[1].trim()) return [];
 

@@ -324,7 +324,7 @@ function colorize(value, color, enabled = supportsColor()) {
     return value;
   }
   const code = DASHBOARD_THEME.terminalAnsi[color];
-  if (!code) {
+  if (typeof code !== "string" || !code) {
     throw new CatalogError(`Unknown terminal color: ${color}`);
   }
   return `\u001b[${code}m${value}\u001b[0m`;
