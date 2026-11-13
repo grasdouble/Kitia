@@ -14,6 +14,8 @@ pnpm test
 pnpm run cli:test:package-smoke
 ```
 
+`pnpm run web:dev` starts Vite on all network interfaces and prints both localhost and LAN URLs. The development server is accessible to other devices on the local network; use `pnpm run web:dev --host 127.0.0.1` to restrict access to this machine.
+
 `pnpm test` runs documentation and CLI tests. For CLI or machine-readable output changes, preserve the [CLI compatibility contract](docs/cli-contract.md) and run `pnpm run cli:test:contract`.
 
 Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; source-history behavior and prefix handling lives in `cli/test/source-history.test.js`. Catalog discovery and dashboard filtering has focused coverage in `cli/test/dashboard-filters.test.js`. Inventory migration behavior is covered by `cli/test/migrations.test.js`; when changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts. `pnpm test` also runs the strict TypeScript boundary configured in `tsconfig.strict.json`.

@@ -32,6 +32,9 @@ export default defineConfig({
   root,
   base: '/',
   plugins: [...browserInkPlugins(), pageRoutes()],
+  server: {
+    host: true,
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
