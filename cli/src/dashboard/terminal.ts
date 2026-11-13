@@ -4,6 +4,17 @@ const readline = require("node:readline");
 const { CatalogError } = require("../catalog/resources/index.js");
 const { matchesSearchText } = require("../catalog/search.js");
 import type { CatalogResource } from "../catalog/entries.js";
+const { adaptiveColumnWidths } = require("../table-layout.js");
+import { DASHBOARD_THEME } from "./colors.js";
+
+function fitColumn(value, width) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const characters = Array.from(text);
+  const fitted = characters.length <= width
+    ? text
+    : `${characters.slice(0, Math.max(0, width - 3)).join("")}...`;
+  return fitted.padEnd(width);
+}
 
 interface Keypress {
   name?: string;
@@ -15,26 +26,56 @@ interface Keypress {
 type TerminalInput = NodeJS.ReadStream & { isRaw?: boolean };
 type TerminalOutput = NodeJS.WriteStream;
 
-function formatCatalogHeader() {
-  return `${colorize("CATALOG".padEnd(18), "bold")} ${colorize("KIND".padEnd(11), "bold")} ${colorize("ID".padEnd(30), "bold")} ${colorize("STATUS".padEnd(13), "bold")} DESCRIPTION`;
+function catalogColumnWidths(resources, width, markerWidth = 0) {
+  const contentWidth = (header, value) => resources.reduce((maximum, resource) =>
+    Math.max(maximum, String(value(resource) || "").length), header.length);
+  const kindWidth = contentWidth("KIND", (resource) => resource.kind);
+  const catalogWidth = contentWidth("CATALOG", (resource) => resource.catalog);
+  const idWidth = contentWidth("ID", (resource) => resource.id);
+  const statusWidth = contentWidth("STATUS", (resource) => resource.status || "-");
+  const compact = Number.isFinite(width) && width < 58;
+  const rules = [
+    { contentWidth: catalogWidth, minWidth: compact ? 7 : catalogWidth, growWeight: 1, shrinkWeight: 1 },
+    { contentWidth: kindWidth, minWidth: kindWidth, shrinkWeight: 0 },
+    { contentWidth: idWidth, minWidth: compact ? 6 : idWidth, growWeight: 1, shrinkWeight: 1 },
+    { contentWidth: statusWidth, minWidth: statusWidth, shrinkWeight: 0 },
+    { contentWidth: contentWidth("DESCRIPTION", (resource) => resource.description), minWidth: 12, growWeight: 2, shrinkWeight: 4 },
+  ];
+  const naturalWidth = rules.reduce((sum, rule) => sum + rule.contentWidth, rules.length - 1);
+  const availableWidth = Number.isFinite(width) ? Math.max(1, width - markerWidth) : naturalWidth;
+  return adaptiveColumnWidths(availableWidth, rules);
 }
 
-function formatCatalogRow(resource: CatalogResource, marker = "", color = supportsColor()): string {
-  const statusColor = {
-    experimental: "yellow",
-    stable: "green",
-    deprecated: "red",
-  }[resource.status] || "gray";
-  const catalogColor = resource.source_repository ? "cyan" : "gray";
-  const fields = [
-    colorize(resource.catalog.padEnd(18), catalogColor, color),
-    colorize(resource.kind.padEnd(11), "magenta", color),
-    resource.id.padEnd(30),
-    colorize((resource.status || "-").padEnd(13), statusColor, color),
-    truncateDescription(resource.description),
+function formatCatalogHeader(columns, markerWidth = 0, color = supportsColor()) {
+  const labels = ["CATALOG", "KIND", "ID", "STATUS", "DESCRIPTION"];
+  return " ".repeat(markerWidth) + labels.map((label, index) =>
+    colorize(fitColumn(label, columns[index]), "bold", color)).join(" ");
+}
+
+function formatCatalogRow(resource, marker = "", color = supportsColor(), columns) {
+  const statusColor = DASHBOARD_THEME.semantic.catalogStatus[resource.status] || DASHBOARD_THEME.semantic.catalogStatus.unknown;
+  const catalogColor = resource.source_repository
+    ? DASHBOARD_THEME.semantic.catalogRepository.connected
+    : DASHBOARD_THEME.semantic.catalogRepository.missing;
+  const values = [
+    colorize(fitColumn(resource.catalog, columns[0]), catalogColor, color),
+    colorize(fitColumn(resource.kind, columns[1]), DASHBOARD_THEME.semantic.terminalKind, color),
+    fitColumn(resource.id, columns[2]),
+    colorize(fitColumn(resource.status || "-", columns[3]), statusColor, color),
+    fitColumn(resource.description, columns[4]),
   ];
-  const prefix = marker ? colorize(marker, "cyan", color) : "";
-  return `${prefix}${fields.join(" ")}`;
+  const prefix = marker ? colorize(marker, DASHBOARD_THEME.semantic.selected, color) : "";
+  return `${prefix}${values.join(" ")}`;
+}
+
+function formatCatalogTable(resources, output = process.stdout) {
+  const color = supportsColor(output);
+  const width = output.isTTY ? output.columns || 100 : undefined;
+  const columns = catalogColumnWidths(resources, width);
+  return [
+    formatCatalogHeader(columns, 0, color),
+    ...resources.map((resource) => formatCatalogRow(resource, "", color, columns)),
+  ].join("\n");
 }
 
 async function resolveCatalogResource(
@@ -97,13 +138,15 @@ function selectCatalogResource(
         visible.length - viewport,
       ));
       const page = visible.slice(first, first + viewport);
+      const columns = catalogColumnWidths(visible, output.columns || 100, 2);
+      const color = supportsColor(output);
       const lines = [
         "Select a catalog entry (Esc to cancel):",
         `Filter: ${query}`,
-        formatCatalogHeader(),
+        formatCatalogHeader(columns, 2, color),
         ...(page.length
           ? page.map((resource, index) =>
-            formatCatalogRow(resource, first + index === selectedIndex ? "> " : "  ", supportsColor(output)))
+            formatCatalogRow(resource, first + index === selectedIndex ? "> " : "  ", color, columns))
           : ["No matching resources." ]),
         `${visible.length ? `${first + 1}-${first + page.length} of ${visible.length}` : "0 results"} | Enter: select`,
       ];
@@ -150,30 +193,51 @@ function selectCatalogResource(
 }
 
 
-function installedColumns(width) {
-  const description = Math.max(12, Math.min(36, width - 68));
-  const id = Math.max(12, Math.min(22, width - (9 + 15 + 11 + 10 + description + 5)));
-  return { scope: 9, catalog: 15, kind: 11, id, status: 10, description };
+function installedColumnWidths(resources, width) {
+  const compact = Number.isFinite(width) && width < 48;
+  const contentWidth = (header, value) => resources.reduce((maximum, resource) =>
+    Math.max(maximum, String(value(resource) || "").length), header.length);
+  const kindWidth = contentWidth("KIND", (resource) => resource.kind);
+  const scopeWidth = contentWidth("SCOPE", (resource) => resource.scope || "project");
+  const catalogWidth = contentWidth("CATALOG", (resource) => resource.catalog);
+  const idWidth = contentWidth("ID", (resource) => resource.id);
+  const statusWidth = contentWidth("STATUS", (resource) => dashboardStatus(resource));
+  const rules = [
+    { contentWidth: scopeWidth, minWidth: scopeWidth, shrinkWeight: 0 },
+    { contentWidth: catalogWidth, minWidth: compact ? 6 : catalogWidth, maxWidth: catalogWidth + 4, growWeight: 1, shrinkWeight: 1 },
+    { contentWidth: kindWidth, minWidth: kindWidth, shrinkWeight: 0 },
+    { contentWidth: idWidth, minWidth: compact ? 6 : idWidth, growWeight: 1, shrinkWeight: 1 },
+    { contentWidth: statusWidth, minWidth: statusWidth, shrinkWeight: 0 },
+    ...(!compact ? [{
+      contentWidth: contentWidth("DESCRIPTION", (resource) => resource.description),
+      minWidth: 12,
+      growWeight: 3,
+      shrinkWeight: 4,
+    }] : []),
+  ];
+  const naturalWidth = rules.reduce((sum, rule) => sum + rule.contentWidth, rules.length - 1);
+  const widths = adaptiveColumnWidths(Number.isFinite(width) ? width : naturalWidth, rules);
+  return {
+    scope: widths[0],
+    catalog: widths[1],
+    kind: widths[2],
+    id: widths[3],
+    status: widths[4],
+    description: compact ? 0 : widths[5],
+    compact,
+  };
 }
 
-function fitColumn(value, width) {
-  const characters = Array.from(String(value || ""));
-  if (characters.length > width) {
-    return `${characters.slice(0, Math.max(0, width - 3)).join("")}...`;
-  }
-  return characters.join("").padEnd(width);
-}
-
-function formatInstalledHeader(width = 100) {
-  const columns = installedColumns(width);
-  return ([
+function formatInstalledHeader(columns) {
+  return [
     ["SCOPE", columns.scope],
     ["CATALOG", columns.catalog],
     ["KIND", columns.kind],
     ["ID", columns.id],
     ["STATUS", columns.status],
-    ["DESCRIPTION", columns.description],
-  ] as Array<[string, number]>).map(([label, columnWidth]) => label.padEnd(columnWidth)).join(" ");
+    ...(!columns.compact ? [["DESCRIPTION", columns.description]] : []),
+  ].filter(([, columnWidth]) => columnWidth > 0)
+    .map(([label, columnWidth]) => fitColumn(label, columnWidth)).join(" ");
 }
 
 function dashboardStatus(resource) {
@@ -183,28 +247,44 @@ function dashboardStatus(resource) {
     : resource.status;
 }
 
-function formatInstalledRow(resource, marker = "", color = supportsColor(), width = 100) {
-  const columns = installedColumns(width);
+function formatInstalledRow(resource, marker = "", color = supportsColor(), columns) {
   const status = dashboardStatus(resource);
-  const statusColor = status === "unmanaged" ? "gray" : status === "attention" ? "yellow" : status === "update" ? "cyan" : "green";
-  const scopeColor = resource.scope === "user" ? "cyan" : "blue";
-  const catalogColor = resource.source_repository ? "cyan" : "gray";
-  return [
-    colorize(fitColumn(`${marker}${resource.scope || "project"}`, columns.scope), scopeColor, color),
-    colorize(fitColumn(resource.catalog, columns.catalog), catalogColor, color),
-    colorize(fitColumn(resource.kind, columns.kind), "magenta", color),
-    fitColumn(resource.id, columns.id),
-    colorize(fitColumn(status, columns.status), statusColor, color),
-    fitColumn(resource.description, columns.description),
-  ].join(" ");
+  const statusColor = status === "unmanaged"
+    ? DASHBOARD_THEME.semantic.inventoryStatus.unmanaged
+    : status === "attention"
+      ? DASHBOARD_THEME.semantic.inventoryStatus.attention
+      : status === "update"
+        ? DASHBOARD_THEME.semantic.selected
+        : DASHBOARD_THEME.semantic.inventoryStatus.current;
+  const scopeColor = resource.scope === "user"
+    ? DASHBOARD_THEME.semantic.terminalScope.user
+    : DASHBOARD_THEME.semantic.terminalScope.project;
+  const catalogColor = resource.source_repository
+    ? DASHBOARD_THEME.semantic.catalogRepository.connected
+    : DASHBOARD_THEME.semantic.catalogRepository.missing;
+  const fields = [
+    [colorize(fitColumn(`${marker}${resource.scope || "project"}`, columns.scope), scopeColor, color), columns.scope],
+    [colorize(fitColumn(resource.catalog, columns.catalog), catalogColor, color), columns.catalog],
+    [colorize(fitColumn(resource.kind, columns.kind), DASHBOARD_THEME.semantic.terminalKind, color), columns.kind],
+    [fitColumn(resource.id, columns.id), columns.id],
+    [colorize(fitColumn(status, columns.status), statusColor, color), columns.status],
+    [fitColumn(resource.description, columns.description), columns.description],
+  ];
+  return fields.filter(([, width]) => width > 0).map(([value]) => value).join(" ");
 }
 
 function renderInstalledResources(resources, output = process.stdout, errors = []) {
-  const width = output.columns || 100;
+  const width = output.isTTY ? output.columns || 100 : undefined;
+  const columns = installedColumnWidths(resources, width);
   const lines = resources.length
     ? [
-      formatInstalledHeader(width),
-      ...resources.map((resource) => formatInstalledRow(resource, "", supportsColor(output), width)),
+      formatInstalledHeader(columns),
+      ...resources.flatMap((resource) => [
+        formatInstalledRow(resource, "", supportsColor(output), columns),
+        ...(columns.compact && resource.description
+          ? [`  ${truncateDescription(resource.description, Math.max(4, width - 2))}`]
+          : []),
+      ]),
     ]
     : ["No catalog-managed resources found in project or user scope."];
   if (errors.length) {
@@ -243,19 +323,7 @@ function colorize(value, color, enabled = supportsColor()) {
   if (!enabled) {
     return value;
   }
-  const codes = {
-    bold: "1",
-    gray: "90",
-    red: "31",
-    green: "32",
-    yellow: "33",
-    blue: "34",
-    magenta: "35",
-    cyan: "36",
-    whiteOnBlue: "97;44",
-    whiteOnGray: "97;100",
-  };
-  const code = codes[color];
+  const code = DASHBOARD_THEME.terminalAnsi[color];
   if (!code) {
     throw new CatalogError(`Unknown terminal color: ${color}`);
   }
@@ -263,7 +331,7 @@ function colorize(value, color, enabled = supportsColor()) {
 }
 
 module.exports = {
-  formatCatalogHeader, formatCatalogRow, resolveCatalogResource, selectCatalogResource,
+  formatCatalogTable, resolveCatalogResource, selectCatalogResource,
   formatInstalledHeader, formatInstalledRow, renderInstalledResources, browseInstalledResources,
   truncateDescription, supportsColor, colorize,
 };

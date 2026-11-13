@@ -36,20 +36,58 @@ check.
 
 | Command family | Contract |
 |---|---|
-| no command | Opens the dashboard by default; equivalent to `dashboard` |
-| `list`, `search` | Discover resources; `--json` retains its existing array format |
+| `list`, `search` | Discover resources; support `--catalog`, `--kind`, `--tag`, `--status`, and `--license`; `--json` retains its existing array format |
 | `show`, `preview` | Human-readable inspection; an omitted kind uses the normal ambiguity rules |
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
+| `versions <kind> <id>` | List up to 500 newest GitHub commits affecting a skill entrypoint or an agent/instruction Markdown file, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
 | `validate` | Strict validation of all catalog sources |
+| `collection export`, `collection import` | Share versioned pinned references to selected resources; collections contain no resource content and do not install resources |
+
 
 Installation defaults to Copilot and the target defaults to the current
 directory. Updates preserve registered runtimes; they do not silently remove
 resources absent from the current catalog. `--force` remains explicit and does
 not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
+
+`kitia versions <kind> <id> [--catalog <name>]` supports skills, agents, and
+instructions. It uses `gh api` against the GitHub commits endpoint, filtered
+to `<source_path>/SKILL.md` for skills and the exact Markdown file path for
+agents and instructions. History covers commits affecting that file only;
+supporting files are not listed. Results are newest first and bounded to five
+pages of 100 commits; displayed dates are commit committer dates. GitHub CLI
+authentication and network access are required.
+`kitia install <kind> <id> --ref <sha-or-prefix>` and the corresponding
+targeted `kitia update <kind> <id> --ref <sha-or-prefix>` use that commit for
+this operation without changing the catalog index pin. The installed inventory
+records the chosen full SHA, so a later ordinary update returns the installation
+to the catalog pin. A hexadecimal prefix must be at least 7 characters and is
+resolved only against the selected resource's listed history; ambiguous or
+unknown prefixes are rejected. Full 40-character commit SHAs remain accepted.
+`--ref` is supported only for GitHub source skills, agents, and instructions.
+When an installed GitHub source resource ref differs from its catalog pin,
+`check` and dashboard inventory compare the latest commit affecting its source
+file at each ref. For skills, `source_path` is a directory and the history path
+is `<source_path>/SKILL.md` (supporting files are not covered by this
+entrypoint history); for agents and instructions, `source_path` is the exact
+Markdown file path. Thus unrelated repository commits do not imply a resource
+update. Resources without a supported GitHub repository/file path retain exact
+pin comparison. Path-history checks require GitHub CLI authentication and
+network access. If either lookup fails or is invalid, `check` reports an error
+(dashboard inventory reports a scope scan error); it must not report the
+resource as current.
+`--audit` is opt-in and applies only to `preview` and `install` of pinned
+source-catalog resources; it is not an update check. It is rejected for other
+commands and for resources without pinned source metadata. Preview reports
+findings and coverage but continues. An audited install is blocked if any rule
+matches or coverage is incomplete, including skipped files. The deterministic
+checks are intentionally limited and are not an exhaustive security analysis:
+neither a complete scan nor an empty findings list guarantees that a resource
+is safe. See the [resource audit guide](resource-audit.md) for the rules and
+coverage limits.
 
 `--scope project|user` is an additive option for `install`, `update`,
 `uninstall`, `check`, and `doctor`. External source lifecycle commands use the
@@ -67,15 +105,160 @@ Read-only commands and previews do not create home configuration directories.
 other scope and reports the failing scope explicitly instead of rewriting it.
 Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
+Long-running dashboard operations show a centered blocking popup with an
+animated spinner and progress label. Input is ignored until the operation ends.
+Operations that can block run in a worker thread so rendering and animation
+continue during the work.
+Preview uses a dedicated screen below the dashboard header and opens directly
+on source-file content, not an initial tree page. With enough terminal width
+and height, source files occupy the main pane on the left; the right sidebar
+stacks `AUDIT REPORT` above `SOURCE TREE`. On narrow or short terminals, one
+focused pane fills the available content area instead. Press `S`, `A`, or `T`
+to focus source, audit, or tree; `Tab` cycles those panes and `Shift+Tab` cycles
+backward. Left/Right or PageUp/PageDown navigate only the focused pane. Each
+pane retains its own page when focus changes, and pagination adapts to the
+available pane width and height. Enter or Esc closes Preview.
+The source pane groups its title, page counter, and filename into a distinct
+header above a theme-colored divider. The audit and tree panes likewise separate
+their existing title and page counter from the body with one divider row; they
+do not gain filename rows. Header rows are reserved separately from each pane's
+body pagination, including in narrow and short-terminal layouts.
+Preview preserves Markdown source bodies, including tables, rules, frontmatter,
+and fenced examples. Source-only syntax colors distinguish Markdown headings,
+emphasis, links and code, plus comments, keywords, strings and other supported
+code tokens. Colors do not render Markdown or alter source characters, whitespace,
+line wrapping, page boundaries, filenames, audit text or tree text. Tokenization
+covers each complete logical file before wrapping and pagination, so multiline
+comments, strings and fenced blocks retain their syntax state across pages.
+Unmatched Markdown emphasis delimiters remain literal and do not carry syntax
+color into a later paragraph, heading, or table; valid nested and multiline
+emphasis within a paragraph remains highlighted without changing source text.
+Catalog Preview uses upstream file boundaries: the `SKILL.md` entrypoint
+followed by files declared in the source tree. Catalog agent and instruction
+previews remain single source files with their provenance metadata.
+In Inventory, `P` previews the bytes currently installed in the selected local
+skill, agent, or instruction and audits those same local files using the
+deterministic audit rules. Findings retain their local path and line attribution;
+coverage lists every detected file and any skipped path/reason. Binary,
+unreadable, oversized, invalid-UTF-8, or otherwise unsupported content is
+explicitly skipped rather than audited as a display placeholder. Missing or
+unsafe paths still fail Preview. A clean result is not a safety guarantee.
+Catalog Resources `P` and the `kitia preview` command continue to use pinned
+source content and retain their existing audit behavior.
+
+Supported filename extensions are Markdown (`md`, `markdown`, `mdown`, `mkd`),
+JavaScript (`js`, `mjs`, `cjs`, `jsx`), TypeScript (`ts`, `mts`, `cts`, `tsx`),
+JSON/JSONC (`json`, `jsonc`), Python (`py`, `pyw`), shell (`sh`, `bash`, `zsh`,
+`ksh`), YAML (`yaml`, `yml`), markup (`html`, `htm`, `xml`, `svg`), CSS (`css`),
+Go (`go`), Rust (`rs`) and SQL (`sql`). Shell startup filenames `.bashrc`,
+`.bash_profile`, `.bash_login`, `.profile`, `.zshrc`, `.zprofile`, `.zshenv` and
+`.zlogin` also select the shell grammar.
+Markdown backtick and tilde fences select a grammar only for an explicit
+supported language: `md`/`markdown`, `js`/`javascript`/`jsx`,
+`ts`/`typescript`/`tsx`, `json`/`jsonc`, `py`/`python`,
+`sh`/`shell`/`bash`/`zsh`/`ksh`, `yaml`/`yml`,
+`html`/`markup`/`xml`/`svg`/`mathml`, `css`, `go`/`golang`, `rs`/`rust` or
+`sql`. Unknown filenames and unknown or unlabeled fenced languages remain plain
+source; content is never used to guess a language. Fence recognition covers
+top-level fences with up to three leading spaces, not fences nested inside
+blockquote or list containers. Shell aliases use the Bash grammar, and SQL uses
+a generic SQL grammar rather than dialect-specific parsing. These lexical source
+colors are not a rendered CommonMark or MDX view.
+This presentation does not change CLI output, JSON output or command syntax.
+Inventory, catalog browser, and catalog management distribute available list
+width across their columns. Catalog tables limit padding for short status and
+count fields, leaving more room for source names, IDs, and repository URLs.
+The dashboard colors each inventory and catalog row by resource kind: yellow for
+skills, cyan for agents, and green for instructions. Statuses remain labeled in
+text. Selecting a row overrides its kind color with blue highlighting and
+marks it with `›` in the fixed-width leading marker column on inventory, catalog
+browser, and catalog management screens. Unknown kinds retain the
+existing status-based inventory color or proprietary-license catalog
+highlighting, when applicable. CLI tables retain their existing presentation.
+On wide terminals, an open details panel shares the viewport; hiding it lets
+the table expand. Selected-content details in inventory, the catalog browser,
+and catalog management separate their existing title from the body with one
+theme-colored divider row. The title text and colors, selected-row highlighting,
+metadata, and keyboard actions remain unchanged; filename and page labels remain
+Preview-only. This applies to skills, agents, and instructions alike, including
+stacked details on narrow terminals. The Inventory, Catalog Resources, Connected
+Catalogs, and Resource Revisions table panels group their existing title first
+and their existing metadata next, above one theme-colored divider. Inventory
+and Catalog Resources show `RESOURCES n/total · range`, then the shared
+`Filter query · Catalog value · Kind value · License value` line, wrapping
+this full summary above the same divider as needed. Connected Catalogs has no
+separate metadata lines: its count remains in the title. Resource Revisions
+keeps its resource/action context and, when paginated, its existing Showing
+range above the divider; no column labels are added to revisions. Existing
+table column headings and data rows remain below the divider. Moving these
+metadata lines reserves header rows
+and can reduce the responsive list row budget; selected-row visibility and
+pagination reflect the available body rows. Framed `SHORTCUTS` panels, including
+modal shortcut frames, place each nonempty category—Actions, Filters, Display,
+and Navigation—in order on its own purple heading line, followed by its
+shortcuts. Search mode shows only applicable categories. The panels retain their
+metadata-free title/divider/body structure and complete keyboard hints,
+including conditional controls. Shortcut keys, selection colors, navigation,
+filters, and the `D` details toggle are unchanged. Summary cards, warnings,
+non-table modal main title bars, and the five-line global dashboard header are
+unchanged.
+Preview uses the same framed `SHORTCUTS` panel: `Display` lists source, audit,
+and tree controls; `Navigation` lists pane focus, pagination, and close
+controls. The panel reserves its full height before pane pagination is sized.
+Below 12 terminal rows, the shortcut frame temporarily occupies the screen;
+pane contents and independent page state return when the terminal is resized.
+These presentation changes do not change CLI command syntax, options, output
+contracts, or audit semantics.
+Human-readable CLI tables also adapt to terminal width; piped output retains
+complete values.
+The dashboard is the interactive resource-management interface. CLI-only
+`validate` and `doctor` provide strict catalog validation and environment/
+installation diagnostics for terminal automation; `--json` provides stable
+machine-readable discovery and maintenance reports. These automation and
+diagnostic commands intentionally have no dashboard equivalents.
+Collection import/export remain CLI-only because they require explicit file
+paths and optional signing keys or trust decisions; dashboard catalog transfer
+is intentionally limited to catalog configuration, not resource collections.
+
+
 
 Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
 New installations can choose project/user scope and Copilot/Claude/both
-clients; instructions remain project-scoped. Press `F` to enter filter mode and
-`D` to toggle the selected resource's details panel in inventory and catalog
-browsing or catalog management.
+clients; instructions remain project-scoped. In the catalog browser, `F` enters
+search mode; while searching, all typed characters—including `T`, `S`, and `L`—
+are query text, and `Enter` applies the query. Outside search mode, `F` starts
+search, `C`/`K` cycle catalog/kind, and `L` cycles license within the active
+Catalog/Kind scope. Search and all three filters intersect when selecting visible
+resources. A stale license value advances to the first available value rather
+than appearing unchanged. Changing catalog or kind resets License to `ALL`.
+`Esc` while searching clears the query and License filter while preserving
+Catalog and Kind; opening Catalog Resources with `A` likewise clears query and
+License while preserving Catalog and Kind. Tag and status remain resource
+metadata, but do not have Catalog browser filter controls.
+In Inventory, `L` cycles license within the active Catalog/Kind scope; license
+and text filters intersect, while `C`/`K` retain their paired cycling behavior.
+`Esc` from Inventory search clears only the text query; it preserves Catalog,
+Kind, and License filters. While search is active, `L` is query text.
+`V` on a skill opens its pinned commit history.
+Choosing a commit in the catalog browser applies that full SHA to this install
+only; choosing one in inventory applies it to the confirmed update. Neither
+changes the catalog pin. `D` toggles the selected resource's details panel.
+Catalog Resources `P` previews the selected pinned source and reports
+deterministic audit findings and coverage in the same screen's audit pane,
+replacing the separate Audit action. Catalog skills, agents, and instructions
+use the same source-first layout and independent pane navigation. If no audit
+result was returned, the audit pane explicitly says
+`Audit report unavailable; no result was returned.`; an absent report is not a
+clean audit. Dashboard installations always audit pinned source content first
+and are blocked on findings or incomplete coverage; audit results
+are warnings, not a safety guarantee. These interactive presentation changes do
+not change CLI command syntax, options, output contracts, or audit semantics.
+Selected-resource details expose license status and, when source provenance is
+available, the pinned repository/path/commit. Missing license metadata is shown
+as undeclared; incomplete pin metadata may show as unknown.
 The inventory's Catalog column shows the configured source-catalog name for a
 tracked artifact with source-repository metadata. For a custom user catalog, it
 adds the folder selected by the saved path mapping, such as
@@ -184,6 +367,37 @@ exits nonzero if any new index could not be fetched. Retry with
 `kitia catalog refresh --all`. Invalid catalog definitions reject the import
 before registry changes.
 
+### Resource collections
+
+`kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>]`
+writes a version-1 resource-selection manifest for explicitly selected resources.
+Each catalog reference includes its configured HTTPS GitHub repository and
+mapping, full commit SHA, and each resource's kind, ID, repository-relative path,
+and metadata. The manifest contains no upstream resource content. The optional
+`--signing-key` reads an Ed25519 private PEM file and signs the canonical
+version-1 manifest before writing it.
+
+`kitia collection import <file> [--trusted-key <public-pem>]` validates the
+entire manifest and all catalog conflicts before publishing any files. The
+optional public PEM file is the importer's out-of-band approved key; the
+manifest's `key_id` is its `sha256:` fingerprint (SHA-256 of DER/SPKI public
+key bytes), not a key or trust assertion. Signed imports fail closed without
+that key, on fingerprint mismatch, or after any signed-content alteration.
+Supplying `--trusted-key` requires a signature; unsigned imports remain
+compatible when the option is absent.
+
+Signatures use Ed25519 over recursively key-sorted canonical JSON with a
+versioned Kitia domain separator. Verification authenticates the approved
+signer and manifest integrity; it does not establish resource safety or
+independently prove upstream provenance. Import registers the referenced
+catalogs and stages minimal pinned indexes for selected resources; publication
+uses same-directory staging and rolls back published files on an I/O failure.
+Collections contain references only, not offline content. Installation still
+retrieves the pinned commit from GitHub; the commit may become unavailable, and
+later refresh may advance the index. Import does not fetch or install resources.
+[resource collections guide](resource-collections.md).
+
+
 Use `G` in the dashboard to choose a single catalog or all user catalogs to
 refresh. `kitia catalog refresh <name>` refreshes one source, and
 `kitia catalog refresh --all` refreshes every user source. A refresh fetches the
@@ -191,10 +405,11 @@ current upstream commit and replaces that source's metadata index; configuration
 and already-installed artifacts remain unchanged. Bulk refresh continues after
 individual failures and exits nonzero if any source failed.
 
-Discovery reads user indexes locally. Skills install through `gh skill` at the
-refreshed pin; agents and instructions are fetched from that pinned commit and
-installed through Kitia's normal managed-file inventory.
-Offline preview and source installation/update execution are refused; registry indexes remain local and require no network fetch.
+Discovery reads user indexes locally. Source resources resolve to the pinned
+upstream commit: skills delegate to `gh skill`, while agents and instructions
+are fetched and installed through Kitia's managed-file inventory. Multi-file
+installs and updates stage all replacements before publication and roll back on
+a write failure.
 
 
 ## JSON formats
@@ -206,8 +421,9 @@ Machine-readable schemas ship with the package:
 - [Installation inventory formats and migrations](inventory-migrations.md)
 
 Discovery schema versions are identified by the schema filename; the public
-discovery payload remains an unwrapped JSON array. Report envelopes include
-their schema version in `schema_version`.
+discovery payload remains an unwrapped JSON array. New optional discovery
+properties are additive within version 1. Report envelopes include their schema
+version in `schema_version`.
 
 Reports and discovery keep their version-1 envelopes and arrays. Source-backed
 resource identities include their configured catalog. External-resource
@@ -217,6 +433,22 @@ fail before any delegation.
 `list --json` and `search --json` emit a single JSON array on stdout, including
 an empty array when there are no results. Aggregate discovery entries include
 the configured catalog name and source metadata where available.
+
+`search` orders matches by relevance, prioritizing exact resource-identifier
+matches. The relative ranking is part of the user-facing behavior, but score
+weights and other internal ranking details are not a CLI contract.
+
+`--license <value>` combines with other `list`/`search` filters. A single valid
+SPDX license identifier matches when that identifier occurs anywhere in the
+resource's recognized SPDX expression (for example, `MIT` matches
+`MIT OR Apache-2.0`). A valid compound SPDX expression matches only the same
+stored normalized expression; the filter is trimmed at its ends but is not
+internally whitespace-normalized. A value that is not a valid single SPDX
+identifier or expression matches the upstream `license_status` exactly against
+the trimmed filter. Indexing preserves non-empty upstream `license_status`,
+uses `not-declared` when the upstream value is missing or blank, and adds
+normalized `license_spdx` only for a valid SPDX expression. Kitia never infers
+a missing license.
 
 
 `check --json`, `doctor --json`, and `install/update/uninstall --dry-run --json`
@@ -331,7 +563,7 @@ and object/array ordering are deliberately not frozen.
 Historical version-1 inventories are read from committed fixtures rather than
 created by the current writer. Future-version and unsupported-kind scenarios
 verify that files remain byte-for-byte unchanged even when `--force` is used.
-The suite is included in `npm test` and therefore in the existing Node.js 22/24,
+The suite is included in `npm test` and therefore in the existing Node.js 26
 Linux/macOS/Windows CI matrix.
 
 Do not update a baseline merely to make a regression green. Explain whether a

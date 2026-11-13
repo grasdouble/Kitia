@@ -19,20 +19,29 @@ Create a Changeset for user-facing package changes. Follow the repository's vers
 
 ## Required format
 
-Use one concise, user-facing sentence as the summary, followed by a short list of concrete details. Keep each detail on its own line. Write in English and describe outcomes, not implementation steps.
+Use one concise, user-facing sentence as the summary, followed by grouped details. Keep each detail specific, understandable without knowledge of internal code, and written in English. Describe outcomes, not implementation steps.
+
+Group details under bold bullet labels. Use two spaces before each group label and four spaces before its detail bullets:
+- **User-Facing**
+- **Technical**
+
+The User-Facing group MUST always come first. Keep each group together; never interleave them. Omit a group when it has no relevant details. Include technical changes only when they have a meaningful release impact; omit internal refactors with no user-relevant impact.
 
 ```md
 ---
 "@grasdouble/kitia": patch
 ---
 
-Add ready-to-use catalogs for Anthropic and GitHub Awesome Copilot.
-- Discover skills, agents, and instructions from the dashboard or CLI.
-- Support Copilot agent display names and filenames.
-- Keep refreshes scoped to the selected catalog.
+Improve catalog discovery and update reliability
+  - **User-Facing**
+    - Search catalogs by license, source, and description.
+    - Replace a resource with a selected commit through the existing update workflow.
+  - **Technical**
+    - Prevent partial installs from leaving managed files in an inconsistent state.
 ```
 
-The first sentence becomes the release-note headline. The following `- ` lines become nested details in the generated changelog. Avoid blank lines between the summary and its detail bullets, extra top-level bullets, commit links, and vague statements such as "Various improvements".
+The first sentence becomes the release-note headline. Group labels and their nested bullets form the details in the generated changelog. Avoid blank lines between the summary and details, ungrouped detail bullets, commit links, and vague statements such as "Various improvements".
+
 
 ## Release-note constraints
 

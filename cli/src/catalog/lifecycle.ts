@@ -1,9 +1,11 @@
 "use strict";
 
 const fs = require("node:fs");
+const { latestSourceVersionAtRef } = require("./sources/history.js");
 const { CatalogError } = require("./resources/index.js");
 const { readInstallState, trackedPaths, findUnmanagedArtifacts } = require("./inventory/index.js");
 const { readInstalledSourceSkills, readInstalledSourceResources } = require("./sources/installed.js");
+import type { execFileSync as ExecFileSync } from "node:child_process";
 import type { CatalogResource } from "./entries.js";
 export interface ScanError {
   scope: string;
@@ -13,8 +15,9 @@ export interface ScanError {
 function checkInstalledResources(
   target: string,
   sourceResources: CatalogResource[],
-  { catalog, scope, includeUnmanaged = false }: {
-    catalog?: string; scope?: string; includeUnmanaged?: boolean;
+  { catalog, scope, includeUnmanaged = false, run, revisionCache }: {
+    catalog?: string; scope?: string; includeUnmanaged?: boolean; run?: typeof ExecFileSync;
+    revisionCache?: Map<string, string | null>;
   } = {},
 ) {
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
@@ -51,6 +54,7 @@ function checkInstalledResources(
     updateAvailable = true;
   };
 
+  const currentSourceRevisions = revisionCache || new Map<string, string | null>();
   for (const { resource, installations, removed, tracked = true } of installedSourceResources) {
     if (!tracked) continue;
     const result = resultFor(resource);
@@ -68,9 +72,24 @@ function checkInstalledResources(
       messages.push(`Removed from catalog: ${resource.catalog || "source"} ${resource.kind} ${resource.id}. Use uninstall to remove it explicitly.`);
       continue;
     }
-    const stale = installations.filter((installation) =>
-      !installation.missing && installation.ref?.toLowerCase() !== resource.source_ref?.toLowerCase(),
-    );
+    const stale = installations.filter((installation) => {
+      if (installation.missing || installation.ref?.toLowerCase() === resource.source_ref?.toLowerCase()) return false;
+      if (!/^[a-f0-9]{40}$/i.test(installation.ref || "") ||
+          !/^[a-f0-9]{40}$/i.test(resource.source_ref || "")) return true;
+      const revisionKey = (ref: string) => `${resource.source_repository}:${resource.source_path}:${ref}`;
+      const installedKey = revisionKey(installation.ref!);
+      const catalogKey = revisionKey(resource.source_ref!);
+      if (!currentSourceRevisions.has(installedKey)) {
+        currentSourceRevisions.set(installedKey, latestSourceVersionAtRef(resource, installation.ref!, run));
+      }
+      if (!currentSourceRevisions.has(catalogKey)) {
+        currentSourceRevisions.set(catalogKey, latestSourceVersionAtRef(resource, resource.source_ref!, run));
+      }
+      const installedRevision = currentSourceRevisions.get(installedKey);
+      const catalogRevision = currentSourceRevisions.get(catalogKey);
+      return !installedRevision || !catalogRevision ||
+        installedRevision.toLowerCase() !== catalogRevision.toLowerCase();
+    });
     if (stale.length) {
       issue(result, "UPDATE_AVAILABLE", stale.map((entry) => entry.path));
       const installedRefs = [...new Set(stale.map(({ ref }) => ref?.slice(0, 7) || "unknown"))];
@@ -102,14 +121,16 @@ function checkInstalledResources(
 function collectInstalledScopes(
   targets: Record<string, string>,
   sourceResources: CatalogResource[],
+  { run }: { run?: typeof ExecFileSync } = {},
 ): { resources: Array<CatalogResource & { scope: string }>; errors: ScanError[] } {
   const result: { resources: Array<CatalogResource & { scope: string }>; errors: ScanError[] } = {
     resources: [],
     errors: [],
   };
+  const revisionCache = new Map<string, string | null>();
   for (const [scope, target] of Object.entries(targets)) {
     try {
-      const checked = checkInstalledResources(target, sourceResources, { scope, includeUnmanaged: true });
+      const checked = checkInstalledResources(target, sourceResources, { scope, includeUnmanaged: true, run, revisionCache });
       result.resources.push(...checked.resources.map((resource) => ({ ...resource, scope })));
     } catch (error) {
       if (!(error instanceof CatalogError)) throw error;

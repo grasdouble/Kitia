@@ -213,15 +213,22 @@ function readInstallState(targetRoot: string): InstallState {
             (record.apply_to !== undefined && (!Array.isArray(record.apply_to) || record.apply_to.some((value) => typeof value !== "string"))) ||
             (record.license_status !== undefined && typeof record.license_status !== "string") ||
             !Object.keys(files).length) fail();
-        const allowedPaths = kind === "skill"
-          ? new Set(Object.values(SOURCE_SKILL_DIRECTORIES).map((directory) => `${directory}/${id}/SKILL.md`))
-          : kind === "agent"
-            ? new Set([`.claude/agents/${id}.md`, `.github/agents/${id}.agent.md`, `.copilot/agents/${id}.agent.md`])
-            : new Set([`.claude/rules/${id}.md`, `.github/instructions/${id}.instructions.md`]);
+        const allowedPaths = kind === "skill" ? null : kind === "agent"
+          ? new Set([`.claude/agents/${id}.md`, `.github/agents/${id}.agent.md`, `.copilot/agents/${id}.agent.md`])
+          : new Set([`.claude/rules/${id}.md`, `.github/instructions/${id}.instructions.md`]);
+        let hasSkillEntryPoint = false;
         for (const [relativePath, file] of Object.entries(files)) {
-          if (!allowedPaths.has(relativePath) || !isFileFingerprint(file)) fail();
+          const validSkillFile = kind === "skill" && Object.values(SOURCE_SKILL_DIRECTORIES).some((directory) => {
+            const skillPrefix = `${directory}/${id}/`;
+            return relativePath.startsWith(skillPrefix) &&
+              relativePath.split("/").every((part) => part && part !== "." && part !== "..");
+          });
+          if ((kind === "skill" ? !validSkillFile : !allowedPaths.has(relativePath)) || !isFileFingerprint(file)) fail();
+          if (kind === "skill" && Object.values(SOURCE_SKILL_DIRECTORIES).some((directory) =>
+            relativePath === `${directory}/${id}/SKILL.md`)) hasSkillEntryPoint = true;
           targetPath(targetRoot, relativePath);
         }
+        if (kind === "skill" && !hasSkillEntryPoint) fail();
       }
     }
   }

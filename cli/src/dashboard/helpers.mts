@@ -1,10 +1,13 @@
 "use strict";
 
+import { DASHBOARD_THEME } from "./colors.js";
 import { createRequire } from "node:module";
+import { adaptiveColumnWidths } from "../table-layout.js";
 import type { CatalogResource } from "../catalog/entries.js";
 
 const require = createRequire(import.meta.url);
-const { matchesSearchText } = require("../catalog/search.js");
+const { matchesSearchText, searchRelevance } = require("../catalog/search.js");
+const { matchesLicense } = require("../catalog/license.js");
 
 export interface InventoryCatalogConfiguration {
   name: string;
@@ -96,17 +99,29 @@ export function filterCatalogResources(
   catalogFilter: string,
   kindFilter: string,
   catalogs: InventoryCatalogConfiguration[] = [],
+  filters: { license?: string } = {},
 ): CatalogResource[] {
   const labels = inventoryCatalogLabels(resources, catalogs);
-  return resources.filter((resource) => {
+  const visible = resources.filter((resource) => {
     const catalog = catalogCandidateLabel(resource, labels);
     if (catalogFilter !== "all" && catalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
+    if (filters.license && !matchesLicense(resource, filters.license)) return false;
     return matchesSearchText(query, [
       catalog, resource.kind, resource.id, resource.description,
-      resource.license_status || "",
+      resource.license_status || "", resource.license_spdx || "",
+      resource.category || "", resource.owner || "",
+      ...(resource.tags || []), resource.status || "",
+      resource.use_when || "", resource.example || "",
+      resource.expected_output || "", resource.source_repository || "",
+      resource.source_path || "",
     ]);
   });
+  if (query.trim()) {
+    visible.sort((left, right) =>
+      searchRelevance(right, query) - searchRelevance(left, query));
+  }
+  return visible;
 }
 
 export function mergeRefreshedCatalogResources(
@@ -140,18 +155,28 @@ export function mergeRefreshedCatalogResources(
   }
   return merged;
 }
+type CatalogFilterProperty = "catalog" | "kind" | "license";
 
-type CatalogFilterProperty = "catalog" | "kind";
-
-function catalogFilterValue(
+function catalogFilterValues(
   resource: CatalogResource,
   property: CatalogFilterProperty,
   labels?: Map<CatalogResource, string>,
-): string {
+): string[] {
   if (property === "catalog") {
-    return labels ? catalogCandidateLabel(resource, labels) : catalogLabel(resource);
+    return [labels ? catalogCandidateLabel(resource, labels) : catalogLabel(resource)];
   }
-  return resource.kind;
+  if (property === "kind") return [resource.kind];
+  return [resource.license_status, resource.license_spdx].filter((value): value is string => Boolean(value));
+}
+
+function matchesCatalogFilter(
+  resource: CatalogResource,
+  property: CatalogFilterProperty,
+  filter: string,
+  labels?: Map<CatalogResource, string>,
+): boolean {
+  if (property === "license") return matchesLicense(resource, filter);
+  return catalogFilterValues(resource, property, labels).includes(filter);
 }
 
 export function cycleFilter(
@@ -164,11 +189,36 @@ export function cycleFilter(
 ): string {
   const labels = inventoryCatalogs ? inventoryCatalogLabels(resources, inventoryCatalogs) : undefined;
   const values = [...new Set(resources
-    .filter((resource) => otherFilter === "all" || catalogFilterValue(resource, otherProperty, labels) === otherFilter)
-    .map((resource) => catalogFilterValue(resource, property, labels))
+    .filter((resource) => otherFilter === "all" ||
+      matchesCatalogFilter(resource, otherProperty, otherFilter, labels))
+    .flatMap((resource) => catalogFilterValues(resource, property, labels))
     .filter(Boolean))].sort((left, right) => left.localeCompare(right));
   const choices = ["all", ...values];
-  return choices[(choices.indexOf(current) + 1) % choices.length];
+  const index = choices.indexOf(current);
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
+}
+
+export function cycleCatalogFilter(
+  current: string,
+  resources: CatalogResource[],
+  property: "catalog" | "kind" | "license",
+  filters: { catalog: string; kind: string; license: string },
+  catalogs: InventoryCatalogConfiguration[] = [],
+): string {
+  if (property === "catalog" || property === "kind") {
+    const otherProperty = property === "catalog" ? "kind" : "catalog";
+    return cycleFilter(current, resources, property, otherProperty, filters[otherProperty], catalogs);
+  }
+
+  const scopedResources = filterCatalogResources(resources, "", filters.catalog, filters.kind, catalogs);
+  const values = [...new Set(scopedResources
+    .flatMap((resource) => catalogFilterValues(resource, "license"))
+    .filter(Boolean))]
+    .filter((value) => scopedResources.some((resource) => matchesLicense(resource, value)))
+    .sort((left, right) => left.localeCompare(right));
+  const choices = ["all", ...values];
+  const index = choices.indexOf(current);
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
 }
 
 
@@ -231,12 +281,14 @@ export function filterInventory(
   kindFilter: string,
   catalogs: InventoryCatalogConfiguration[] = [],
   precomputedLabels?: Map<CatalogResource, string>,
+  licenseFilter = "all",
 ): CatalogResource[] {
   const labels = precomputedLabels || inventoryCatalogLabels(resources, catalogs);
   return resources.filter((resource) => {
     const resourceCatalog = labels.get(resource) || catalogLabel(resource);
     if (catalogFilter !== "all" && resourceCatalog !== catalogFilter) return false;
     if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
+    if (licenseFilter !== "all" && !matchesLicense(resource, licenseFilter)) return false;
     return matchesSearchText(query, [
       resource.scope, resourceCatalog, resource.kind, resource.id,
       resource.status, resource.description,
@@ -245,11 +297,29 @@ export function filterInventory(
   });
 }
 
+export function cycleInventoryLicense(
+  current: string,
+  resources: CatalogResource[],
+  catalogFilter: string,
+  kindFilter: string,
+  catalogs: InventoryCatalogConfiguration[] = [],
+): string {
+  const labels = inventoryCatalogLabels(resources, catalogs);
+  const eligible = filterInventory(resources, "", catalogFilter, kindFilter, catalogs, labels);
+  const values = [...new Set(eligible
+    .flatMap((resource) => catalogFilterValues(resource, "license"))
+    .filter(Boolean))]
+    .filter((value) => eligible.some((resource) => matchesLicense(resource, value)))
+    .sort((left, right) => left.localeCompare(right));
+  const choices = ["all", ...values];
+  const index = choices.indexOf(current);
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
+}
 export function colorForStatus(status?: string) {
-  if (status === "unmanaged") return "gray";
-  if (status === "attention") return "yellow";
-  if (status === "update") return "blue";
-  return "green";
+  if (status === "unmanaged") return DASHBOARD_THEME.semantic.inventoryStatus.unmanaged;
+  if (status === "attention") return DASHBOARD_THEME.semantic.inventoryStatus.attention;
+  if (status === "update") return DASHBOARD_THEME.semantic.inventoryStatus.update;
+  return DASHBOARD_THEME.semantic.inventoryStatus.current;
 }
 
 export function fitText(value: unknown, width: number): string {
@@ -266,7 +336,18 @@ export function fitColumn(value: unknown, width: number): string {
 export function wrapText(value: unknown, width: number, maxLines = Infinity): string[] {
   const lines = [];
   let line = "";
-  for (const word of String(value || "").split(/\s+/).filter(Boolean)) {
+  for (const originalWord of String(value || "").split(/\s+/).filter(Boolean)) {
+    let word = originalWord;
+    while (word.length > width) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      const slash = word.lastIndexOf("/", width - 1);
+      const splitAt = slash > 0 ? slash + 1 : width;
+      lines.push(word.slice(0, splitAt));
+      word = word.slice(splitAt);
+    }
     if (line && line.length + word.length + 1 > width) {
       lines.push(line);
       line = "";
@@ -281,31 +362,49 @@ export function wrapText(value: unknown, width: number, maxLines = Infinity): st
   return limited;
 }
 
-export function tableColumns(width: number) {
-  const targetWidth = Math.max(1, width - 6);
-  const compact = width < 64;
+export function tableColumns(
+  width: number,
+  idContentWidth = 12,
+  catalogContentWidth = 9,
+) {
+  const compact = width < 58;
   const marker = 2;
   const scope = compact ? 5 : 7;
   const kind = compact ? 5 : 8;
   const status = compact ? 7 : 9;
-  const separators = compact ? 4 : 5;
-  const id = Math.max(compact ? 8 : 12, Math.min(24, Math.floor(targetWidth * 0.18)));
-  const catalog = compact ? 0 : Math.max(9, targetWidth - marker - scope - kind - status - id - separators);
+  const idContent = Math.max(8, idContentWidth);
+  const catalogContent = Math.max(9, catalogContentWidth);
+  const fields = adaptiveColumnWidths(width, [
+    { contentWidth: marker, minWidth: marker, maxWidth: marker, shrinkWeight: 0 },
+    { contentWidth: status, minWidth: 6, growWeight: 1 },
+    { contentWidth: scope, minWidth: 5, growWeight: 1 },
+    { contentWidth: kind, minWidth: 5, growWeight: 1 },
+    {
+      contentWidth: idContent,
+      minWidth: 8,
+      growWeight: 2,
+    },
+    ...(!compact ? [{
+      contentWidth: catalogContent,
+      minWidth: 9,
+      growWeight: 2,
+    }] : []),
+  ]);
   return {
-    marker,
-    status,
-    scope,
-    kind,
-    id,
-    catalog,
+    marker: fields[0],
+    status: fields[1],
+    scope: fields[2],
+    kind: fields[3],
+    id: fields[4],
+    catalog: compact ? 0 : fields[5],
   };
 }
-export function detailPanelLayout(width: number) {
+export function detailPanelLayout(width: number, listRatio = 0.68) {
   if (width < 112) {
     return { sideBySide: false, listWidth: undefined, detailsWidth: undefined };
   }
   const available = width - 3;
-  const listWidth = Math.floor(available * 0.68);
+  const listWidth = Math.floor(available * listRatio);
   return {
     sideBySide: true,
     listWidth,
@@ -313,22 +412,45 @@ export function detailPanelLayout(width: number) {
   };
 }
 
-
-export function catalogTableColumns(width: number) {
-  const targetWidth = Math.max(1, width - 6);
-  const compact = width < 64;
+export function catalogTableColumns(
+  width: number,
+  sourceContentWidth = 12,
+  idContentWidth = 12,
+  kindContentWidth = 4,
+) {
+  const compact = width < 58;
   const marker = 2;
-  const source = compact ? 11 : 30;
-  const kind = compact ? 8 : 12;
-  const installed = compact ? 7 : 11;
-  const separators = 4;
-  const minId = compact ? 8 : 12;
-  const fixedWidth = marker + source + kind + installed + separators + minId;
-  const flexibleWidth = Math.max(0, targetWidth - fixedWidth);
-  const id = compact
-    ? minId + Math.min(14, flexibleWidth)
-    : Math.max(12, Math.min(30, minId + flexibleWidth));
-  return { marker, source, kind, installed, id };
+  const installed = compact ? 4 : 9;
+  const sourceContent = Math.max(8, sourceContentWidth);
+  const idContent = Math.max(8, idContentWidth);
+  const kind = Math.max(compact ? 5 : 4, kindContentWidth);
+  const naturalWidth = marker + installed + kind + 4 + sourceContent + idContent;
+  const preserveValues = naturalWidth <= width;
+  const fields = adaptiveColumnWidths(width, [
+    { contentWidth: marker, minWidth: marker, maxWidth: marker, shrinkWeight: 0 },
+    { contentWidth: installed, minWidth: installed, maxWidth: installed + 2, growWeight: 1 },
+    {
+      contentWidth: sourceContent,
+      minWidth: preserveValues ? sourceContent : Math.min(sourceContent, 8),
+      growWeight: 2,
+      shrinkWeight: 1,
+    },
+    { contentWidth: kind, minWidth: kind, maxWidth: kind + 2, growWeight: 1 },
+    {
+      contentWidth: idContent,
+      minWidth: preserveValues ? idContent : Math.min(idContent, 8),
+      growWeight: 2,
+      shrinkWeight: 1,
+    },
+  ]);
+  return {
+    marker: fields[0],
+    installed: fields[1],
+    source: fields[2],
+    kind: fields[3],
+    id: fields[4],
+    compact,
+  };
 }
 
 export function tableLine(fields: Array<[string, number]>): string {

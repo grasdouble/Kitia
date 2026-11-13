@@ -28,7 +28,7 @@ jobs:
           version: 12.17.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run web:build

@@ -77,7 +77,7 @@ async function seedShowcase(directory) {
   const config = path.join(directory, "config");
   const indexes = path.join(config, "source-catalogs");
   await Promise.all([
-    fs.mkdir(path.join(home, ".agents", "skills", "herdr"), { recursive: true }),
+    fs.mkdir(path.join(home, ".agents", "skills", "unmanaged"), { recursive: true }),
     fs.mkdir(project, { recursive: true }),
     fs.mkdir(indexes, { recursive: true }),
   ]);
@@ -104,10 +104,10 @@ async function seedShowcase(directory) {
     writeJson(path.join(indexes, "catalogSources.json"), manifest),
     writeJson(path.join(indexes, `${catalogName}.json`), catalogIndex),
     fs.writeFile(
-      path.join(home, ".agents", "skills", "herdr", "SKILL.md"),
+      path.join(home, ".agents", "skills", "unmanaged", "SKILL.md"),
       [
         "---",
-        "name: herdr",
+        "name: unmanaged",
         "description: Example skill installed outside Kitia.",
         "---",
         "",
@@ -140,6 +140,7 @@ function showcaseEnvironment(fixture) {
     HOME: fixture.home,
     USERPROFILE: fixture.home,
     KITIA_CONFIG_DIR: fixture.config,
+    KITIA_INSTALLED_VERSION: "unknown",
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
     FORCE_COLOR: "1",

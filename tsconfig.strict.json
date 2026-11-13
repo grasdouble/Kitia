@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true
+  },
+  "files": [
+    "cli/src/dashboard/helpers.mts",
+    "cli/src/dashboard/catalog-freshness.mts",
+    "cli/src/dashboard/action-retry.mts",
+    "cli/src/dashboard/version-check.mts",
+    "cli/src/dashboard/screens/shared.mts"
+  ]
+}

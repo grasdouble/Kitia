@@ -13,6 +13,7 @@ const {
   catalogNameKey, isValidCatalogName, repositoryId, validateSourceConfiguration,
   loadUserSourceConfiguration, userCatalogSourcesFile, userCatalogIndexDirectory, userCatalogDirectory,
 } = require("./config.js");
+const { spdxExpression } = require("../license.js");
 function sourceMetadata(file) {
   try {
     return parseFrontmatter(fs.readFileSync(file, "utf8"), file);
@@ -234,11 +235,14 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: "
     const description = typeof metadata.get("description") === "string" && metadata.get("description").trim()
       ? metadata.get("description").trim().replace(/\s+/g, " ")
       : fs.readFileSync(file, "utf8").replace(/^---[\s\S]*?---\s*/, "").trim().split("\n")[0].replace(/^#\s*/, "").trim() || id;
+    const rawLicense = metadata.get("license");
+    const licenseStatus = typeof rawLicense === "string" && rawLicense.trim()
+      ? rawLicense : "not-declared";
     resources.push({
       id, kind, description, source_path: sourcePath,
       ...(kind === "instruction" ? { apply_to: applyTo } : {}),
-      license_status: typeof metadata.get("license") === "string" && metadata.get("license").trim()
-        ? metadata.get("license").trim().replace(/\s+/g, " ") : "not-declared",
+      license_status: licenseStatus,
+      license_spdx: spdxExpression(licenseStatus),
     });
   }
   const catalog = { catalog_version: 1, catalog_name: name, source_repository: sourceRepository, source_ref: sourceRef, resources };

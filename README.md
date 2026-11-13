@@ -8,7 +8,7 @@ Kitia is a terminal user interface (TUI) for discovering and managing skills, ag
 
 ## Quick start
 
-Requires Node.js 22 or newer. For regular use, install Kitia globally:
+Requires Node.js 26 or newer. For regular use, install Kitia globally:
 
 ```sh
 npm install --global @grasdouble/kitia
@@ -34,7 +34,7 @@ Use `kitia catalog export catalogs.json` and `kitia catalog import catalogs.json
 
 Kitia tracks managed files and protects untracked or locally modified content. Use `update`, `uninstall`, `check`, and read-only `doctor` to maintain installations. Add `--dry-run --json` to inspect a planned change without modifying files. The CLI stores catalog definitions and metadata-only indexes under `~/.config/kitia/` (override with `KITIA_CONFIG_DIR`); resource bodies remain upstream and catalog entries are pinned to source commits.
 
-See the [CLI contract](docs/cli-contract.md) for commands and machine-readable output, and the [inventory migration guide](docs/inventory-migrations.md) for inventory format upgrades.
+See the [CLI contract](docs/cli-contract.md) for commands and machine-readable output, the [resource collections guide](docs/resource-collections.md) for sharing pinned resource selections, the [resource audit guide](docs/resource-audit.md) for opt-in pinned-text checks, and the [inventory migration guide](docs/inventory-migrations.md) for inventory format upgrades.
 
 ## Contributing
 

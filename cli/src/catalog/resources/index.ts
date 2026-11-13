@@ -5,6 +5,7 @@ const path = require("node:path");
 const YAML = require("yaml");
 import type { CatalogResource } from "../entries.js";
 import type { InstallPlanEntry } from "../plan.js";
+const { spdxExpression } = require("../license.js");
 
 const INSTALLABLE_KINDS = new Set(["skill", "agent", "instruction"]);
 const USER_INSTALLABLE_KINDS = new Set(["skill", "agent"]);
@@ -26,10 +27,29 @@ const SOURCE_SKILL_DIRECTORIES = {
 
 class CatalogError extends Error {
   code: string;
+  category?: string;
+  paths?: string[];
+  recoverable?: boolean;
+  userMessage?: string;
+  technicalDetail?: string;
+  agent?: string;
 
-  constructor(message, code = "CATALOG_ERROR") {
+  constructor(message, code = "CATALOG_ERROR", details: {
+    category?: string;
+    paths?: string[];
+    recoverable?: boolean;
+    userMessage?: string;
+    technicalDetail?: string;
+    agent?: string;
+  } = {}) {
     super(message);
     this.code = code;
+    this.category = details.category;
+    this.paths = details.paths ? [...details.paths] : undefined;
+    this.recoverable = details.recoverable || false;
+    this.userMessage = details.userMessage;
+    this.technicalDetail = details.technicalDetail;
+    this.agent = details.agent;
   }
 }
 
@@ -155,6 +175,7 @@ function validateSourceCatalog(
       description: entry.description.trim(),
       source_repository: manifest.source_repository,
       source_ref: manifest.source_ref,
+      license_spdx: spdxExpression(entry.license_status),
       ...(kind === "instruction" ? { applyTo: entry.apply_to } : {}),
     } as CatalogResource;
   });

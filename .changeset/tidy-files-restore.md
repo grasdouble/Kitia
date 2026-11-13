@@ -1,0 +1,36 @@
+---
+"@grasdouble/kitia": minor
+---
+
+Improve source catalog workflows and dashboard usability
+  - **User-Facing**
+    - Restore pre-existing managed files when a multi-file install or update fails partway through.
+    - Audit pinned resources with per-file findings and explicit coverage; block installs when findings or skipped content are reported.
+    - Export and import versioned resource collections with staged publication and rollback, optional Ed25519 signatures, and trusted-key verification.
+    - Preserve normalized SPDX license expressions and filter `list` and `search` by license.
+    - Search dashboard catalogs across metadata, tags, status, license, source provenance, and descriptions.
+    - Filter Catalog by kind and license, and filter Inventory by license using source catalog metadata.
+    - View complete locations, descriptions, pinned sources, and wrapped inventory URLs in dashboard detail panels.
+    - Get contextual update errors and explicit confirmation before retrying GitHub CLI updates with `--force`, while retaining local-modification safeguards.
+    - Replace a tracked source resource with a selected commit through existing update safeguards in the CLI and dashboard.
+    - Avoid false update notifications from unrelated repository commits by comparing commits that affect each resource file.
+    - See audit results and the source tree together in TUI Preview, replacing the separate Audit action.
+    - Keep resource-collection import and export CLI-only when file paths, signing, or trust inputs are needed; dashboard transfer remains limited to catalog configuration.
+    - Navigate source previews file by file with complete metadata, consistent label and value colors, and a distinct source, page, and filename header.
+    - Paginate Preview by source file without treating Markdown table separators as filenames.
+    - Read Markdown and code in TUI source Preview with syntax highlighting that prevents emphasis colors from bleeding across content, without changing source text or pagination.
+    - Preview and audit current local files for managed and unmanaged Inventory resources, including multiple installations with navigable paths; missing or unsafe paths fail Preview. Catalog and CLI previews remain pinned-source based.
+    - Use themed content headers and dividers across Inventory, Catalog, Catalog Management, and Preview panels, with table metadata and filters above the divider and shortcut category headings above their shortcuts.
+    - Show a centered loader and factual GitHub CLI/file-update phases in the dashboard, relay sanitized GitHub output, and stop hung GitHub CLI installs or updates with an actionable timeout error.
+    - Use dashboard tables that expand to available width and prioritize catalog names, IDs, and repositories over padding; terminal tables adapt while piped output retains complete values.
+    - Keep confirmation modal borders intact on narrow terminals and render them in the warning accent color.
+    - Keep known dashboard kind colors, show selected rows in blue, and retain inventory-status or proprietary-license fallbacks for unknown kinds.
+    - Identify selected rows consistently with `›` across inventory, catalog browsing, and catalog management.
+    - Exit the interactive dashboard when its input stream closes.
+    - Skip the npm update lookup when the installed version is unknown.
+    - See compact inline details and shortcuts on short stacked inventory screens so panel borders and complete issue paths remain visible.
+    - Search Inventory on small terminals with a visible prompt and apply/clear hints.
+    - Load packaged CLI dashboards successfully with the shared table-layout module included in the published package.
+    - Keep dashboard semantic colors, modal RGB values, the title gradient, and terminal ANSI codes together in one editable theme module.
+  - **Technical**
+    - Keep all source catalog, file-resource, and dashboard flows on shared lifecycle and update safeguards.

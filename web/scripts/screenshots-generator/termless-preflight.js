@@ -1,6 +1,6 @@
 "use strict";
 
-const minimum = [23, 6, 0];
+const minimum = [26, 0, 0];
 
 function supportsTermless(version = process.versions.node) {
   const current = version.split(".").map(Number);
@@ -14,8 +14,7 @@ function supportsTermless(version = process.versions.node) {
 function assertTermlessRuntime(version = process.versions.node) {
   if (!supportsTermless(version)) {
     throw new Error(
-      `Termless xterm.js tooling requires Node.js >=23.6.0; current version is ${version}. ` +
-      "Kitia itself continues to support Node.js >=22.",
+      `Kitia's Termless dashboard tooling requires Node.js >=26.0.0; current version is ${version}.`,
     );
   }
 }

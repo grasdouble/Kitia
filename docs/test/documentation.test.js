@@ -38,7 +38,7 @@ test("package, workflow, and docs agree on runtime and project identity", () => 
   const pkg = JSON.parse(read("package.json"));
   assert.equal(pkg.name, "@grasdouble/kitia");
   assert.equal(pkg.license, "MIT");
-  assert.equal(pkg.engines.node, ">=22");
+  assert.equal(pkg.engines.node, ">=26");
   assert.deepEqual(pkg.bin, { kitia: "cli/bin/kitia.js" });
   assert.match(pkg.repository.url, /github\.com\/grasdouble\/Kitia\.git$/);
   assert.match(read("README.md"), /^# Kitia/m);

@@ -1,5 +1,5 @@
 import React from 'react';
-import workspaceScreenshot from '../../../assets/workspace-inventory-termless.png';
+import workspaceScreenshot from '../../../assets/workspace-inventory-termless.webp';
 import { repo } from '../core/siteConstants';
 import styles from './Hero.module.css';
 

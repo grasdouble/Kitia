@@ -15,7 +15,15 @@
       "group": { "type": "string", "minLength": 1 },
       "status": { "enum": ["experimental", "stable", "deprecated"] },
       "source": false,
-      "applyTo": false
+      "applyTo": false,
+      "license_status": {
+        "type": "string",
+        "description": "Upstream license metadata; `not-declared` represents missing metadata."
+      },
+      "license_spdx": {
+        "type": "string",
+        "description": "Present only when license_status is a valid SPDX license expression."
+      }
     }
   }
 }

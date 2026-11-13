@@ -16,8 +16,8 @@ function diagnose({ target = ".", network = false } = {}, spawn = spawnSync) {
   } catch (error) {
     add("source-config", "error", error.message);
   }
-  add("node", Number(process.versions.node.split(".")[0]) >= 22 ? "ok" : "error",
-    `Node.js ${process.versions.node}; version 22 or later is required.`);
+  add("node", Number(process.versions.node.split(".")[0]) >= 26 ? "ok" : "error",
+    `Node.js ${process.versions.node}; version 26 or later is required.`);
   const probe = (command, args) => spawn(command, args, {
     encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, GH_PROMPT_DISABLED: "1" },

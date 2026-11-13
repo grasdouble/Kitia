@@ -1,6 +1,8 @@
 "use strict";
 
 const { randomBytes } = require("node:crypto");
+
+const sharp = require("sharp");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -17,8 +19,8 @@ const {
 
 const assets = path.join(root, "web", "assets");
 const captures = [
-  { name: "Termless inventory", staged: "workspace-inventory.png", output: "workspace-inventory-termless.png", draft: "workspace-inventory-termless-draft.png" },
-  { name: "Termless catalog", staged: "catalog-browser.png", output: "catalog-browser-termless.png", draft: "catalog-browser-termless-draft.png" },
+  { name: "Termless inventory", staged: "workspace-inventory.webp", output: "workspace-inventory-termless.webp", draft: "workspace-inventory-termless-draft.webp", png: "workspace-inventory.png" },
+  { name: "Termless catalog", staged: "catalog-browser.webp", output: "catalog-browser-termless.webp", draft: "catalog-browser-termless-draft.webp", png: "catalog-browser.png" },
 ];
 const usage = `Capture Termless/xterm.js screenshots of Kitia's actual Ink dashboard.
 
@@ -26,11 +28,12 @@ Usage:
   pnpm run web:screenshots:update:termless
   pnpm run web:screenshots:update:termless -- --help
 
-Requires Node.js >=23.6, a built checkout, and @resvg/resvg-js. The command
-uses the shared deterministic showcase fixture and writes a separate Termless
-pair. It promotes to *-termless.png only when the parsed xterm screen proves
-both complete frames; otherwise it writes review-only *-termless-draft.png
-files and reports exactly which cells were missing. The original captures are untouched.`;
+Requires Node.js >=23.6, a built checkout, @resvg/resvg-js, and sharp. The
+command uses the shared deterministic showcase fixture and writes a separate
+lossless WebP pair. It promotes to *-termless.webp only when the parsed xterm
+screen proves both complete frames; otherwise it writes review-only
+*-termless-draft.webp files and reports exactly which cells were missing. The
+original captures are untouched.`;
 
 class CaptureError extends Error {}
 
@@ -52,7 +55,7 @@ function missingInventory(screen) {
   const lines = screenRows(screen);
   const requirements = [
     ["project current ask-matt row", /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/],
-    ["unmanaged user herdr row", /UNMANAGED.*USER.*skill.*herdr/],
+    ["unmanaged user unmanaged row", /UNMANAGED.*USER.*skill.*unmanaged/],
     ["current user grill-me row", /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/],
     ["side-by-side inventory and ask-matt detail titles", /INVENTORY.*SKILL - ask-matt/],
   ];
@@ -87,6 +90,23 @@ async function validatePng(filePath, label) {
   }
   return buffer;
 }
+
+
+async function encodeWebp(sourcePath, destinationPath, label) {
+  try {
+    await sharp(sourcePath).webp({ lossless: true, effort: 6 }).toFile(destinationPath);
+    const metadata = await sharp(destinationPath).metadata();
+    if (metadata.format !== "webp" || metadata.width !== screenshotViewport.width ||
+        metadata.height !== screenshotViewport.height) {
+      throw new CaptureError(`${label} did not produce a valid ${screenshotViewport.width}×${screenshotViewport.height} WebP.`);
+    }
+    return (await fs.stat(destinationPath)).size;
+  } catch (error) {
+    if (error instanceof CaptureError) throw error;
+    throw new CaptureError(`${label} could not be encoded as lossless WebP: ${error.message}`);
+  }
+}
+
 
 async function replacePair(images, destinations) {
   const staged = [];
@@ -165,8 +185,8 @@ async function main(args) {
   }
   try {
     assertTermlessRuntime();
-    await assertBuiltCheckout();
     await import("@resvg/resvg-js");
+    await import("sharp");
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exitCode = 1;
@@ -177,9 +197,9 @@ async function main(args) {
   let session;
   try {
     session = await launchShowcaseDashboard(temporaryDirectory);
-    const staged = captures.map(({ staged: file }) => path.join(temporaryDirectory, file));
+    const staged = captures.map(({ png }) => path.join(temporaryDirectory, png));
 
-    const inventoryAnsi = await waitForInkOutput(session, "ask-matt");
+    const inventoryAnsi = await waitForInkOutput(session, "unknown · INVENTORY");
     await session.flushTerminal();
     const inventoryGrid = session.terminal.screen.getText();
     await fs.writeFile(staged[0], await screenshotTermlessTerminal(session.terminal));
@@ -193,18 +213,20 @@ async function main(args) {
 
     const images = await Promise.all(staged.map((file, index) => validatePng(file, captures[index].name)));
     if (images[0].equals(images[1])) throw new CaptureError("The Termless screenshots are identical.");
+    const optimized = captures.map(({ staged: file }) => path.join(temporaryDirectory, file));
+    const sizes = await Promise.all(optimized.map((file, index) => encodeWebp(staged[index], file, captures[index].name)));
 
     const missing = [...missingInventory(inventoryGrid), ...missingCatalog(catalogGrid)];
     const complete = missing.length === 0;
     await fs.mkdir(assets, { recursive: true });
     const destinations = captures.map(({ output, draft }) => path.join(assets, complete ? output : draft));
-    await replacePair(staged, destinations);
+    await replacePair(optimized, destinations);
     if (complete) {
       const obsoleteDrafts = captures.map(({ draft }) => path.join(assets, draft));
       await Promise.all(obsoleteDrafts.map((file) => fs.rm(file, { force: true })));
     }
     for (let index = 0; index < captures.length; index += 1) {
-      console.log(`${captures[index].name} ${complete ? "complete" : "draft"}: ${screenshotViewport.width}×${screenshotViewport.height} → ${destinations[index]}`);
+      console.log(`${captures[index].name} ${complete ? "complete" : "draft"}: ${screenshotViewport.width}×${screenshotViewport.height} → ${destinations[index]} (${sizes[index]} bytes, lossless WebP)`);
     }
     console.log(`Termless xterm projection: inventory ${missingInventory(inventoryGrid).length ? "incomplete" : "complete"}; catalog ${missingCatalog(catalogGrid).length ? "incomplete" : "complete"}.`);
     console.log(`Ink stream evidence: inventory ${inventoryAnsi.length} chars; catalog ${catalogAnsi.length} chars.`);
