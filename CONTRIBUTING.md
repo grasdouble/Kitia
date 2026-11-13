@@ -18,7 +18,7 @@ pnpm run cli:test:package-smoke
 
 Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; source-history behavior and prefix handling lives in `cli/test/source-history.test.js`. Catalog discovery and dashboard filtering has focused coverage in `cli/test/dashboard-filters.test.js`. Inventory migration behavior is covered by `cli/test/migrations.test.js`; when changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts. `pnpm test` also runs the strict TypeScript boundary configured in `tsconfig.strict.json`.
 
-Dashboard interaction tests must wait for a complete synchronized frame showing the destination screen and the dismissed modal's absence before sending the next key. A background heading, output-length increase, or negative-only predicate can match an animation repaint or an incomplete frame while a standalone Escape is still being decoded.
+Dashboard interaction tests must wait for a complete synchronized frame showing the destination screen and the dismissed modal's absence before sending the next key. A background heading, output-length increase, or negative-only predicate can match an animation repaint or an incomplete frame while a standalone Escape is still being decoded. Loading frames precede operation execution; synchronize dispatch assertions with an explicit signal from the operation handler rather than assuming that visible progress means it has run.
 
 The Termless dashboard test runs in CI on Ubuntu with Node.js 26. Run it locally with Node.js 26 or newer:
 
