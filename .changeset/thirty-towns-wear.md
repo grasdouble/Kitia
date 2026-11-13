@@ -1,5 +1,0 @@
----
-
----
-
-Optimize website screenshots
