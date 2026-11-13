@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link } from '@tanstack/react-router';
 import { DASHBOARD_THEME } from '../../../../cli/src/dashboard/colors';
 import { initialCatalogs, initialInstallations, installedPath, resourceKey, resources, revisions, sourcePath, type DemoCatalog, type DemoResource, type Installation, type Kind, type Scope } from './demoData';
 import styles from './DashboardDemo.module.css';
@@ -169,7 +170,7 @@ export function DashboardDemo() {
   return <main id="main" className={`shell ${styles.page}`} style={themeStyle}>
     <div className={styles.intro}>
       <div><p className={styles.eyebrow}>Interactive playground</p><h1>Your toolkit. Your turn.</h1><p>Try Kitia’s dashboard without installing anything.</p></div>
-      <a href="/#commands" data-ga-event="demo_install_cli">Get the real CLI <span aria-hidden="true">↗</span></a>
+      <Link to="/" hash="commands" data-ga-event="demo_install_cli">Get the real CLI <span aria-hidden="true">↗</span></Link>
     </div>
     <p className={styles.notice}><strong>Demo mode</strong> · Sample data, browser-only actions. No downloads, GitHub access, or local file changes. Reload or reset to start over.</p>
     <section className={styles.terminal} aria-label="Interactive dashboard demo" onKeyDown={keyboard} tabIndex={0}>

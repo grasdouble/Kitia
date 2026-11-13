@@ -2,4 +2,4 @@
 
 ---
 
-Move homepage section links into responsive sticky navigation with interruptible 800ms eased scrolling, current-section tracking through the page boundary, and a header reserved for pages and external links. Respect reduced-motion preferences.
+Use TanStack Router for client-side page transitions with static deep-link entrypoints, lazy demos, route metadata, and SPA page-view tracking. Keep responsive section navigation, interruptible 800ms eased scrolling, and current-section tracking through the page boundary. Respect reduced-motion preferences.

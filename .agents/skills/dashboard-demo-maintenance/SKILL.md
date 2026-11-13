@@ -18,7 +18,7 @@ Inspect the relevant current files before editing; follow their imports if the s
 - `web/src/components/demo/browserTerminal.ts`, `terminalRuntime/`, and `web/browserInkPlugin.ts`: xterm/Ink bridge and scoped browser compatibility.
 - `web/src/components/demo/terminalTheme.ts`: ANSI-to-CSS resolution and xterm theme. Reuse the shared ANSI palette used by the TUI screenshots; page surfaces and borders use website CSS tokens, not another dashboard palette.
 - `web/src/components/demo/tuiDemoSession.ts`, `demoData.ts`, and `tuiDemoSession.test.mjs`: isolated operation handlers, sample content, and behavioral coverage.
-- `web/src/App.tsx`, `web/pages/demo/index.html`, and `web/vite.config.ts`: lazy loading, metadata, development routing, and static build output.
+- `web/src/router.tsx`, `main.tsx`, `App.tsx`, `web/pages/demo/index.html`, and `web/vite.config.ts`: typed client-side routes, persistent layout, lazy demos, route metadata, and static deep-link entrypoints.
 - `web/src/components/demo/DashboardDemo.tsx` and its CSS module, plus `web/pages/demo-keep/index.html`: preserved web-style demo. Its fixture data is shared; changes to `demoData.ts` can affect both demos.
 
 ## Maintenance workflow
@@ -28,6 +28,7 @@ Inspect the relevant current files before editing; follow their imports if the s
 3. Update the in-memory handler when the operation contract changes. Return complete results in the shape consumed by Dashboard and apply real changes to the private fixture store. Do not report success for an unimplemented operation.
 4. Update the wrapper's on-screen keys and guidance when shortcuts change. Buttons send the same input sequences as a terminal; do not bypass the shared state machine or confirmation dialogs. Keep ordinary browser navigation usable outside the terminal.
 5. Check both routes. Preserve `/demo-keep` and its behavior unless explicitly asked to change it. Keep home/navigation links pointing to `/demo`; retain a discoverable link to the preserved version.
+6. Use TanStack Router links for internal navigation. Preserve static HTML entrypoints for direct visits, keep the terminal lazy, and verify that route exits dispose its renderer without reloading the document. Route titles and analytics page views must follow committed routes; section hash changes must not create extra page views.
 
 ## Fixture invariants
 

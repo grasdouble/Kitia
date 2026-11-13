@@ -60,7 +60,7 @@
     "docs:test": "node --test docs/test/documentation.test.js",
     "web:build": "vite build --config web/vite.config.ts",
     "web:dev": "vite --config web/vite.config.ts",
-    "web:test:components": "node --test web/src/analytics.test.mjs web/src/HomePage.test.mjs web/src/sectionScrolling.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/src/components/demo/tuiDemoSession.test.mjs web/test/website-screenshots.test.mjs",
+    "web:test:components": "node --conditions=development --test web/src/analytics.test.mjs web/src/HomePage.test.mjs web/src/sectionScrolling.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/src/components/demo/tuiDemoSession.test.mjs web/test/website-screenshots.test.mjs",
     "web:test:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node --test web/test/termless-dashboard.test.mjs",
     "web:screenshots:update:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node web/scripts/screenshots-generator/update-site-screenshots-termless.js"
   },
@@ -76,6 +76,7 @@
     "@changesets/cli": "^3.0.3",
     "@resvg/resvg-js": "2.6.2",
     "@rollup/plugin-inject": "^5.0.5",
+    "@tanstack/react-router": "^1.170.46",
     "@termless/core": "0.10.2",
     "@termless/xtermjs": "0.10.2",
     "@types/node": "26.6.6",

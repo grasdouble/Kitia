@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link } from '@tanstack/react-router';
 import { Dashboard } from '../../../../cli/src/dashboard/dashboard.mjs';
 import { DASHBOARD_THEME } from '../../../../cli/src/dashboard/colors';
 import { mountDashboardTerminal, type BrowserTerminalSession } from './browserTerminal';
@@ -87,7 +88,7 @@ export function TuiDemo() {
   }
 
   return <main id="main" className={`shell ${styles.page}`} style={themeStyle}>
-    <div className={styles.intro}><div><p className={styles.eyebrow}>The terminal dashboard · in your browser</p><h1>Try the real interface.</h1><p>The same dashboard components, screens, and keyboard controls as the Kitia TUI.</p></div><a href="/#commands" data-ga-event="demo_install_cli">Get the CLI <span aria-hidden="true">↗</span></a></div>
+    <div className={styles.intro}><div><p className={styles.eyebrow}>The terminal dashboard · in your browser</p><h1>Try the real interface.</h1><p>The same dashboard components, screens, and keyboard controls as the Kitia TUI.</p></div><Link to="/" hash="commands" data-ga-event="demo_install_cli">Get the CLI <span aria-hidden="true">↗</span></Link></div>
     <p className={styles.notice}><strong>Safe demo workspace.</strong> The interface is real; catalog data and operations are simulated in memory. No GitHub access, local file changes, or security audits. Audit wording inside the TUI is illustrative here. Reset or reload restores the sample workspace.</p>
     <section className={styles.workspace} aria-label="Terminal dashboard playground">
       <header className={styles.toolbar}><span>kitia dashboard <span className={styles.demoLabel}>DEMO</span></span><div><button type="button" disabled={phase !== 'ready'} onClick={() => terminal.current?.focus()}>Focus terminal</button><button type="button" onClick={reset}>{phase === 'ended' ? 'Restart demo' : 'Reset demo'}</button></div></header>
@@ -103,6 +104,6 @@ export function TuiDemo() {
         <details><summary>Action keys</summary><p>Keys follow the current TUI screen; in text fields, they enter text instead of triggering actions.</p><div className={styles.actionKeys}>{actionKeys.map(([key, label]) => <button type="button" key={key} disabled={phase !== 'ready'} onClick={() => sendKey(key.toLowerCase())}><kbd>{key}</kbd>{label}</button>)}<button type="button" disabled={phase !== 'ready'} onClick={() => sendKey('\u001b[3~')}><kbd>Del</kbd>Uninstall / remove</button></div></details>
       </div>
     </section>
-    <div className={styles.notes}><p>This runs the shared TUI, not a video or a recreation of its screens. Only the operation handlers use sample data. Real repositories, filesystem safety checks, and security audits require the installed CLI.</p></div>
+    <div className={styles.notes}><p>This runs the shared TUI, not a video or a recreation of its screens. Only the operation handlers use sample data. Real repositories, filesystem safety checks, and security audits require the installed CLI.</p><p>Prefer the earlier web-style playground? <Link to="/demo-keep">Open the preserved demo.</Link></p></div>
   </main>;
 }

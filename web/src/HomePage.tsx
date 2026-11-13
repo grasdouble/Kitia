@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useRouter } from '@tanstack/react-router';
 import { Approach } from './components/sections/Approach';
 import { Automation } from './components/sections/Automation';
 import { Closing } from './components/sections/Closing';
@@ -17,9 +18,11 @@ const sections = [
 ] as const;
 
 export function HomePage() {
+  const router = useRouter();
   const navigation = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const cancelSectionScroll = useRef<(() => void) | null>(null);
+  const sectionRequest = useRef(0);
   const [activeSection, setActiveSection] = useState('');
 
   useEffect(() => {
@@ -61,6 +64,7 @@ export function HomePage() {
       window.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
       window.removeEventListener('hashchange', schedule);
+      sectionRequest.current++;
       cancelSectionScroll.current?.();
     };
   }, []);
@@ -70,10 +74,20 @@ export function HomePage() {
     const target = document.getElementById(id);
     if (!target) return;
     event.preventDefault();
-    const hash = event.currentTarget.hash;
-    if (window.location.hash !== hash) window.history.pushState(null, '', hash);
+    const request = ++sectionRequest.current;
     cancelSectionScroll.current?.();
-    cancelSectionScroll.current = scrollToSection(target);
+    void router.navigate({
+      to: '/',
+      hash: id,
+      search: true,
+      replace: router.latestLocation.hash === id,
+      resetScroll: false,
+      hashScrollIntoView: false,
+    }).then(() => {
+      if (request === sectionRequest.current && content.current?.contains(target)) {
+        cancelSectionScroll.current = scrollToSection(target);
+      }
+    });
   }
 
   return <main id="main" className={styles.layout}>

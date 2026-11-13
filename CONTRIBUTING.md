@@ -29,6 +29,10 @@ pnpm run web:screenshots:update:termless
 
 The CLI lives in `cli/`, the website in `web/`, and shared documentation in `docs/`. The root package builds both; CLI output goes to `cli/dist/` and website output to `web/dist/`.
 
+Client-side routes live in `web/src/router.tsx` and render through the persistent `App` layout. Use TanStack Router `Link` for internal page links; external URLs and screenshot links remain native anchors. The homepage section handler uses `router.navigate` with automatic hash scrolling disabled so its controlled animation owns the scroll. Route heads own titles and metadata; do not duplicate them in HTML entrypoints. Keep the four static HTML entrypoints and Vite output mapping for GitHub Pages direct visits and reloads. Verify route transitions, Back/Forward, deep links, terminal cleanup, and route page views without hash-only duplicates.
+
+`pnpm run web:test:components` uses Node's `development` export condition so TanStack Router can distinguish client-side JSDOM fixtures from server-rendered tests.
+
 Homepage section links live in `web/src/HomePage.tsx`: a sticky sidebar on wide screens and a sticky horizontal block below the header on smaller screens. `web/src/sectionScrolling.ts` provides an interruptible 800ms eased transition, respects reduced motion, and preserves sticky-header offsets. The shared header is reserved for pages and external links. When changing section anchors or layout, verify active-section tracking, unobscured anchor destinations, animation cancellation, and keyboard/mobile navigation; section navigation must not appear on the demo or changelog pages.
 
 The website's `/demo` page mounts the shared Ink dashboard in a browser terminal, using the same screen components, layout, modals, and keyboard handlers as the local TUI. Run `pnpm run web:dev` to explore it; click the terminal to type or use the on-page key buttons. The earlier web-style playground remains available at `/demo-keep`.

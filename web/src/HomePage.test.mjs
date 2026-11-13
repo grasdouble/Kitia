@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { createServer } from 'vite';
+import { createComponentRouter } from '../test/router-fixture.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const vite = await createServer({
@@ -16,7 +17,8 @@ after(() => vite.close());
 
 test('the final section activates at the reachable scroll limit and updates after scrolling or resizing', async () => {
   const dom = new JSDOM('<!doctype html><header></header><div id="root"></div>', { url: 'https://kitia.test/' });
-  const names = ['window', 'document', 'navigator', 'HTMLElement', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT'];
+  const names = ['window', 'document', 'navigator', 'HTMLElement', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT',
+    'self', 'history', 'sessionStorage', 'addEventListener', 'removeEventListener', 'scrollTo', 'scrollX', 'scrollY'];
   const previous = new Map(names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
   let scrollY = 0;
   let viewportHeight = 1100;
@@ -29,13 +31,23 @@ test('the final section activates at the reachable scroll limit and updates afte
     observe(target) { observed.add(target); }
     disconnect() { observed.clear(); }
   }
+  dom.window.scrollTo = () => {};
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
   for (const [name, value] of Object.entries({
     window: dom.window,
+    self: dom.window,
     document: dom.window.document,
     navigator: dom.window.navigator,
     HTMLElement: dom.window.HTMLElement,
     ResizeObserver: GeometryObserver,
     IS_REACT_ACT_ENVIRONMENT: true,
+    history: dom.window.history,
+    sessionStorage: dom.window.sessionStorage,
+    addEventListener: dom.window.addEventListener.bind(dom.window),
+    removeEventListener: dom.window.removeEventListener.bind(dom.window),
+    scrollTo: dom.window.scrollTo,
+    scrollX: 0,
+    scrollY: 0,
   })) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   Object.defineProperty(window, 'scrollY', { get: () => scrollY });
   Object.defineProperty(window, 'innerHeight', { get: () => viewportHeight });
@@ -50,8 +62,10 @@ test('the final section activates at the reachable scroll limit and updates afte
     React = await import('react');
     const { createRoot } = await import('react-dom/client');
     const { HomePage } = await vite.ssrLoadModule('/src/HomePage.tsx');
+    const { RouterProvider } = await import('@tanstack/react-router');
+    const router = await createComponentRouter(React.createElement(HomePage));
     root = createRoot(document.querySelector('#root'));
-    await React.act(async () => root.render(React.createElement(HomePage)));
+    await React.act(async () => root.render(React.createElement(RouterProvider, { router })));
     document.querySelector('header').getBoundingClientRect = () => new dom.window.DOMRect(0, 0, 1200, 77);
     const tops = { approach: 800, dashboard: 1500, workflow: 2500, commands: 3200 };
     for (const [id, top] of Object.entries(tops)) {
