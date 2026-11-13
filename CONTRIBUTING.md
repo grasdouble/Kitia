@@ -18,7 +18,7 @@ pnpm run cli:test:package-smoke
 
 Use synthetic repositories and fixtures for catalog tests; do not rely on live repositories. External catalog and lifecycle behavior is covered by `cli/test/source-catalogs.test.js`; source-history behavior and prefix handling lives in `cli/test/source-history.test.js`. Catalog discovery and dashboard filtering has focused coverage in `cli/test/dashboard-filters.test.js`. Inventory migration behavior is covered by `cli/test/migrations.test.js`; when changing migrations, verify files dropped from an older inventory remain discoverable as unmanaged artifacts. `pnpm test` also runs the strict TypeScript boundary configured in `tsconfig.strict.json`.
 
-Dashboard interaction tests must wait for a complete synchronized frame showing the destination screen and the dismissed modal's absence before sending the next key. A background heading, output-length increase, or negative-only predicate can match an animation repaint or an incomplete frame while a standalone Escape is still being decoded.
+Dashboard interaction tests must wait for a complete synchronized frame showing the destination screen and the dismissed modal's absence before sending the next key. A background heading, output-length increase, or negative-only predicate can match an animation repaint or an incomplete frame while a standalone Escape is still being decoded. Loading frames precede operation execution; synchronize dispatch assertions with an explicit signal from the operation handler rather than assuming that visible progress means it has run.
 
 The Termless dashboard test runs in CI on Ubuntu with Node.js 26. Run it locally with Node.js 26 or newer:
 
@@ -28,6 +28,18 @@ pnpm run web:screenshots:update:termless
 ```
 
 The CLI lives in `cli/`, the website in `web/`, and shared documentation in `docs/`. The root package builds both; CLI output goes to `cli/dist/` and website output to `web/dist/`.
+
+Client-side routes live in `web/src/router.tsx` and render through the persistent `App` layout. Use TanStack Router `Link` for internal page links; external URLs and screenshot links remain native anchors. The homepage section handler uses `router.navigate` with automatic hash scrolling disabled so its controlled animation owns the scroll. Route heads own titles and metadata; do not duplicate them in HTML entrypoints. Keep the four static HTML entrypoints and Vite output mapping for GitHub Pages direct visits and reloads. Verify route transitions, Back/Forward, deep links, terminal cleanup, and route page views without hash-only duplicates.
+
+`pnpm run web:test:components` uses Node's `development` export condition so TanStack Router can distinguish client-side JSDOM fixtures from server-rendered tests.
+
+Homepage section links live in `web/src/HomePage.tsx`: a sticky sidebar on wide screens and a sticky horizontal block below the header on smaller screens. `web/src/sectionScrolling.ts` provides an interruptible 800ms eased transition, respects reduced motion, and preserves sticky-header offsets. The shared header is reserved for pages and external links. When changing section anchors or layout, verify active-section tracking, unobscured anchor destinations, animation cancellation, and keyboard/mobile navigation; section navigation must not appear on the demo or changelog pages.
+
+The website's `/demo` page mounts the shared Ink dashboard in a browser terminal, using the same screen components, layout, modals, and keyboard handlers as the local TUI. Run `pnpm run web:dev` to explore it; click the terminal to type or use the on-page key buttons. The earlier web-style playground remains available at `/demo-keep`.
+
+Only the demo's operation handlers use in-memory fixtures: lifecycle actions, source previews, revision selection, and catalog management never contact GitHub or modify local files. Fixtures cover skills, agents, and instructions; instructions remain project-only, while skills and agents support project and user scope independently. Reset or reload restores the fixtures. Audit text explicitly identifies the simulation; real repository access, filesystem safety checks, and security audits require the installed CLI/TUI. Shared TUI color roles and the screenshot/xterm ANSI palette live in `cli/src/dashboard/colors.ts`; `web/src/components/demo/terminalTheme.ts` resolves those roles for CSS without a separate browser semantic theme. Page surfaces and borders use the site's CSS tokens. No server process is required for the deployed demo.
+
+Use the [dashboard-demo-maintenance skill](.agents/skills/dashboard-demo-maintenance/SKILL.md) when changing the demo or TUI behavior that affects it. It covers shared-renderer parity, fixture contracts, browser lifecycle, route preservation, and focused verification.
 
 ## Versioning and releases
 

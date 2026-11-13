@@ -1,0 +1,10 @@
+const unavailable = () => { throw new Error('Filesystem access is unavailable in the browser demo'); };
+export const readFileSync = unavailable;
+export const existsSync = unavailable;
+export const statSync = unavailable;
+export const readdirSync = unavailable;
+export const realpathSync = unavailable;
+export const readFile = unavailable;
+export const writeFile = unavailable;
+export const promises = new Proxy({}, { get: () => unavailable });
+export default new Proxy({}, { get: () => unavailable });

@@ -1413,11 +1413,14 @@ test("Termless uninstall modal fits narrow bounds and unmanaged removal needs tw
   const actions = [];
   let finishAction;
   const actionGate = new Promise((resolve) => { finishAction = resolve; });
+  let notifyActionStarted;
+  const actionStarted = new Promise((resolve) => { notifyActionStarted = resolve; });
   let session;
   try {
     session = await launchShowcaseDashboard(directory, {
       executeOverride: async (...args) => {
         actions.push(args);
+        notifyActionStarted();
         await actionGate;
         return { code: 0, messages: ["Unmanaged skill removed."] };
       },
@@ -1522,7 +1525,9 @@ test("Termless uninstall modal fits narrow bounds and unmanaged removal needs tw
 
     session.input.write("y");
     await waitForGrid(session, (value) => value.includes("LOADING") &&
-      value.includes("Removing skill:unmanaged"), "the second confirmation dispatches removal");
+      value.includes("Removing skill:unmanaged"), "the second confirmation shows removal progress");
+    // The dashboard yields after rendering progress and before invoking the handler.
+    await actionStarted;
     assert.equal(actions.length, 1);
     assert.equal(actions[0][0], "remove-unmanaged");
     assert.equal(actions[0][1].id, "unmanaged");

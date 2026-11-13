@@ -1,0 +1,29 @@
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 160px; align-items: start; gap: 32px; width: min(1480px, calc(100% - 64px)); margin-inline: auto; }
+.content { grid-column: 1; grid-row: 1; min-width: 0; }
+.content :global(.shell) { width: min(1180px, 100%); }
+.sectionNav { position: sticky; top: 104px; grid-column: 2; grid-row: 1; margin-block: 58px 32px; }
+.sectionNav p { margin: 0 0 14px 13px; color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; }
+.sectionNav ol { list-style: none; margin: 0; padding: 0; }
+.sectionNav a { display: block; padding: 11px 12px; border-left: 1px solid var(--line); color: var(--muted); font-size: 13px; transition: color .15s ease, background .15s ease; }
+.sectionNav a:hover { color: var(--ink); background: var(--surface); text-decoration: none; }
+.sectionNav a[aria-current] { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 7%, transparent); }
+@media (max-width: 1179px) {
+  .layout { display: block; width: 100%; }
+  .content :global(.shell) { width: min(1180px, calc(100% - 64px)); }
+  .content section[id] { scroll-margin-top: 32px; }
+  .sectionNav { top: 77px; z-index: 9; margin: 0; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .sectionNav p { display: none; }
+  .sectionNav ol { display: flex; justify-content: center; gap: 12px; }
+  .sectionNav a { padding: 13px 14px; border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; font-size: 12px; }
+}
+@media (max-width: 760px) {
+  .content :global(.shell) { width: min(100% - 40px, 560px); }
+  .sectionNav { top: 67px; padding-inline: 10px; }
+  .sectionNav ol { gap: 2px; }
+  .sectionNav a { padding: 12px 8px; font-size: 11px; }
+}
+@media (max-width: 420px) {
+  .content :global(.shell) { width: calc(100% - 32px); }
+  .sectionNav { padding-inline: 6px; }
+  .sectionNav a { padding-inline: 6px; }
+}

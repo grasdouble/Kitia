@@ -7,6 +7,7 @@ const { collectInstalledScopes } = require("../../../cli/dist/catalog/lifecycle.
 const { catalogEntries, formatDashboardRows } = require("../../../cli/dist/cli/catalog.js");
 const { loadUserSourceConfiguration } = require("../../../cli/dist/catalog/sources/config.js");
 const { executeDashboardAction } = require("../../../cli/dist/cli/commands.js");
+const { DASHBOARD_THEME } = require("../../../cli/dist/dashboard/colors.js");
 const { root, seedShowcase } = require("./site-showcase-fixture.js");
 const { assertTermlessRuntime } = require("./termless-preflight.js");
 
@@ -22,18 +23,13 @@ const screenshotOptions = {
   margin: 0,
   scale: 1,
   theme: {
-    background: "#282c34",
-    foreground: "#ffffff",
-    cursor: "#ffffff",
+    background: DASHBOARD_THEME.terminalAnsi.palette[0],
+    foreground: DASHBOARD_THEME.terminalAnsi.palette[7],
+    cursor: DASHBOARD_THEME.terminalAnsi.palette[7],
   },
 };
 
-const ANSI_PALETTE = [
-  "#282c34", "#e06c75", "#b4bd69", "#b4bd69",
-  "#81a2be", "#c678dd", "#8bbeb7", "#ffffff",
-  "#666666", "#e06c75", "#b4bd69", "#b4bd69",
-  "#8ab5f9", "#c678dd", "#8bbeb7", "#ffffff",
-];
+const ANSI_PALETTE = DASHBOARD_THEME.terminalAnsi.palette;
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

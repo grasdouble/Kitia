@@ -75,8 +75,16 @@ export const DASHBOARD_THEME = {
     blue: "34",
     magenta: "35",
     cyan: "36",
+    white: "37",
+    redBright: "91",
     whiteOnBlue: "97;44",
     whiteOnGray: "97;100",
+    palette: [
+      "#282c34", "#e06c75", "#b4bd69", "#b4bd69",
+      "#81a2be", "#c678dd", "#8bbeb7", "#ffffff",
+      "#666666", "#e06c75", "#b4bd69", "#b4bd69",
+      "#8ab5f9", "#c678dd", "#8bbeb7", "#ffffff",
+    ],
   },
   titleGradientStops: [[34, 211, 238], [167, 139, 250], [244, 114, 182]],
 } as const;

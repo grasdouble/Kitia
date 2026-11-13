@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 import { createServer } from 'vite';
 import { JSDOM } from 'jsdom';
+import { createComponentRouter } from '../../../test/router-fixture.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../');
 const vite = await createServer({
@@ -21,12 +22,14 @@ after(async () => {
 test('changelog renders source versions with shareable links', async () => {
   const React = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
+  const { RouterProvider } = await import('@tanstack/react-router');
   const { Changelog } = await vite.ssrLoadModule('/src/components/sections/Changelog.tsx');
+  const router = await createComponentRouter(React.createElement(Changelog), { initialEntries: ['/changelog'] });
   const source = await readFile(path.join(projectRoot, 'CHANGELOG.md'), 'utf8');
   const expectedVersions = [...source.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
-  const markup = renderToStaticMarkup(React.createElement(Changelog));
+  const markup = renderToStaticMarkup(React.createElement(RouterProvider, { router }));
   const renderedVersions = [...markup.matchAll(/<h2 id="release-([^"]+)">([^<]+)<\/h2>/g)].map((match) => match[2]);
-  const linkedVersions = [...markup.matchAll(/href="#release-([^"]+)"/g)].map((match) => match[1]);
+  const linkedVersions = [...markup.matchAll(/href="\/changelog#release-([^"]+)"/g)].map((match) => match[1]);
 
   assert.deepEqual(renderedVersions, expectedVersions);
   assert.deepEqual(linkedVersions, expectedVersions);
@@ -35,8 +38,10 @@ test('changelog renders source versions with shareable links', async () => {
 test('changelog preserves grouped details and legacy release notes', async () => {
   const React = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
+  const { RouterProvider } = await import('@tanstack/react-router');
   const { Changelog } = await vite.ssrLoadModule('/src/components/sections/Changelog.tsx');
-  const dom = new JSDOM(renderToStaticMarkup(React.createElement(Changelog)));
+  const router = await createComponentRouter(React.createElement(Changelog), { initialEntries: ['/changelog'] });
+  const dom = new JSDOM(renderToStaticMarkup(React.createElement(RouterProvider, { router })));
   try {
     const document = dom.window.document;
     const release = document.querySelector('article[aria-labelledby="release-2.0.0"]');

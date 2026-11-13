@@ -60,7 +60,7 @@
     "docs:test": "node --test docs/test/documentation.test.js",
     "web:build": "vite build --config web/vite.config.ts",
     "web:dev": "vite --config web/vite.config.ts",
-    "web:test:components": "node --test web/src/analytics.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/test/website-screenshots.test.mjs",
+    "web:test:components": "node --conditions=development --test web/src/analytics.test.mjs web/src/HomePage.test.mjs web/src/sectionScrolling.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/src/components/demo/tuiDemoSession.test.mjs web/test/website-screenshots.test.mjs",
     "web:test:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node --test web/test/termless-dashboard.test.mjs",
     "web:screenshots:update:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node web/scripts/screenshots-generator/update-site-screenshots-termless.js"
   },
@@ -75,17 +75,30 @@
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
     "@resvg/resvg-js": "2.6.2",
+    "@rollup/plugin-inject": "^5.0.5",
+    "@tanstack/react-router": "^1.170.46",
     "@termless/core": "0.10.2",
     "@termless/xtermjs": "0.10.2",
     "@types/node": "26.6.6",
     "@types/prismjs": "1.26.6",
     "@types/react": "19.3.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ajv": "8.20.0",
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
     "husky": "^9.1.7",
     "jsdom": "^31.0.0",
+    "path-browserify": "^1.0.1",
+    "process": "^0.11.10",
+    "readable-stream": "^4.8.0",
     "rimraf": "^6.1.4",
     "sharp": "^0.35.5",
+    "strip-ansi": "^7.2.0",
     "typescript": "5.9.3",
-    "vite": "^6.4.1"
+    "url": "^0.11.4",
+    "util": "^0.12.5",
+    "vite": "^6.4.1",
+    "vite-plugin-commonjs": "^0.10.4"
   }
 }
