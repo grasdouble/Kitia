@@ -120,7 +120,7 @@ async function seedShowcase(directory) {
   await writeManagedSkill(project, resources[0]);
   await writeManagedSkill(home, resources[1]);
   const { recordSourceInstallation } = require(path.join(
-    root, "cli", "dist", "catalog", "sources", "installed.js",
+    root, "terminal", "dist", "catalog", "sources", "installed.js",
   ));
   for (const [target, resource] of [[project, resources[0]], [home, resources[1]]]) {
     recordSourceInstallation({

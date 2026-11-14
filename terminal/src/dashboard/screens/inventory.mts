@@ -110,7 +110,7 @@ export function InventoryScreen({
     Math.max(1, columns - 2),
   ));
   const warningBlockRows = warningLines.length ? warningLines.length + 1 : 0;
-  const workspaceGap = 1;
+  const workspaceGap = columns >= 45 && columns < 76 ? 0 : 1;
   const workspaceHeight = Math.max(1, rows - (
     DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height + warningBlockRows +
     workspaceGap + footerRows
@@ -313,5 +313,6 @@ export function InventoryScreen({
           : DASHBOARD_THEME.semantic.accents.detailPanel,
       })),
     footer,
+    controls.menuFilter ? h(DashboardControls, { ...filterProps, menuOverlayOnly: true }) : null,
   );
 }

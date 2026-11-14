@@ -93,7 +93,7 @@ export function CatalogScreen({
       });
   const footerRows = shortcutFooterLines(catalogShortcutLines, columns - 2).length +
     Number(Boolean(catalogShortcutLines.length));
-  const workspaceGap = 1;
+  const workspaceGap = columns >= 45 && columns < 76 ? 0 : 1;
   const workspaceHeight = Math.max(1, rows - (
     DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height + workspaceGap + footerRows
   ));
@@ -255,5 +255,6 @@ export function CatalogScreen({
           : DASHBOARD_THEME.semantic.accents.detailPanel,
       })),
     footer,
+    controls.menuFilter ? h(DashboardControls, { ...filterProps, menuOverlayOnly: true }) : null,
   );
 }

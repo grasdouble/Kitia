@@ -11,9 +11,9 @@ Keep `/demo` faithful to the local dashboard by running the shared Ink component
 
 Inspect the relevant current files before editing; follow their imports if the structure has changed.
 
-- `cli/src/dashboard/dashboard.mts`: shared Dashboard component, state transitions, action contracts, confirmations, and keyboard handlers.
-- `cli/src/dashboard/screens/`, `modals.mts`, `helpers.mts`, and `source-highlighting.mts`: shared layout, panels, filters, and syntax highlighting. Do not copy these implementations into the website.
-- `cli/src/dashboard/colors.ts`: shared TUI semantic roles and renderer-specific ANSI codes/palette under `terminalAnsi`. Do not add browser-specific semantic roles or component-local color literals; selected rows override kind/status colors.
+- `terminal/src/dashboard/dashboard.mts`: shared Dashboard component, state transitions, action contracts, confirmations, and keyboard handlers.
+- `terminal/src/dashboard/screens/`, `modals.mts`, `helpers.mts`, and `source-highlighting.mts`: shared layout, panels, filters, and syntax highlighting. Do not copy these implementations into the website.
+- `terminal/src/dashboard/colors.ts`: shared TUI semantic roles and renderer-specific ANSI codes/palette under `terminalAnsi`. Do not add browser-specific semantic roles or component-local color literals; selected rows override kind/status colors.
 - `web/src/components/demo/TuiDemo.tsx` and its CSS module: page wrapper, terminal lifecycle, reset/quit states, and on-screen key buttons.
 - `web/src/components/demo/browserTerminal.ts`, `terminalRuntime/`, and `web/browserInkPlugin.ts`: xterm/Ink bridge and scoped browser compatibility.
 - `web/src/components/demo/terminalTheme.ts`: ANSI-to-CSS resolution and xterm theme. Reuse the shared ANSI palette used by the TUI screenshots; page surfaces and borders use website CSS tokens, not another dashboard palette.

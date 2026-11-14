@@ -1,7 +1,7 @@
 import type * as React from 'react';
-import type { Dashboard } from '../../../../cli/src/dashboard/dashboard.mts';
-import type { CatalogResource } from '../../../../cli/src/catalog/entries';
-import type { DashboardActionResult as ActionResult } from '../../../../cli/src/cli/dashboard';
+import type { Dashboard } from '../../../../terminal/src/dashboard/dashboard.mts';
+import type { CatalogResource } from '../../../../terminal/src/catalog/entries';
+import type { DashboardActionResult as ActionResult } from '../../../../terminal/src/cli/dashboard';
 import {
   initialCatalogs, initialInstallations, resources as samples, revisions, sourcePath,
   type DemoResource,

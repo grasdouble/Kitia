@@ -738,7 +738,7 @@ test("Termless Preview keeps source main, audit above tree, and independent adap
         return { code: 0, messages: [source, audit], resources: [], errors: [] };
       },
     });
-    ({ inspectionPageView } = await import("../../cli/dist/dashboard/screens.mjs"));
+    ({ inspectionPageView } = await import("../../terminal/dist/dashboard/screens.mjs"));
     await press("a", "CATALOG RESOURCES");
     const initial = await press("p", "# Pinned skill source");
     await assertShortcutsFrame(session, previewShortcutHints);
@@ -873,8 +873,8 @@ test("Termless Inventory previews and audits installed local content", {
   timeout: 20000,
 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "kitia-termless-local-preview-"));
-  const { DASHBOARD_THEME } = require("../../cli/dist/dashboard/colors.js");
-  const { createDashboardActionHandler } = require("../../cli/dist/cli/dashboard.js");
+  const { DASHBOARD_THEME } = require("../../terminal/dist/dashboard/colors.js");
+  const { createDashboardActionHandler } = require("../../terminal/dist/cli/dashboard.js");
   const handler = createDashboardActionHandler(async () => {
     throw new Error("The local Inventory preview must not execute the remote CLI command.");
   });
@@ -1075,7 +1075,7 @@ for (const [kind, id, filename] of [
           return { code: 0, messages: [content], resources: [], errors: [] };
         },
       });
-      ({ inspectionPageView } = await import("../../cli/dist/dashboard/screens.mjs"));
+      ({ inspectionPageView } = await import("../../terminal/dist/dashboard/screens.mjs"));
       await press("a", "CATALOG RESOURCES");
       await press("f", "TYPE to search");
       await press(id, id);
@@ -1111,7 +1111,7 @@ for (const [kind, id, filename] of [
 
 test("Termless Preview colors literal Markdown and code cells across pages and narrow resizing", { timeout: 15000 }, async () => {
   let inspectionPageView;
-  const { DASHBOARD_THEME } = require("../../cli/dist/dashboard/colors.js");
+  const { DASHBOARD_THEME } = require("../../terminal/dist/dashboard/colors.js");
   const expectedColors = Object.fromEntries(Object.entries(DASHBOARD_THEME.semantic.syntax).map(([role, color]) => [
     role, {
       r: parseInt(color.slice(1, 3), 16),
@@ -1260,7 +1260,7 @@ test("Termless Preview colors literal Markdown and code cells across pages and n
         return { code: 0, messages: [source], resources: [], errors: [] };
       },
     });
-    ({ inspectionPageView } = await import("../../cli/dist/dashboard/screens.mjs"));
+    ({ inspectionPageView } = await import("../../terminal/dist/dashboard/screens.mjs"));
     await press("a", "CATALOG RESOURCES");
     await press("p", "# Syntax preview");
     const plain = session.terminal.findText("Plain source sentinel.");
@@ -1343,7 +1343,7 @@ test("Termless Catalog Catalog/Kind/License filters match visible candidates", {
     session.input.write("d");
     await waitForGrid(session, (grid) => !grid.includes("SKILL - alpha-brief"), "details are hidden");
 
-    const wrapText = (await import("../../cli/dist/dashboard/helpers.mjs")).wrapText;
+    const wrapText = (await import("../../terminal/dist/dashboard/helpers.mjs")).wrapText;
     const assertView = async (ids) => {
       const summary = `Filter ${state.editing ? `${state.query}▏` : state.query || "(F to filter)"} · Catalog ${state.catalog.toUpperCase()} · Kind ${state.kind.toUpperCase()} · License ${state.license.toUpperCase()}`;
       const metadata = [

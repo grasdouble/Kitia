@@ -43,6 +43,7 @@ export interface DashboardControlsProps {
   menuFilter?: DashboardFilter | null;
   menuOptions?: string[];
   menuIndex?: number;
+  menuOverlayOnly?: boolean;
   modalActive?: boolean;
   actions?: DashboardControlButton[];
   actionsInToolbar?: boolean;
@@ -66,42 +67,55 @@ interface ControlItem {
 }
 
 type LayoutItem = ControlItem & { text: string; width: number };
-type ControlLineKind = "tabs" | "tab-underline" | "labels" | "fields" | "menu" | "menu-heading" | "actions";
+type ControlLineKind = "tab-top" | "tabs" | "tab-underline" | "labels" | "fields" | "actions";
+interface ControlMenu {
+  left: number;
+  top: number;
+  width: number;
+  first: number;
+  count: number;
+  selectedValue: string;
+  allLabel: string;
+}
 
 interface ControlLine {
   row: number;
   items: LayoutItem[];
   kind: ControlLineKind;
-  searchWidth?: number;
-  text?: string;
 }
 
 export interface DashboardControlsLayout {
   width: number;
   height: number;
   lines: ControlLine[];
-  menuFirst: number;
-  menuCount: number;
+  menu?: ControlMenu;
 }
 
 
-function splitControlLines(items: LayoutItem[], maxWidth: number, row: number, kind: ControlLineKind, stride = 1) {
+function splitControlLines(
+  items: LayoutItem[], maxWidth: number, row: number, kind: ControlLineKind, stride = 1, gap = 1,
+) {
   const lines: ControlLine[] = [];
   let lineItems: LayoutItem[] = [];
   let used = 0;
   const width = Math.max(1, maxWidth);
   for (const item of items) {
     const itemWidth = Math.max(1, Math.min(width, item.width));
-    if (lineItems.length && used + 1 + itemWidth > width) {
+    if (lineItems.length && used + gap + itemWidth > width) {
       lines.push({ row: row + lines.length * stride, kind, items: lineItems });
       lineItems = [];
       used = 0;
     }
     lineItems.push({ ...item, width: itemWidth });
-    used += (lineItems.length > 1 ? 1 : 0) + itemWidth;
+    used += (lineItems.length > 1 ? gap : 0) + itemWidth;
   }
   if (lineItems.length) lines.push({ row: row + lines.length * stride, kind, items: lineItems });
   return lines;
+}
+
+function sectionTabMetrics(width: number) {
+  const compact = width < 56;
+  return { inset: compact ? 0 : 1, itemPadding: compact ? 0 : 1, gap: compact ? 1 : 2 };
 }
 
 function clipped(value: string, width: number) {
@@ -127,31 +141,38 @@ export function dashboardControlsLayout(props: DashboardControlsProps): Dashboar
   const width = Math.max(1, props.columns - 2);
   const fieldRows = props.rows && props.rows < 40 ? 2 : 4;
   const lines: ControlLine[] = [];
-  if (props.modalActive) return { width, height: 0, lines, menuFirst: 0, menuCount: 0 };
+  if (props.modalActive) return { width, height: 0, lines, menu: undefined };
   const part = props.part || "all";
   let row = 0;
   if (part !== "filters") {
     const sectionNames: Record<DashboardSection, string> = {
       inventory: "Inventory",
-      browse: "Browse resources",
+      browse: width < 45 ? "Browse" : "Browse resources",
       catalogs: "Catalogs",
     };
+    const tabMetrics = sectionTabMetrics(width);
     const tabs: LayoutItem[] = (["inventory", "browse", "catalogs"] as const).map((section) => ({
       id: section,
       label: sectionNames[section],
       text: `${sectionNames[section]} ${props.sectionCounts?.[section] ?? 0}`,
       width: sectionNames[section].length + String(props.sectionCounts?.[section] ?? 0).length + 1 +
-        Number(props.focus === "tabs" && props.section === section) * 2,
+        Number(props.focus === "tabs" && props.section === section) * 2 + tabMetrics.itemPadding * 2,
       target: { type: "section", section },
     }));
-    const tabLines = splitControlLines(tabs, width, row, "tabs", 2);
+    const tabLines = splitControlLines(
+      tabs, Math.max(1, width - 2 - tabMetrics.inset * 2), row, "tabs", 3, tabMetrics.gap,
+    );
     for (const tabLine of tabLines) {
-      lines.push(tabLine, { row: tabLine.row + 1, kind: "tab-underline", items: tabLine.items });
+      lines.push(
+        { ...tabLine, kind: "tab-top" },
+        { ...tabLine, row: tabLine.row + 1 },
+        { ...tabLine, row: tabLine.row + 2, kind: "tab-underline" },
+      );
     }
-    row += tabLines.length * 2;
+    row += tabLines.length * 3;
   }
   if (part === "tabs") {
-    return { width, height: row, lines, menuFirst: 0, menuCount: 0 };
+    return { width, height: row, lines, menu: undefined };
   }
 
   const filters = ["kind", "catalog", "license"].flatMap((id) =>
@@ -192,30 +213,47 @@ export function dashboardControlsLayout(props: DashboardControlsProps): Dashboar
     }
   }
 
+  let menu: ControlMenu | undefined;
   const options = props.menuFilter ? props.menuOptions || [] : [];
-  if (options.length) {
-    lines.push({ row, kind: "menu-heading", items: [], text: `Choose ${props.menuFilter} · arrows · Enter` });
-    row += 1;
-    const menuCount = Math.min(MAX_MENU_OPTIONS, options.length);
-    const maxFirst = Math.max(0, options.length - menuCount);
-    const menuFirst = Math.max(0, Math.min((props.menuIndex || 0) - menuCount + 1, maxFirst));
-    for (let index = menuFirst; index < menuFirst + menuCount; index += 1) {
-      const value = options[index];
-      lines.push({
-        row,
-        kind: "menu",
-        items: [{
-          id: `filter-option-${index}`,
-          label: value,
-          text: value,
-          width,
-          target: { type: "filter-option", filter: props.menuFilter!, value },
-        }],
-      });
-      row += 1;
+  if (props.menuFilter && options.length) {
+    const filterLine = lines.find((line) => line.kind === "fields" &&
+      line.items.some((item) => item.id === props.menuFilter));
+    const filterIndex = filterLine?.items.findIndex((item) => item.id === props.menuFilter) ?? -1;
+    const anchor = filterLine?.items[filterIndex];
+    const filter = filters.find(({ id }) => id === props.menuFilter);
+    if (filterLine && anchor && filter) {
+      const left = 2 + filterLine.items.slice(0, filterIndex)
+        .reduce((used, item) => used + item.width + 1, 0);
+      const localLeft = left - 2;
+      const fieldBottom = filterLine.row + (fieldRows === 2 ? 0 : 2);
+      let top = fieldBottom;
+      const terminalBottom = props.rows
+        ? props.rows - DASHBOARD_HEADER_ROWS - (props.rowOffset || 0)
+        : Number.POSITIVE_INFINITY;
+      const availableRows = Math.max(0, terminalBottom - top);
+      const count = Math.min(MAX_MENU_OPTIONS, options.length, Math.max(1, availableRows - 2));
+      const panelHeight = count + 2;
+      if (availableRows < panelHeight) top = Math.max(0, terminalBottom - panelHeight);
+      const availableWidth = Math.max(1, width - localLeft);
+      const allLabel = filterValue({ ...filter, value: "all" });
+      const longestOption = Math.max(...options.map((value) =>
+        Array.from(value === "all" ? allLabel : value).length));
+      const desiredWidth = Math.max(anchor.width, Math.min(32, longestOption + 7));
+      const menuWidth = Math.min(availableWidth, desiredWidth);
+      const first = Math.max(0, Math.min(
+        (props.menuIndex || 0) - count + 1,
+        options.length - count,
+      ));
+      menu = {
+        left: localLeft,
+        top,
+        width: menuWidth,
+        first,
+        count,
+        selectedValue: filter.value,
+        allLabel,
+      };
     }
-    lines.push({ row, kind: "menu-heading", items: [], text: "" });
-    row += 1;
   }
 
   if (props.actionsInToolbar && props.actions?.length) {
@@ -232,18 +270,9 @@ export function dashboardControlsLayout(props: DashboardControlsProps): Dashboar
       row += 3;
     }
   }
-  return {
-    width,
-    height: row,
-    lines,
-    menuFirst: props.menuFilter && props.menuOptions?.length
-      ? Math.max(0, Math.min((props.menuIndex || 0) - MAX_MENU_OPTIONS + 1, props.menuOptions.length - MAX_MENU_OPTIONS))
-      : 0,
-    menuCount: props.menuFilter && props.menuOptions?.length
-      ? Math.min(MAX_MENU_OPTIONS, props.menuOptions.length)
-      : 0,
-  };
+  return { width, height: row, lines, menu };
 }
+
 
 function actionColor(id: string) {
   const { accents } = DASHBOARD_THEME.semantic;
@@ -301,38 +330,105 @@ export function DashboardControls(props: DashboardControlsProps) {
       target: item.target,
     });
   };
+  if (!props.menuOverlayOnly) {
   for (const line of layout.lines) {
+    if (layout.width < 3 && (line.kind === "tab-top" || line.kind === "tabs" || line.kind === "tab-underline")) {
+      const item = line.items[0];
+      const active = item?.target.type === "section" && item.target.section === props.section;
+      const focused = active && props.focus === "tabs";
+      const text = line.kind === "tabs"
+        ? clipped(`${focused ? "› " : ""}${item?.text || ""}`, layout.width)
+        : "─".repeat(layout.width);
+      children.push(h(Text, {
+        key: `tab-fallback-${line.kind}-${line.row}`,
+        color: line.kind === "tabs" && active || line.kind === "tab-underline" && active
+          ? DASHBOARD_THEME.semantic.accents.primary
+          : DASHBOARD_THEME.semantic.accents.muted,
+        bold: focused,
+      }, text));
+      if (line.kind === "tabs" && item) addControlRegion(item, 2, line.row, line.row + 1);
+      continue;
+    }
+    if (line.kind === "tab-top") {
+      const rule = layout.width >= 2
+        ? `┌${"─".repeat(layout.width - 2)}┐`
+        : "─".repeat(layout.width);
+      children.push(h(Text, {
+        key: `tab-top-${line.row}`,
+        color: DASHBOARD_THEME.semantic.accents.muted,
+      }, rule));
+      continue;
+    }
     if (line.kind === "tabs" || line.kind === "tab-underline") {
+      const { inset, itemPadding, gap } = sectionTabMetrics(layout.width);
+      const interiorWidth = Math.max(0, layout.width - 2);
+      const availableWidth = Math.max(0, interiorWidth - inset * 2);
       const rowChildren: React.ReactNode[] = [];
-      let x = 2;
-      for (const [index, item] of line.items.entries()) {
-        if (index) {
-          rowChildren.push(h(Text, { key: `tab-gap-${line.row}-${index}` }, " "));
-          x += 1;
-        }
-        const active = item.target.type === "section" && item.target.section === props.section;
-        const focused = props.focus === "tabs" && active;
-        if (line.kind === "tabs") {
+      if (line.kind === "tabs") {
+        rowChildren.push(h(Text, {
+          key: `tab-left-${line.row}`,
+          color: DASHBOARD_THEME.semantic.accents.muted,
+        }, "│"));
+        if (inset) rowChildren.push(h(Text, { key: `tab-inset-left-${line.row}` }, " ".repeat(inset)));
+        let used = 0;
+        let x = 3 + inset;
+        for (const [index, item] of line.items.entries()) {
+          if (index) {
+            rowChildren.push(h(Text, { key: `tab-gap-${line.row}-${index}` }, " ".repeat(gap)));
+            used += gap;
+            x += gap;
+          }
+          const active = item.target.type === "section" && item.target.section === props.section;
+          const focused = props.focus === "tabs" && active;
           const label = `${focused ? "› " : ""}${item.text}`;
+          const textWidth = Math.max(0, item.width - itemPadding * 2);
+          if (itemPadding) {
+            rowChildren.push(h(Text, { key: `tab-padding-left-${item.id}` }, " ".repeat(itemPadding)));
+          }
           rowChildren.push(h(Text, {
             key: `tab-${item.id}`,
             color: active ? DASHBOARD_THEME.semantic.accents.primary : DASHBOARD_THEME.semantic.accents.muted,
             bold: focused,
-          }, clipped(label, item.width)));
+          }, clipped(label, textWidth).padEnd(textWidth)));
+          if (itemPadding) {
+            rowChildren.push(h(Text, { key: `tab-padding-right-${item.id}` }, " ".repeat(itemPadding)));
+          }
           addControlRegion(item, x, line.row, line.row + 1);
-        } else {
-          rowChildren.push(h(Text, {
-            key: `tab-underline-${item.id}`,
-            color: active ? DASHBOARD_THEME.semantic.accents.primary : DASHBOARD_THEME.semantic.accents.muted,
-          }, (active ? "─" : " ").repeat(item.width)));
+          used += item.width;
+          x += item.width;
         }
-        x += item.width;
-      }
-      if (line.kind === "tab-underline" && x - 2 < layout.width) {
         rowChildren.push(h(Text, {
-          key: `tab-underline-rest-${line.row}`,
+          key: `tab-fill-${line.row}`,
           color: DASHBOARD_THEME.semantic.accents.muted,
-        }, "─".repeat(Math.max(0, layout.width - (x - 2)))));
+        }, `${" ".repeat(Math.max(0, availableWidth - used))}${" ".repeat(inset)}`));
+        rowChildren.push(h(Text, {
+          key: `tab-right-${line.row}`,
+          color: DASHBOARD_THEME.semantic.accents.muted,
+        }, "│"));
+      } else {
+        const activeIndex = line.items.findIndex((item) =>
+          item.target.type === "section" && item.target.section === props.section);
+        const activeWidth = activeIndex < 0 ? 0 : line.items[activeIndex].width;
+        let activeStart = inset;
+        for (let index = 0; index < activeIndex; index += 1) {
+          activeStart += line.items[index].width + gap;
+        }
+        const leftWidth = activeIndex < 0 ? 0 : activeStart;
+        const rightWidth = Math.max(0, interiorWidth - leftWidth - activeWidth);
+        rowChildren.push(h(Text, {
+          key: `tab-underline-left-${line.row}`,
+          color: DASHBOARD_THEME.semantic.accents.muted,
+        }, `└${"─".repeat(leftWidth)}`));
+        if (activeWidth) {
+          rowChildren.push(h(Text, {
+            key: `tab-underline-active-${line.row}`,
+            color: DASHBOARD_THEME.semantic.accents.primary,
+          }, "─".repeat(activeWidth)));
+        }
+        rowChildren.push(h(Text, {
+          key: `tab-underline-right-${line.row}`,
+          color: DASHBOARD_THEME.semantic.accents.muted,
+        }, `${"─".repeat(rightWidth)}┘`));
       }
       children.push(h(Box, {
         key: `control-${line.kind}-${line.row}`,
@@ -340,18 +436,6 @@ export function DashboardControls(props: DashboardControlsProps) {
         height: 1,
         width: layout.width,
       }, ...rowChildren));
-      continue;
-    }
-    if (line.kind === "menu-heading") {
-      const title = line.text || "";
-      const interior = title ? ` ${clipped(title, Math.max(0, layout.width - 4))} ` : "";
-      const rule = "─".repeat(Math.max(0, layout.width - interior.length - 2));
-      const border = title ? `╭${interior}${rule}╮` : `╰${"─".repeat(Math.max(0, layout.width - 2))}╯`;
-      children.push(h(Text, {
-        key: `menu-heading-${line.row}`,
-        color: DASHBOARD_THEME.semantic.accents.muted,
-        wrap: "truncate-end",
-      }, clipped(border, layout.width)));
       continue;
     }
     if (line.kind === "labels") {
@@ -444,27 +528,89 @@ export function DashboardControls(props: DashboardControlsProps) {
       continue;
     }
 
-    const rowChildren: React.ReactNode[] = [];
-    for (const [index, item] of line.items.entries()) {
-      const active = props.menuOptions?.[props.menuIndex || 0] === item.label;
-      const contentWidth = Math.max(0, layout.width - 4);
-      const content = `│ ${active ? "› " : "  "}${clipped(item.label, Math.max(0, contentWidth - 2)).padEnd(Math.max(0, contentWidth - 2))} │`;
-      rowChildren.push(h(Text, {
-        key: `menu-option-${line.row}-${index}`,
-        color: active ? DASHBOARD_THEME.semantic.accents.primary : DASHBOARD_THEME.semantic.accents.neutral,
-        bold: active,
-      }, clipped(content, layout.width)));
-      addControlRegion(item, 2, line.row, line.row);
-    }
+  }
+  }
+  if (layout.menu && props.menuFilter && props.menuOverlayOnly) {
+    const { left, top, width, first, count, selectedValue, allLabel } = layout.menu;
+    const options = props.menuOptions || [];
+    const backgroundColor = DASHBOARD_THEME.semantic.modal.background;
+    const foregroundColor = DASHBOARD_THEME.semantic.modal.foreground;
+    const borderColor = DASHBOARD_THEME.semantic.accents.primary;
+    const borderLine = (start: string, end: string) => width > 1
+      ? `${start}${"─".repeat(Math.max(0, width - 2))}${end}`
+      : start;
+    const borderItem: LayoutItem = {
+      id: "filter-popover-border",
+      label: "",
+      text: "",
+      width,
+      target: { type: "filter-dismiss", filter: props.menuFilter! },
+    };
+    addControlRegion(borderItem, left + 1, top, top);
+    addControlRegion(borderItem, left + 1, top + count + 1, top + count + 1);
     children.push(h(Box, {
-      key: `menu-option-row-${line.row}`,
-      flexDirection: "row",
-      height: 1,
+      key: "filter-popover",
+      position: "absolute",
+      top,
+      left,
+      width,
+      height: count + 2,
+      flexDirection: "column",
+      flexShrink: 0,
+    },
+    h(Text, { key: "filter-popover-top", color: borderColor, backgroundColor }, clipped(borderLine("╭", "╮"), width)),
+    ...options.slice(first, first + count).map((value, visibleIndex) => {
+      const optionIndex = first + visibleIndex;
+      const active = optionIndex === (props.menuIndex || 0);
+      const checked = value === selectedValue;
+      const optionLabel = value === "all" ? allLabel : value;
+      const innerWidth = Math.max(0, width - 2);
+      const marker = ` ${active ? "›" : " "} ${checked ? "✓" : " "} `;
+      const labelWidth = Math.max(0, innerWidth - Array.from(marker).length);
+      const content = `${clipped(marker, innerWidth)}${clipped(optionLabel, labelWidth).padEnd(labelWidth)}`;
+      const row = `│${content.padEnd(innerWidth)}│`;
+      const color = active
+        ? DASHBOARD_THEME.semantic.selectedForeground
+        : checked ? DASHBOARD_THEME.semantic.accents.success : foregroundColor;
+      const rowBackground = active ? DASHBOARD_THEME.semantic.selected : backgroundColor;
+      const item: LayoutItem = {
+        id: `filter-option-${optionIndex}`,
+        label: optionLabel,
+        text: optionLabel,
+        width,
+        target: { type: "filter-option", filter: props.menuFilter!, value },
+      };
+      addControlRegion(item, left + 2, top + visibleIndex + 1, top + visibleIndex + 1);
+      return h(Text, {
+        key: item.id,
+        color,
+        backgroundColor: rowBackground,
+        bold: active || checked,
+      }, clipped(row, width));
+    }),
+    h(Text, { key: "filter-popover-bottom", color: borderColor, backgroundColor }, clipped(borderLine("╰", "╯"), width))));
+  }
+  if (props.menuOverlayOnly) {
+    props.mouse?.replace("filter-popover", regions);
+    if (!layout.menu) return null;
+    return h(Box, {
+      position: "absolute",
+      top: DASHBOARD_HEADER_ROWS + (props.rowOffset || 0),
+      left: 1,
       width: layout.width,
-    }, ...rowChildren));
+      height: layout.menu.top + layout.menu.count + 2,
+      flexDirection: "column",
+      flexShrink: 0,
+    }, ...children);
   }
   props.mouse?.replace(props.part ? `controls-${props.part}` : "controls", regions);
-  return h(Box, { flexDirection: "column", width: layout.width, flexShrink: 0 }, ...children);
+  return h(Box, {
+    flexDirection: "column",
+    width: layout.width,
+    height: layout.height,
+    position: "relative",
+    flexShrink: 0,
+  }, ...children);
 }
 
 function actionButtonLines(props: DashboardControlsProps, width: number) {

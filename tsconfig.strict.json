@@ -9,10 +9,10 @@
     "noEmit": true
   },
   "files": [
-    "cli/src/dashboard/helpers.mts",
-    "cli/src/dashboard/catalog-freshness.mts",
-    "cli/src/dashboard/action-retry.mts",
-    "cli/src/dashboard/version-check.mts",
-    "cli/src/dashboard/screens/shared.mts"
+    "terminal/src/dashboard/helpers.mts",
+    "terminal/src/dashboard/catalog-freshness.mts",
+    "terminal/src/dashboard/action-retry.mts",
+    "terminal/src/dashboard/version-check.mts",
+    "terminal/src/dashboard/screens/shared.mts"
   ]
 }

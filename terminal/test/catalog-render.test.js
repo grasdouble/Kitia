@@ -204,6 +204,30 @@ function selectedDetailsFrame(frame) {
   return start < 0 ? "" : frame.slice(start);
 }
 
+function detailBodyText(frame) {
+  const rows = frame.split(/\r?\n/);
+  const headerRow = rows.findIndex((row) => row.includes("SELECTION DETAILS"));
+  if (headerRow < 0) return "";
+  const header = rows[headerRow];
+  const detailStart = header.lastIndexOf("│", header.indexOf("SELECTION DETAILS")) + 1;
+  const contentRows = [];
+  for (const row of rows.slice(headerRow + 1)) {
+    if (row.includes("└")) break;
+    const leftBorder = row.indexOf("│", detailStart - 1);
+    const contentStart = leftBorder >= 0 ? leftBorder + 1 : detailStart;
+    const rightBorder = row.indexOf("│", contentStart);
+    contentRows.push(row.slice(contentStart, rightBorder < 0 ? undefined : rightBorder));
+  }
+  return contentRows.join("").replace(/[\s┌┐└┘─│]/g, "");
+}
+
+function appendDetailPage(previous, frame) {
+  const next = detailBodyText(frame);
+  let overlap = Math.min(previous.length, next.length);
+  while (overlap > 0 && previous.slice(-overlap) !== next.slice(0, overlap)) overlap -= 1;
+  return previous + next.slice(overlap);
+}
+
 async function startInteractiveDashboard(resources, actions = {}, dimensions = { columns: 120, rows: 56 }) {
   const { PassThrough } = require("node:stream");
   const { render } = await import("ink");
@@ -482,9 +506,11 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
       catalogManagementFrames,
       selectedAnsi: DASHBOARD_THEME.terminalAnsi[DASHBOARD_THEME.semantic.selected],
       selectedForeground: DASHBOARD_THEME.semantic.selectedForeground,
+      primaryAnsi: DASHBOARD_THEME.terminalAnsi[DASHBOARD_THEME.semantic.accents.primary],
+      mutedAnsi: DASHBOARD_THEME.terminalAnsi[DASHBOARD_THEME.semantic.accents.muted],
     }));
   `;
-  const { frames, catalogManagementFrames, selectedAnsi, selectedForeground } = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script, screens], {
+  const { frames, catalogManagementFrames, selectedAnsi, selectedForeground, primaryAnsi, mutedAnsi } = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script, screens], {
     env, encoding: "utf8", timeout: 10000,
   }));
   const selectedBackgroundAnsi = String(Number(selectedAnsi) + 10);
@@ -494,12 +520,33 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
     const initialFrame = frames[screen * 4];
     const plainFrame = initialFrame.replace(ansi, "");
     assert.match(plainFrame, /Inventory \d+.*Browse resources \d+.*Catalogs \d+/);
+    assert.ok(plainFrame.includes("=o.o="), "the original cat face renders beside the dashboard title");
+    assert.ok(plainFrame.includes("\\__|_|__/_/"), "the complete five-line mascot renders");
     const lines = initialFrame.split(/\r?\n/);
+    const plainLines = plainFrame.split(/\r?\n/);
     const tabRow = lines.findIndex((line) => line.includes(screen ? "Inventory" : "Browse resources"));
+    assert.ok(tabRow >= 5, "the redesigned tabs follow the full-height dashboard header");
     const activeTab = lines[tabRow];
     assert.ok(activeTab);
     assert.doesNotMatch(activeTab, selectedBackground, "active tabs do not use a solid selected background");
-    assert.match(lines[tabRow + 1], /\u001b\[36m─/, "the active section has a thin primary underline");
+    const escape = String.fromCharCode(27);
+    const selectedLabel = screen ? "Inventory" : "Browse resources";
+    const selectedLabelStart = plainLines[tabRow].indexOf(selectedLabel);
+    const count = plainLines[tabRow].slice(selectedLabelStart + selectedLabel.length + 1).match(/^[0-9]+/)?.[0];
+    assert.ok(count, "the selected tab count remains visible");
+    const selectedText = `${selectedLabel} ${count}`;
+    const inactiveText = `${screen ? "Browse resources" : "Inventory"} `;
+    assert.ok(activeTab.includes(`${escape}[${primaryAnsi}m${selectedText}`), "the selected label and count use the primary accent");
+    assert.ok(activeTab.includes(`${escape}[${mutedAnsi}m${inactiveText}`), "unselected labels and counts use the muted accent");
+    const topRule = plainLines[tabRow - 1];
+    const bottomRule = plainLines[tabRow + 1];
+    assert.match(topRule, /┌─+┐/, "a full-width top rule starts the section strip");
+    assert.match(bottomRule, /└─+┘/, "the strip ends with a continuous bottom rule");
+    assert.equal(topRule.lastIndexOf("┐") - topRule.indexOf("┌"), 117, "the tab strip spans the dashboard content width");
+    assert.equal(bottomRule[selectedLabelStart - 1], "─", "the active underline extends into its left tab padding");
+    assert.equal(bottomRule[selectedLabelStart + selectedText.length], "─", "the active underline extends into its right tab padding");
+    assert.ok(lines[tabRow + 1].includes(`${escape}[${primaryAnsi}m${"─".repeat(selectedText.length + 2)}`),
+      "the active underline uses the primary accent across the padded tab width");
   }
   for (let screen = 0; screen < 2; screen++) {
     for (let selectedIndex = 0; selectedIndex < 4; selectedIndex++) {
@@ -567,6 +614,47 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
   }
 });
 
+test("dashboard header preserves the original animated cat artwork and height", async () => {
+  const { DASHBOARD_HEADER_ROWS, dashboardCatArt } = await import("../dist/dashboard/screens/shared.mjs");
+  assert.equal(DASHBOARD_HEADER_ROWS, 5);
+  assert.deepEqual(dashboardCatArt("idle", 0), [
+    "       /\\_/\\",
+    "      (=o.o=)",
+    "      /:>^<:\\    )",
+    "     / .| |. \\  /",
+    "     \\__|_|__/_/",
+  ]);
+  assert.equal(dashboardCatArt("wink", 0)[1], "      (=o.-=)");
+  assert.notDeepEqual(dashboardCatArt("lick", 0), dashboardCatArt("lick", 1));
+  assert.notDeepEqual(dashboardCatArt("scratch", 0), dashboardCatArt("scratch", 1));
+});
+
+test("section tabs stay clipped when there is no room for border corners", async () => {
+  const { Text } = await import("ink");
+  const { DashboardControls } = await import("../dist/dashboard/controls.mjs");
+  const regions = [];
+  const controls = DashboardControls({
+    columns: 3,
+    part: "tabs",
+    section: "inventory",
+    sectionCounts: { inventory: 1, browse: 2, catalogs: 3 },
+    focus: "tabs",
+    query: "",
+    searchActive: false,
+    filters: [],
+    actions: [],
+    mouse: { replace: (_owner, next) => regions.push(...next) },
+  });
+  const renderedRows = React.Children.toArray(controls.props.children);
+  assert.equal(controls.props.width, 1);
+  assert.equal(renderedRows.length, 9, "three tabs retain top, text, and underline rows");
+  assert.ok(renderedRows.every((row) => visibleInkText(row, Text).join("").length <= 1),
+    "the clipped tab fallback never draws beyond the one-cell content width");
+  assert.equal(regions.length, 3, "all three sections retain their hit regions");
+  assert.ok(regions.every(({ left, right }) => left === 2 && right === 2),
+    "tiny-width hit regions stay within the terminal columns");
+});
+
 test("dashboard mouse transport strips fragmented reports without corrupting search input", async () => {
   const { PassThrough } = require("node:stream");
   const { createDashboardInputTransport } = await import("../dist/dashboard/input-transport.mjs");
@@ -630,9 +718,9 @@ test("dashboard section shortcuts switch directly between inventory, catalog, an
 
 test("dashboard keyboard focus follows Search, Kind, Catalog, and License controls", async () => {
   const resources = [
-    { catalog: "alpha", kind: "skill", id: "alpha-skill", scope: "project", managed: true, status: "current", license_status: "MIT", license_spdx: "MIT" },
-    { catalog: "alpha", kind: "agent", id: "alpha-agent", scope: "project", managed: true, status: "current", license_status: "Apache-2.0", license_spdx: "Apache-2.0" },
-    { catalog: "beta", kind: "skill", id: "beta-skill", scope: "project", managed: true, status: "current", license_status: "GPL-3.0-only", license_spdx: "GPL-3.0-only" },
+    { catalog: "alpha", kind: "skill", id: "alpha-skill", scope: "project", managed: true, status: "current", license_status: "MIT", license_spdx: "MIT", source_repository: "org/alpha" },
+    { catalog: "alpha", kind: "agent", id: "alpha-agent", scope: "project", managed: true, status: "current", license_status: "Apache-2.0", license_spdx: "Apache-2.0", source_repository: "org/alpha" },
+    { catalog: "beta", kind: "skill", id: "beta-skill", scope: "project", managed: true, status: "current", license_status: "GPL-3.0-only", license_spdx: "GPL-3.0-only", source_repository: "org/beta" },
   ];
   const dashboard = await startInteractiveDashboard(resources);
   try {
@@ -644,9 +732,9 @@ test("dashboard keyboard focus follows Search, Kind, Catalog, and License contro
     await dashboard.waitRaw((frame) => frame !== beforeFocus, "Kind focus after Search");
     assertFocusedInput(dashboard, "Kind");
     dashboard.input.write("\r");
-    await dashboard.wait((frame) => frame.includes("Choose kind"), "kind option list");
+    await dashboard.wait((frame) => frame.includes("✓ All kinds"), "kind option list with the selected value marked");
     dashboard.input.write("\u001b[B");
-    await dashboard.wait((frame) => frame.includes("› agent"), "kind option highlighted");
+    await dashboard.wait((frame) => /›\s+agent/.test(frame), "kind option highlighted");
     dashboard.input.write("\r");
     await dashboard.wait((frame) => frame.includes("KIND AGENT"), "kind filter committed");
 
@@ -655,20 +743,20 @@ test("dashboard keyboard focus follows Search, Kind, Catalog, and License contro
     await dashboard.waitRaw((frame) => frame !== beforeFocus, "Catalog focus after Kind");
     assertFocusedInput(dashboard, "Catalog");
     dashboard.input.write("\r");
-    await dashboard.wait((frame) => frame.includes("Choose catalog"), "catalog option list");
+    await dashboard.wait((frame) => frame.includes("✓ All catalogs"), "catalog option list with the selected value marked");
     dashboard.input.write("\u001b[B");
-    await dashboard.wait((frame) => frame.includes("› alpha"), "catalog option highlighted");
+    await dashboard.wait((frame) => /›\s+alpha(?:\s|│)/.test(frame), "catalog option highlighted");
     dashboard.input.write("\r");
-    await dashboard.wait((frame) => frame.includes("CATALOG ALPHA"), "catalog filter committed");
+    await dashboard.wait((frame) => frame.includes("alpha▾") && frame.includes("1 results"), "catalog filter committed");
 
     beforeFocus = dashboard.rawFrame();
     dashboard.input.write("\t");
     await dashboard.waitRaw((frame) => frame !== beforeFocus, "License focus after Catalog");
     assertFocusedInput(dashboard, "License");
     dashboard.input.write("\r");
-    await dashboard.wait((frame) => frame.includes("Choose license"), "license option list");
+    await dashboard.wait((frame) => frame.includes("✓ All licenses"), "license option list with the selected value marked");
     dashboard.input.write("\u001b[B");
-    await dashboard.wait((frame) => frame.includes("› Apache-2.0"), "license option highlighted");
+    await dashboard.wait((frame) => /›\s+Apache-2.0/.test(frame), "license option highlighted");
     dashboard.input.write("\r");
     await dashboard.wait((frame) => frame.includes("Apache-2.0▾"), "license filter committed");
     dashboard.input.write("f");
@@ -676,6 +764,124 @@ test("dashboard keyboard focus follows Search, Kind, Catalog, and License contro
     assertFocusedInput(dashboard, "Search");
     dashboard.input.write("alpha-agent");
     await dashboard.wait((frame) => frame.includes("alpha-agent▏"), "typed search text");
+  } finally {
+    await dashboard.stop();
+  }
+});
+
+test("filter popovers stay anchored, preserve the committed choice, and accept pointer selection", async () => {
+  const resources = [
+    { catalog: "toolkit", kind: "skill", id: "toolkit-skill", scope: "project", managed: true, status: "current", license_status: "MIT", license_spdx: "MIT", source_repository: "org/toolkit" },
+    { catalog: "team", kind: "agent", id: "team-agent", scope: "project", managed: true, status: "current", license_status: "Apache-2.0", license_spdx: "Apache-2.0", source_repository: "org/team" },
+  ];
+  const dashboard = await startInteractiveDashboard(resources, {
+    userCatalogs: [
+      { name: "toolkit", repository: "org/toolkit" },
+      { name: "team", repository: "org/team" },
+    ],
+  });
+  try {
+    const before = dashboard.frame();
+    const workspaceRow = before.split(/\r?\n/).findIndex((line) => line.includes("INSTALLED RESOURCES"));
+    assert.notEqual(workspaceRow, -1, "the workspace is visible before opening the popup");
+    clickRenderedTarget(dashboard,
+      (target) => target.type === "filter-open" && target.filter === "kind", "All kinds");
+    const opened = await dashboard.wait((frame) => frame.includes("✓ All kinds"), "anchored kind menu");
+    const lines = opened.split(/\r?\n/);
+    const fieldRow = lines.findIndex((line) => line.includes("All kinds▾"));
+    assert.notEqual(fieldRow, -1, "the source selector remains visible");
+    const closedLines = before.split(/\r?\n/);
+    const closedFieldRow = closedLines.findIndex((line) => line.includes("All kinds▾"));
+    const fieldStart = closedLines[closedFieldRow].indexOf("All kinds▾") - 2;
+    const fieldBottomRow = closedLines.findIndex((line, index) => index > closedFieldRow && line[fieldStart] === "╰");
+    assert.notEqual(fieldBottomRow, -1, "the closed selector has a lower border");
+    const popupTopRow = lines.findIndex((line, index) => index >= fieldBottomRow && line[fieldStart] === "╭");
+    assert.equal(popupTopRow, fieldBottomRow, "the popup replaces the lower-border row without a gap or overlap");
+    assert.match(lines[popupTopRow + 1], /✓ All kinds/, "the first option follows directly below the shared border");
+    assert.equal(lines.findIndex((line) => line.includes("INSTALLED RESOURCES")), workspaceRow,
+      "opening the popup does not push the workspace down");
+    assert.ok(lines.some((line) => line.includes("›") && line.includes("✓ All kinds")),
+      "the active and committed options are visibly marked");
+
+    dashboard.input.write("\u001b[B");
+    const moved = await dashboard.wait((frame) => /›\s+agent/.test(frame), "keyboard highlight moves to another choice");
+    assert.ok(moved.includes("✓ All kinds"), "moving the highlight does not change the committed filter");
+    dashboard.input.write("\u001b");
+    const closed = await dashboard.wait((frame) => !frame.includes("✓ All kinds"), "Escape closes the popup");
+    assert.ok(closed.includes("All kinds▾"), "Escape leaves the filter value unchanged");
+
+    clickRenderedTarget(dashboard,
+      (target) => target.type === "filter-open" && target.filter === "catalog", "All catalogs");
+    const catalogMenu = await dashboard.wait((frame) => frame.includes("✓ All catalogs"), "catalog popup opens");
+    assert.ok(catalogMenu.includes("toolkit") && catalogMenu.includes("team"), "catalog choices remain visible by name");
+    const borderRegions = dashboard.mouse.getRegions().filter(({ target }) =>
+      target.type === "filter-dismiss" && target.filter === "catalog");
+    assert.equal(borderRegions.length, 2, "both popup border rows capture pointer input");
+    const bottomBorder = borderRegions.reduce((bottom, region) => region.top > bottom.top ? region : bottom);
+    clickAt(dashboard.input, {
+      x: Math.floor((bottomBorder.left + bottomBorder.right) / 2),
+      y: bottomBorder.top,
+    });
+    const borderClosed = await dashboard.wait((frame) => !frame.includes("✓ All catalogs"), "popup border dismisses the menu");
+    assert.ok(borderClosed.includes("All catalogs▾") && borderClosed.includes("2 results"),
+      "clicking the popup border dismisses without applying a choice");
+    const { DashboardMouseRegions } = await import("../dist/dashboard/input-transport.mjs");
+    const mouse = new DashboardMouseRegions();
+    let dispatched;
+    const overlap = { left: 8, right: 12, top: 20, bottom: 20 };
+    mouse.replace("inventory-rows", [{ ...overlap, target: { type: "row", screen: "inventory", index: 1 } }]);
+    mouse.replace("controls-filters", [{ ...overlap, target: { type: "filter-dismiss", filter: "catalog" } }]);
+    mouse.setHandler((target) => { dispatched = target; });
+    mouse.dispatch({ x: 10, y: 20, button: 0, modifiers: { shift: false, alt: false, ctrl: false } });
+    assert.deepEqual(dispatched, { type: "filter-dismiss", filter: "catalog" },
+      "popup border clicks take precedence over overlapping workspace rows");
+    clickRenderedTarget(dashboard,
+      (target) => target.type === "filter-open" && target.filter === "catalog", "All catalogs");
+    await dashboard.wait((frame) => frame.includes("✓ All catalogs"), "catalog popup reopens after border dismissal");
+    clickRenderedTarget(dashboard,
+      (target) => target.type === "filter-option" && target.filter === "catalog" && target.value === "toolkit", "toolkit");
+    const selected = await dashboard.wait((frame) => frame.includes("toolkit▾") && frame.includes("1 results"),
+      "pointer selection commits the catalog filter");
+    assert.ok(selected.includes("Inventory 2"), "filtered results preserve the unfiltered section count");
+  } finally {
+    await dashboard.stop();
+  }
+});
+
+test("short narrow terminals clip filter menus and scroll the active option into view", async () => {
+  const names = Array.from({ length: 8 }, (_, index) => `source${index}`);
+  const resources = names.map((catalog, index) => ({
+    catalog,
+    kind: "skill",
+    id: `resource-${index}`,
+    scope: "project",
+    managed: true,
+    status: "current",
+    license_status: "MIT",
+    license_spdx: "MIT",
+    source_repository: `org/${catalog}`,
+  }));
+  const dashboard = await startInteractiveDashboard(resources, {
+    userCatalogs: names.map((name) => ({ name, repository: `org/${name}` })),
+  }, { columns: 47, rows: 20 });
+  try {
+    clickRenderedTarget(dashboard,
+      (target) => target.type === "filter-open" && target.filter === "catalog", "All catalogs");
+    await dashboard.wait((frame) => frame.includes("✓ All catalogs"), "short-terminal catalog popup");
+    for (const name of names) {
+      dashboard.input.write("\u001b[B");
+      await dashboard.wait((frame) => new RegExp(`›\\s+${name}`).test(frame), `${name} becomes the highlighted choice`);
+    }
+    const scrolled = dashboard.frame();
+    const lines = scrolled.split(/\r?\n/);
+    assert.ok(lines.length <= 20, "the popup remains inside the terminal's row bounds");
+    assert.ok(lines.every((line) => Array.from(line).length <= 47), "popup rows remain clipped to terminal width");
+    const activeRow = lines.findIndex((line) => /›\s+source7/.test(line));
+    assert.ok(activeRow >= 0 && activeRow + 1 < 20 && lines[activeRow + 1].includes("╰"),
+      "the scrolled menu keeps its bottom border inside the terminal");
+    clickRenderedTarget(dashboard,
+      (target) => target.type === "filter-option" && target.filter === "catalog" && target.value === "source7", "source7");
+    await dashboard.wait((frame) => frame.includes("source7▾"), "scrolled choice remains pointer-selectable");
   } finally {
     await dashboard.stop();
   }
@@ -733,12 +939,32 @@ test("tabs, bordered filters, and menus stay clickable across responsive widths"
     { columns: 94, rows: 56 },
     { columns: 93, rows: 56 },
     { columns: 47, rows: 60 },
+    { columns: 56, rows: 40 },
   ]) {
     const dashboard = await startInteractiveDashboard(resources, {}, dimensions);
     try {
       const frame = dashboard.frame();
-      assert.ok(["Inventory 2", "Browse resources 0", "Catalogs 0"].every((label) => frame.includes(label)),
-        "tabs show current unfiltered section counts");
+      const sectionLabels = ["Inventory 2", "Browse resources 0", "Catalogs 0"];
+      assert.ok(sectionLabels.every((label) => frame.includes(label)), "tabs show current unfiltered section counts");
+      assert.equal(frame.split(/\r?\n/).filter((line) => sectionLabels.every((label) => line.includes(label))).length, 1,
+        `all sections remain on one tab row at ${dimensions.columns} columns`);
+      if (dimensions.columns === 56) {
+        const beforeTabFocus = dashboard.rawFrame();
+        dashboard.input.write("\t");
+        await dashboard.waitRaw((next) => next !== beforeTabFocus, "Tab moves focus to the section tabs at 56 columns");
+        const focusedFrame = dashboard.frame();
+        assert.ok(focusedFrame.includes("› Inventory 2"), "the focused tab indicator remains visible");
+        assert.equal(focusedFrame.split(/\r?\n/).filter((line) => sectionLabels.every((label) => line.includes(label))).length, 1,
+          "Tab focus does not wrap the section labels at 56 columns");
+
+        const beforeShiftTab = dashboard.rawFrame();
+        dashboard.input.write("\u001b[Z");
+        await dashboard.waitRaw((next) => next !== beforeShiftTab, "Shift+Tab returns from section tabs at 56 columns");
+        const shiftedFrame = dashboard.frame();
+        assert.ok(!shiftedFrame.includes("› Inventory 2"), "Shift+Tab moves focus back off the active tab");
+        assert.equal(shiftedFrame.split(/\r?\n/).filter((line) => sectionLabels.every((label) => line.includes(label))).length, 1,
+          "Shift+Tab leaves all section labels on one row at 56 columns");
+      }
       assert.ok(["Search resources…", "All kinds", "All catalogs", "All licenses"].every((value) => frame.includes(value)),
         `bordered input values remain visible at ${dimensions.columns} columns`);
       const labels = ["Search", "Kind", "Catalog", "License"].map((label) => {
@@ -759,13 +985,13 @@ test("tabs, bordered filters, and menus stay clickable across responsive widths"
       for (const rowOffset of [-1, 0, 1]) {
         clickRenderedButtonRow(dashboard,
           (target) => target.type === "filter-open" && target.filter === "catalog", "All catalogs", rowOffset);
-        await dashboard.wait((next) => next.includes("Choose catalog"), `Catalog border row ${rowOffset} opens menu`);
+        await dashboard.wait((next) => next.includes("✓ All catalogs"), `Catalog border row ${rowOffset} opens menu`);
         dashboard.input.write("\u001b");
-        await dashboard.wait((next) => !next.includes("Choose catalog"), `Catalog border row ${rowOffset} closes menu`);
+        await dashboard.wait((next) => !next.includes("✓ All catalogs"), `Catalog border row ${rowOffset} closes menu`);
       }
       clickRenderedTarget(dashboard,
         (target) => target.type === "filter-open" && target.filter === "catalog", "All catalogs");
-      await dashboard.wait((next) => next.includes("Choose catalog"), "catalog menu after summary cards");
+      await dashboard.wait((next) => next.includes("✓ All catalogs"), "catalog menu after summary cards");
       clickRenderedTarget(dashboard,
         (target) => target.type === "filter-option" && target.filter === "catalog" && target.value === "alpha", "alpha");
       await dashboard.wait((next) => next.includes("alpha▾"), "catalog option selected by its visible cell");
@@ -773,9 +999,41 @@ test("tabs, bordered filters, and menus stay clickable across responsive widths"
 
       clickRenderedTarget(dashboard,
         (target) => target.type === "filter-open" && target.filter === "kind", "All kinds");
-      await dashboard.wait((next) => next.includes("Choose kind"), "kind menu opens from its bordered field");
+      await dashboard.wait((next) => next.includes("✓ All kinds"), "kind menu opens from its bordered field");
       dashboard.input.write("\u001b");
-      await dashboard.wait((next) => !next.includes("Choose kind"), "kind menu closes with Escape");
+      await dashboard.wait((next) => !next.includes("✓ All kinds"), "kind menu closes with Escape");
+
+      const tabFrame = dashboard.frame();
+      const tabLines = tabFrame.split(/\r?\n/);
+      const browseRow = tabLines.findIndex((line) => line.includes("Browse resources 0"));
+      assert.notEqual(browseRow, -1, "the Browse tab remains visible");
+      const browseLine = tabLines[browseRow];
+      const browseLabelStart = browseLine.indexOf("Browse resources 0");
+      const hasFocusMarker = browseLine.slice(browseLabelStart - 2, browseLabelStart) === "› ";
+      const browseTextStart = browseLabelStart - Number(hasFocusMarker) * 2;
+      const browseText = `${hasFocusMarker ? "› " : ""}Browse resources 0`;
+      const itemPadding = dimensions.columns - 2 >= 56 ? 1 : 0;
+      const sectionRegions = dashboard.mouse.getRegions().filter(({ target }) => target.type === "section");
+      const browseRegion = sectionRegions.find(({ target }) => target.section === "browse");
+      assert.ok(browseRegion, "the Browse tab has a mouse hit region");
+      assert.equal(browseRegion.left, browseTextStart + 1 - itemPadding, "the hit region includes the leading tab padding");
+      assert.equal(browseRegion.right, browseTextStart + browseText.length + itemPadding,
+        "the hit region includes the trailing tab padding");
+      assert.equal(browseRegion.top, browseRow + 1, "the label row remains clickable");
+      assert.equal(browseRegion.bottom, browseRow + 2, "the underline row remains clickable");
+      const orderedTabRegions = [...sectionRegions].sort((left, right) => left.left - right.left);
+      for (let index = 0; index < orderedTabRegions.length - 1; index += 1) {
+        const gapX = orderedTabRegions[index].right + 1;
+        assert.ok(!orderedTabRegions.some((region) => region.left <= gapX && gapX <= region.right),
+          "the inter-tab gap stays outside all tab hit regions");
+      }
+      clickAt(dashboard.input, { x: browseRegion.right, y: browseRegion.top });
+      await dashboard.wait((next) => next.includes("CATALOG RESOURCES"), "Browse tab trailing padding click");
+      const inventoryRegion = dashboard.mouse.getRegions().find(({ target }) =>
+        target.type === "section" && target.section === "inventory");
+      assert.ok(inventoryRegion, "the Inventory tab has a mouse hit region after navigation");
+      clickAt(dashboard.input, { x: inventoryRegion.left, y: inventoryRegion.bottom });
+      await dashboard.wait((next) => next.includes("INSTALLED RESOURCES"), "Inventory tab leading padding underline click");
 
       clickRenderedButtonRow(dashboard,
         (target) => target.type === "section" && target.section === "browse", "Browse resources 0", 0);
@@ -1013,6 +1271,10 @@ test("inventory action hitboxes follow Ink layout across descriptions, focus, an
     try {
       const initial = dashboard.frame();
       assert.ok(initial.includes("Preview / audit"), `Preview remains visible at ${columns}×${rows}`);
+      if (columns === 40) {
+        assert.ok(["Inventory 1", "Browse 0", "Catalogs 0"].every((label) => initial.includes(label)),
+          "compact tab labels preserve every section count");
+      }
       if (focusActions) {
         const beforeFocus = dashboard.rawFrame();
         dashboard.input.write("\t".repeat(6));
@@ -1162,8 +1424,8 @@ test("Browse pages full descriptions, catalog/license values, and pinned sources
     kind: "skill", id: "long-resource", description,
     license_status: license, source_repository: "org/very-long-example-repository", source_path: sourcePath, source_ref: sourceRef,
   };
-  const strip = (frame) => frame.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001b\]8;;/g, "").replace(/\u001b\\/g, "").replace(/│/g, "");
+  // PageDown advances at least one detail row; text length plus labels bounds the finite page range.
+  const pageLimit = description.length + source.length + catalog.length + license.length + 64;
   for (const columns of [56, 120]) {
     const dashboard = await startInteractiveDashboard([], { catalogResources: [resource] }, { columns, rows: 40 });
     try {
@@ -1172,8 +1434,8 @@ test("Browse pages full descriptions, catalog/license values, and pinned sources
         frame.includes("long-resource"), "Browse and selected details before reading pages");
       let allPages = "";
       let frame = dashboard.frame();
-      for (let page = 0; page < 8; page += 1) {
-        allPages += strip(frame).replace(/\s/g, "");
+      for (let page = 0; page < pageLimit; page += 1) {
+        allPages = appendDetailPage(allPages, frame);
         if (allPages.includes(description.replace(/\s/g, "")) && allPages.includes(source.replace(/\s/g, "")) &&
             allPages.includes(catalog.replace(/\s/g, "")) && allPages.includes(license.replace(/\s/g, ""))) break;
         const previousDetails = selectedDetailsFrame(frame);
@@ -1186,7 +1448,7 @@ test("Browse pages full descriptions, catalog/license values, and pinned sources
           throw error;
         }
       }
-      allPages += strip(frame).replace(/\s/g, "");
+      allPages = appendDetailPage(allPages, frame);
       assert.ok(allPages.includes(description.replace(/\s/g, "")),
         `description remains complete at ${columns} columns`);
       assert.ok(allPages.includes(source.replace(/\s/g, "")),
@@ -1218,15 +1480,15 @@ test("Inventory pages complete locations, descriptions, catalog labels, and lice
     source_ref: sourceRef,
     license_status: license,
   };
-  const strip = (frame) => frame.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001b\]8;;/g, "").replace(/\u001b\\/g, "").replace(/│/g, "");
+  // PageDown advances at least one detail row; text length plus labels bounds the finite page range.
+  const pageLimit = description.length + location.length + sourceRef.length + catalog.length + license.length + 64;
   for (const columns of [56, 120]) {
     const dashboard = await startInteractiveDashboard([resource], {}, { columns, rows: 40 });
     try {
       let frame = dashboard.frame();
       let allPages = "";
-      for (let page = 0; page < 8; page += 1) {
-        allPages += strip(frame).replace(/\s/g, "");
+      for (let page = 0; page < pageLimit; page += 1) {
+        allPages = appendDetailPage(allPages, frame);
         if (allPages.includes(description.replace(/\s/g, "")) && allPages.includes(location) &&
             allPages.includes("https://github.com/example/long-repository-name") && allPages.includes(sourceRef) &&
             allPages.includes(catalog.replace(/\s/g, "")) && allPages.includes(license.replace(/\s/g, ""))) break;
@@ -1240,7 +1502,7 @@ test("Inventory pages complete locations, descriptions, catalog labels, and lice
           throw error;
         }
       }
-      allPages += strip(frame).replace(/\s/g, "");
+      allPages = appendDetailPage(allPages, frame);
       assert.ok(allPages.includes(description.replace(/\s/g, "")));
       assert.ok(allPages.includes(location));
       assert.ok(allPages.includes("https://github.com/example/long-repository-name"));

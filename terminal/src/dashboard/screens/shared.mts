@@ -11,20 +11,46 @@ const h = React.createElement;
 const OSC8_OPEN = "\u001b]8;;";
 const OSC8_CLOSE = "\u001b]8;;\u001b\\";
 
-function AnimatedTitle({ width, versionLabel, screenName, metadata }: {
+const kitiaWordmark = [
+  "█  ▄▀  ▀█▀  ▀▀█▀▀  ▀█▀  ▄▀▀▀▄",
+  "█▀▀▄    █     █     █   █▀▀▀█",
+  "▀   ▀  ▀▀▀    ▀    ▀▀▀  ▀   ▀",
+];
+
+const titleColorStops = DASHBOARD_THEME.titleGradientStops;
+const titleColors = Array.from({ length: 96 }, (_, index) => {
+  const segment = Math.floor(index / 32);
+  const start = titleColorStops[segment];
+  const end = titleColorStops[(segment + 1) % titleColorStops.length];
+  return `#${start.map((channel, component) =>
+    Math.round(channel + (end[component] - channel) * (index % 32) / 32)
+      .toString(16).padStart(2, "0")).join("")}`;
+});
+
+function AnimatedTitle({ width, versionLabel, screenName, metadata, phase }: {
   width: number;
+  phase: number;
   versionLabel: string;
   screenName: string;
   metadata: string;
 }) {
+  const pixelTitle = width >= kitiaWordmark[0].length;
   return h(Box, { width, flexDirection: "column" },
-    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText("KITIA", width)),
-    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: true },
-      fitText(`${versionLabel} · ${screenName}`, width)),
-    h(Text, { dimColor: true }, fitText(metadata, width)));
+    ...(pixelTitle
+      ? kitiaWordmark.map((line, row) => h(Text, { key: row },
+        ...Array.from(line, (character, column) => h(Text, {
+          key: column,
+          color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
+        }, character))))
+      : [h(Text, { key: "compact", color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText(`KITIA  ${versionLabel}`, width))]),
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: pixelTitle }, fitText(
+      pixelTitle ? `${versionLabel} · ${screenName}` : screenName, width,
+    )),
+    h(Text, { dimColor: true }, fitText(metadata, width)),
+    ...(!pixelTitle ? [h(Text, { key: "blank-1" }, " "), h(Text, { key: "blank-2" }, " ")] : []));
 }
 
-export const DASHBOARD_HEADER_ROWS = 3;
+export const DASHBOARD_HEADER_ROWS = 5;
 function AnimatedBrand({ art, catWidth, textWidth, versionLabel, screenName, metadata }: {
   art: string[];
   catWidth: number;
@@ -33,15 +59,43 @@ function AnimatedBrand({ art, catWidth, textWidth, versionLabel, screenName, met
   screenName: string;
   metadata: string;
 }) {
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setPhase((value) => (value + 1) % titleColors.length), 60);
+    return () => clearInterval(timer);
+  }, []);
   return h(Box, { flexDirection: "row", height: DASHBOARD_HEADER_ROWS, flexShrink: 0 },
     h(Box, { width: catWidth, marginRight: 2, flexDirection: "column" },
-      ...art.map((line, row) => h(Text, {
-        key: row,
-        color: DASHBOARD_THEME.semantic.accents.primary,
-        bold: true,
-        wrap: "truncate-end",
-      }, line))),
-    h(AnimatedTitle, { width: textWidth, versionLabel, screenName, metadata }));
+      ...art.map((line, row) => h(Text, { key: row, bold: true, wrap: "truncate-end" },
+        ...Array.from(line.slice(0, catWidth), (character, column) => h(Text, {
+          key: column,
+          color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
+        }, character))))),
+    h(AnimatedTitle, { width: textWidth, versionLabel, screenName, metadata, phase }));
+}
+
+type DashboardCatActivity = "idle" | "lick" | "scratch" | "wink";
+const sittingCatFrame = [
+  "       /\\_/\\",
+  "      (=o.o=)",
+  "      /:>^<:\\    )",
+  "     / .| |. \\  /",
+  "     \\__|_|__/_/",
+];
+const winkingCatFrame = [sittingCatFrame[0], "      (=o.-=)", ...sittingCatFrame.slice(2)];
+const lickingCatFrames = [
+  ["       /\\_/\\", "      (=-.-=)", "      /: v( )   )", "     / .| . \\  /", "     \\__|_|__/_/"],
+  ["       /\\_/\\", "      (=-.-=)", "      /: -( )   )", "     / .| . \\  /", "     \\__|_|__/_/"],
+];
+const scratchingCatFrames = [
+  ["       /\\_/\\", "      (=o.-=)()", "      /:>^< /   )", "     / .| ./ \\ /", "     \\__|_|__/_/"],
+  ["       /\\_/\\ ()", "      (=o.-=) /", "      /:>^< /   )", "     / .| ./ \\ /", "     \\__|_|__/_/"],
+];
+
+export function dashboardCatArt(activity: DashboardCatActivity, frame: number): string[] {
+  if (activity === "lick") return lickingCatFrames[frame];
+  if (activity === "scratch") return scratchingCatFrames[frame];
+  return activity === "wink" ? winkingCatFrame : sittingCatFrame;
 }
 
 
@@ -561,7 +615,7 @@ export function DashboardHeader({ versionLabel, screenName, metadata, columns }:
     activity: "idle", frame: 0,
   });
   const availableWidth = Math.max(1, columns - 2);
-  const catWidth = Math.min(8, Math.max(1, availableWidth - 3));
+  const catWidth = Math.min(18, Math.max(1, availableWidth - 3));
   const textWidth = Math.max(1, availableWidth - catWidth - 2);
   useEffect(() => {
     let activityTimer: ReturnType<typeof setTimeout>;
@@ -589,21 +643,7 @@ export function DashboardHeader({ versionLabel, screenName, metadata, columns }:
       clearInterval(frameTimer);
     };
   }, []);
-  const sittingFrame = [
-    " /\\_/\\ ",
-    grooming.activity === "wink" ? "( -.- )" : "( o.o )",
-    " > ^ < ",
-  ];
-  const lickingFrames = [
-    [" /\\_/\\ ", "( -.- )", " > v < "],
-    [" /\\_/\\ ", "( -.- )", " > v < "],
-  ];
-  const scratchingFrames = [
-    [" /\\_/\\ ", "( o.- )", " > ^ < "],
-    [" /\\_/\\ ", "( o.- )", " > ^ < "],
-  ];
-  const art = grooming.activity === "lick" ? lickingFrames[grooming.frame]
-    : grooming.activity === "scratch" ? scratchingFrames[grooming.frame] : sittingFrame;
+  const art = dashboardCatArt(grooming.activity, grooming.frame);
   return h(AnimatedBrand, { art, catWidth, textWidth, versionLabel, screenName, metadata });
 }
 

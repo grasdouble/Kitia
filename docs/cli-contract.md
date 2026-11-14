@@ -9,9 +9,9 @@ package version.
 
 The public surface consists of command syntax, documented options and defaults,
 JSON output, exit codes, and the supported installation-inventory formats.
-`cli/src/**/*.ts` and `cli/src/**/*.mts` compile into the matching directory
+`terminal/src/**/*.ts` and `terminal/src/**/*.mts` compile into the matching directory
 under `dist/`; these modules are implementation details, not a supported
-JavaScript SDK. The `cli/bin/` entry point is the supported executable.
+JavaScript SDK. The `terminal/bin/` entry point is the supported executable.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
@@ -414,8 +414,8 @@ a write failure.
 
 Machine-readable schemas ship with the package:
 
-- [Discovery arrays](../cli/schemas/cli-discovery-v1.schema.json)
-- [Reports, version 1](../cli/schemas/cli-report-v1.schema.json)
+- [Discovery arrays](../terminal/schemas/cli-discovery-v1.schema.json)
+- [Reports, version 1](../terminal/schemas/cli-report-v1.schema.json)
 - [Installation inventory formats and migrations](inventory-migrations.md)
 
 Discovery schema versions are identified by the schema filename; the public

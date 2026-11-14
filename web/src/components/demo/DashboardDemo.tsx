@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link } from '@tanstack/react-router';
-import { DASHBOARD_THEME } from '../../../../cli/src/dashboard/colors';
+import { DASHBOARD_THEME } from '../../../../terminal/src/dashboard/colors';
 import { initialCatalogs, initialInstallations, installedPath, resourceKey, resources, revisions, sourcePath, type DemoCatalog, type DemoResource, type Installation, type Kind, type Scope } from './demoData';
 import styles from './DashboardDemo.module.css';
 import { terminalColor } from './terminalTheme';

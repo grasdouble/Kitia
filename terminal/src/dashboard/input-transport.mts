@@ -13,6 +13,7 @@ export type DashboardMouseTarget =
   | { type: "focus"; focus: DashboardControlFocus }
   | { type: "filter-open"; filter: DashboardFilter }
   | { type: "filter-option"; filter: DashboardFilter; value: string }
+  | { type: "filter-dismiss"; filter: DashboardFilter }
   | { type: "modal-choice"; index: number }
   | { type: "modal-option"; group: "scope" | "client"; index: number }
   | { type: "row"; screen: DashboardSection; index: number }
@@ -55,6 +56,16 @@ export class DashboardMouseRegions {
     // Shift-click is a common terminal text-selection override. Never turn a
     // modified report into an application click or feed it to text inputs.
     if (button !== 0 || modifiers.shift || modifiers.alt || modifiers.ctrl) return;
+    for (const regions of this.owners.values()) {
+      for (const region of regions) {
+        if ((region.target.type === "filter-option" || region.target.type === "filter-dismiss") &&
+            x >= region.left && x <= region.right && y >= region.top && y <= region.bottom) {
+          this.owners.clear();
+          this.handler?.(region.target);
+          return;
+        }
+      }
+    }
     for (const regions of this.owners.values()) {
       const region = regions.find(({ left, right, top, bottom }) =>
         x >= left && x <= right && y >= top && y <= bottom);

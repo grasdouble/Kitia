@@ -2,12 +2,12 @@
 
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
-const { loadCommandCatalogs } = require("../../../cli/dist/catalog/loading.js");
-const { collectInstalledScopes } = require("../../../cli/dist/catalog/lifecycle.js");
-const { catalogEntries, formatDashboardRows } = require("../../../cli/dist/cli/catalog.js");
-const { loadUserSourceConfiguration } = require("../../../cli/dist/catalog/sources/config.js");
-const { executeDashboardAction } = require("../../../cli/dist/cli/commands.js");
-const { DASHBOARD_THEME } = require("../../../cli/dist/dashboard/colors.js");
+const { loadCommandCatalogs } = require("../../../terminal/dist/catalog/loading.js");
+const { collectInstalledScopes } = require("../../../terminal/dist/catalog/lifecycle.js");
+const { catalogEntries, formatDashboardRows } = require("../../../terminal/dist/cli/catalog.js");
+const { loadUserSourceConfiguration } = require("../../../terminal/dist/catalog/sources/config.js");
+const { executeDashboardAction } = require("../../../terminal/dist/cli/commands.js");
+const { DASHBOARD_THEME } = require("../../../terminal/dist/dashboard/colors.js");
 const { root, seedShowcase } = require("./site-showcase-fixture.js");
 const { assertTermlessRuntime } = require("./termless-preflight.js");
 
@@ -165,7 +165,7 @@ async function launchShowcaseDashboard(directory, {
     const [{ createTerminal }, { createXtermBackend }, dashboard] = await Promise.all([
       import("@termless/core"),
       import("@termless/xtermjs"),
-      import(path.join(root, "cli", "dist", "dashboard", "dashboard.mjs")),
+      import(path.join(root, "terminal", "dist", "dashboard", "dashboard.mjs")),
     ]);
     terminal = createTerminal({
       backend: createXtermBackend(),

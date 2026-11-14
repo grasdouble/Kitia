@@ -756,7 +756,10 @@ export function Dashboard({
       setCatalogFilterMode(target.focus === "search" && controlSection === "browse");
     } else if (target.type === "filter-open") openFilterMenu(target.filter);
     else if (target.type === "filter-option") chooseFilterValue(target.filter, target.value);
-    else if (target.type === "row") {
+    else if (target.type === "filter-dismiss") {
+      setFilterMenu(null);
+      setControlFocus(target.filter);
+    } else if (target.type === "row") {
       if (target.screen === "inventory") setSelectedIndex(target.index);
       else if (target.screen === "browse") setCatalogIndex(target.index);
       else setCatalogManagementIndex(target.index);

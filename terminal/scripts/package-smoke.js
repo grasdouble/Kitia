@@ -27,17 +27,17 @@ try {
     "package.json",
     "LICENSE",
     "README.md",
-    "cli/bin/kitia.js",
-    "cli/dist/cli/main.js",
+    "terminal/bin/kitia.js",
+    "terminal/dist/cli/main.js",
     "docs/cli-contract.md",
-    "cli/schemas/catalog-lock-v1.schema.json",
-    "cli/migrations/run.js",
+    "terminal/schemas/catalog-lock-v1.schema.json",
+    "terminal/migrations/run.js",
   ]) {
     assert.ok(packed.has(file), `Missing package file: ${file}`);
   }
-  assert.equal([...packed].some((file) => file.startsWith("cli/test/")), false);
+  assert.equal([...packed].some((file) => file.startsWith("terminal/test/")), false);
   assert.equal([...packed].some((file) => file.startsWith("catalogs/")), false);
-  assert.deepEqual([...packed].filter((file) => file.startsWith("cli/bin/")), ["cli/bin/kitia.js"]);
+  assert.deepEqual([...packed].filter((file) => file.startsWith("terminal/bin/")), ["terminal/bin/kitia.js"]);
 
   const consumer = path.join(temporary, "consumer");
   fs.mkdirSync(consumer);
@@ -53,7 +53,7 @@ try {
   npm(["install", "--no-audit", "--no-fund", path.join(temporary, archive.filename)], consumer);
   const installedRoot = path.join(consumer, "node_modules/@grasdouble/kitia");
   const manifest = JSON.parse(fs.readFileSync(path.join(installedRoot, "package.json"), "utf8"));
-  assert.deepEqual(manifest.bin, { kitia: "cli/bin/kitia.js" });
+  assert.deepEqual(manifest.bin, { kitia: "terminal/bin/kitia.js" });
 
   const cli = path.join(installedRoot, manifest.bin.kitia);
   execFileSync(process.execPath, [cli, "dashboard"], {

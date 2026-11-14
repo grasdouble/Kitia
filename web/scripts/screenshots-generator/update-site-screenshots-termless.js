@@ -38,7 +38,7 @@ original captures are untouched.`;
 class CaptureError extends Error {}
 
 async function assertBuiltCheckout() {
-  for (const file of ["cli/dist/cli/main.js", "cli/dist/catalog/sources/installed.js"]) {
+  for (const file of ["terminal/dist/cli/main.js", "terminal/dist/catalog/sources/installed.js"]) {
     try {
       await fs.access(path.join(root, file));
     } catch {
