@@ -6,10 +6,13 @@ import { render, useInput, useWindowSize } from "ink";
 import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
-import {
-  cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, filterCatalogResources, filterInventory, inventoryCatalogLabels,
+import { catalogFilterOptions, cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, filterCatalogResources, filterInventory, inventoryCatalogLabels, inventoryFilterOptions,
   mergeRefreshedCatalogResources,
 } from "./helpers.mjs";
+import { type DashboardControlButton, type DashboardControlFilter } from "./controls.mjs";
+import { DashboardMouseRegions, type DashboardControlFocus, type DashboardFilter, type DashboardMouseTarget, type DashboardSection } from "./input-transport.mjs";
+import { createDashboardInputTransport } from "./input-transport.mjs";
+import type { DashboardControlsProps } from "./controls.mjs";
 import {
   CatalogManagementScreen, CatalogScreen, InspectionScreen, InventoryScreen, ScreenFrame,
   inspectionPageCount,
@@ -95,6 +98,11 @@ type CatalogTransferState = {
 type CatalogPresetState = { index: number };
 
 const h = React.createElement;
+const sectionScreens: Record<string, "inventory" | "catalog" | "catalog-management"> = {
+  "1": "inventory",
+  "2": "catalog",
+  "3": "catalog-management",
+};
 
 
 export function Dashboard({
@@ -102,6 +110,7 @@ export function Dashboard({
   errors = [],
   actions = {},
   onFinish,
+  mouse,
 }: {
   resources: CatalogResource[];
   errors?: ScanError[];
@@ -131,6 +140,7 @@ export function Dashboard({
     showOnboarding?: boolean;
   };
   onFinish: (success: boolean) => void;
+  mouse?: DashboardMouseRegions;
 }) {
   const { columns = 80, rows = 24 } = useWindowSize();
   const installedVersion = process.env.KITIA_INSTALLED_VERSION || "unknown";
@@ -160,6 +170,10 @@ export function Dashboard({
   const [tourStep, setTourStep] = useState<number | null>(actions.showOnboarding ? 0 : null);
   const tourStepRef = useRef<number | null>(actions.showOnboarding ? 0 : null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [controlFocus, setControlFocus] = useState<DashboardControlFocus>("list");
+  const [controlActionIndex, setControlActionIndex] = useState(0);
+  const [filterMenu, setFilterMenu] = useState<DashboardFilter | null>(null);
+  const [filterMenuIndex, setFilterMenuIndex] = useState(0);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogFilterMode, setCatalogFilterMode] = useState(false);
   const [catalogIndex, setCatalogIndex] = useState(0);
@@ -257,6 +271,75 @@ export function Dashboard({
     },
   );
   const activeCatalogIndex = Math.min(catalogIndex, Math.max(0, visibleCatalog.length - 1));
+  const controlSection: DashboardSection = screenMode === "catalog-management" ? "catalogs"
+    : screenMode === "catalog" || screenMode === "install-options" ? "browse" : "inventory";
+  const selectedCandidate = visibleCatalog[activeCatalogIndex];
+  const candidateInstalledScopes = selectedCandidate
+    ? installedResources.filter((resource) => resource.managed !== false && resource.catalog === selectedCandidate.catalog &&
+      resource.kind === selectedCandidate.kind && resource.id === selectedCandidate.id).map((resource) => resource.scope)
+    : [];
+  const inventoryControlsFilters: DashboardControlFilter[] = [
+    { id: "kind", value: inventoryKindFilter, options: inventoryFilterOptions(installedResources, "kind", inventoryCatalogFilter, inventoryKindFilter, inventoryLicenseFilter, userCatalogs) },
+    { id: "catalog", value: inventoryCatalogFilter, options: inventoryFilterOptions(installedResources, "catalog", inventoryCatalogFilter, inventoryKindFilter, inventoryLicenseFilter, userCatalogs) },
+    { id: "license", value: inventoryLicenseFilter, options: inventoryFilterOptions(installedResources, "license", inventoryCatalogFilter, inventoryKindFilter, inventoryLicenseFilter, userCatalogs) },
+  ];
+  const browseControlsFilters: DashboardControlFilter[] = [
+    { id: "kind", value: catalogKindFilter, options: catalogFilterOptions(candidates, "kind", catalogFilters, userCatalogs) },
+    { id: "catalog", value: catalogSourceFilter, options: catalogFilterOptions(candidates, "catalog", catalogFilters, userCatalogs) },
+    { id: "license", value: catalogLicenseFilter, options: catalogFilterOptions(candidates, "license", catalogFilters, userCatalogs) },
+  ];
+  const controlActions: DashboardControlButton[] = controlSection === "inventory"
+    ? [
+      ...(selectedResource && selectedResource.managed !== false && actions.execute ? [{ id: "update", label: "Update resource" }] : []),
+      ...(selectedResource && actions.execute ? [{ id: "remove", label: selectedResource.managed === false ? "Remove" : "Uninstall" }] : []),
+      ...(actions.execute && selectedResource?.scope && (selectedResource.managed === false
+        ? Boolean(selectedResource.paths?.length)
+        : Boolean(selectedResource.source_repository && selectedResource.source_path)) ? [{ id: "preview", label: "Preview / audit" }] : []),
+      ...(selectedResource?.managed !== false && selectedResource?.source_repository && selectedResource?.source_path && actions.listSourceVersions && actions.execute
+        ? [{ id: "revision", label: "Revisions" }] : []),
+      ...(candidates.length && actions.execute ? [{ id: "install", label: "Install resource" }] : []),
+    ]
+    : controlSection === "browse"
+      ? [
+        ...(selectedCandidate && actions.execute ? [{ id: "install", label: "Install resource" }] : []),
+        ...(selectedCandidate && actions.execute ? [{ id: "preview", label: "Preview / audit" }] : []),
+        ...(selectedCandidate?.source_repository && selectedCandidate?.source_path && actions.listSourceVersions && actions.execute
+          ? [{ id: "revision", label: "Revisions" }] : []),
+        ...(candidateInstalledScopes.length && actions.listSourceVersions && actions.execute ? [{ id: "update", label: "Update resource" }] : []),
+      ]
+      : [
+        ...(actions.addCatalog ? [{ id: "add-catalog", label: "Add catalog" }, { id: "presets", label: "Presets" }] : []),
+        ...(userCatalogs.length && actions.updateCatalog ? [{ id: "edit-catalog", label: "Edit" }] : []),
+        ...(userCatalogs.length && actions.refreshCatalog ? [{ id: "refresh-catalog", label: "Refresh" }] : []),
+        ...(userCatalogs.length && actions.removeCatalog ? [{ id: "remove-catalog", label: "Remove" }] : []),
+        ...(actions.transferCatalogs ? [{ id: "import-catalogs", label: "Import" }, { id: "export-catalogs", label: "Export" }] : []),
+      ];
+  const controlsBase: Omit<DashboardControlsProps, "modalActive"> = {
+    columns,
+    rows,
+    section: controlSection,
+    sectionCounts: {
+      inventory: installedResources.length,
+      browse: candidates.length,
+      catalogs: userCatalogs.length,
+    },
+    focus: controlFocus,
+    query: controlSection === "browse" ? catalogQuery : query,
+    searchActive: controlSection === "browse" ? catalogFilterMode : controlSection === "inventory" ? filterMode : false,
+    showSearch: controlSection !== "catalogs",
+    actionsInToolbar: !showDetails,
+    ...(controlSection === "inventory" ? { filters: inventoryControlsFilters }
+      : controlSection === "browse" ? { filters: browseControlsFilters } : {}),
+    menuFilter: filterMenu,
+    menuOptions: filterMenu
+      ? (controlSection === "inventory" ? inventoryControlsFilters : browseControlsFilters)
+        .find(({ id }) => id === filterMenu)?.options || []
+      : [],
+    menuIndex: filterMenuIndex,
+    actions: controlActions,
+    actionIndex: controlActionIndex,
+    mouse,
+  };
   const headerVersionLabel = loading
     ? `${loadingFrames[loadingFrame]} ${actionPending ? actionMessage || "Loading" : versionLabel}`
     : versionLabel;
@@ -516,6 +599,192 @@ export function Dashboard({
     }
   };
 
+  const navigateToSection = (section: DashboardSection) => {
+    setFilterMenu(null);
+    setFilterMode(false);
+    setCatalogFilterMode(false);
+    setControlFocus("list");
+    const destination = section === "inventory" ? "inventory" : section === "browse" ? "catalog" : "catalog-management";
+    setScreenMode(destination);
+    if (section === "catalogs" && screenMode !== destination) void checkCatalogFreshness();
+  };
+  const currentFilterValue = (filter: DashboardFilter) => controlSection === "inventory"
+    ? filter === "catalog" ? inventoryCatalogFilter : filter === "kind" ? inventoryKindFilter : inventoryLicenseFilter
+    : filter === "catalog" ? catalogSourceFilter : filter === "kind" ? catalogKindFilter : catalogLicenseFilter;
+  const openFilterMenu = (filter: DashboardFilter) => {
+    const options = (controlSection === "inventory" ? inventoryControlsFilters : browseControlsFilters)
+      .find(({ id }) => id === filter)?.options || ["all"];
+    setFilterMenu(filter);
+    setFilterMenuIndex(Math.max(0, options.indexOf(currentFilterValue(filter))));
+    setControlFocus(filter);
+    setFilterMode(false);
+    setCatalogFilterMode(false);
+  };
+  const chooseFilterValue = (filter: DashboardFilter, value: string) => {
+    if (controlSection === "inventory") {
+      if (filter === "catalog") setInventoryCatalogFilter(value);
+      else if (filter === "kind") setInventoryKindFilter(value);
+      else setInventoryLicenseFilter(value);
+      setSelectedIndex(0);
+    } else if (filter === "catalog") {
+      setCatalogSourceFilter(value);
+      resetCatalogLicenseFilter();
+      setCatalogIndex(0);
+    } else if (filter === "kind") {
+      setCatalogKindFilter(value);
+      resetCatalogLicenseFilter();
+      setCatalogIndex(0);
+    } else {
+      setCatalogLicenseFilter(value);
+      setCatalogIndex(0);
+    }
+    setFilterMenu(null);
+    setControlFocus(filter);
+  };
+  const openInstallOptions = (resource: CatalogResource) => {
+    setInstallResource(resource);
+    setInstallRef(null);
+    setInstallScope("project");
+    setInstallTool("copilot");
+    setInstallFocus(resource.kind === "instruction" ? 1 : 0);
+    setScreenMode("install-options");
+    setActionMessage("");
+  };
+  const chooseConfirmation = (choice: number) => {
+    if (!confirmation) return;
+    if (choice === 0) {
+      if (confirmation.action === "install") setScreenMode("install-options");
+      setConfirmation(null);
+      setConfirmationStage(1);
+      setConfirmationChoice(0);
+      return;
+    }
+    if (actionPending) return;
+    if (confirmation.action === "remove-unmanaged" && confirmationStage === 1) {
+      setConfirmationStage(2);
+      setConfirmationChoice(0);
+      return;
+    }
+    const requested = confirmation;
+    setConfirmation(null);
+    setConfirmationStage(1);
+    setConfirmationChoice(0);
+    if (requested.action === "install") setScreenMode("inventory");
+    void runConfirmedAction(requested);
+  };
+  const activateControlAction = (action: string) => {
+    if (controlSection === "inventory") {
+      if (action === "install" && candidates.length && actions.execute) {
+        setCatalogQuery("");
+        resetCatalogLicenseFilter();
+        setCatalogIndex(0);
+        setActionMessage("");
+        navigateToSection("browse");
+      }
+      else if (action === "preview" && selectedResource) void runConfirmedAction({ action: "preview", resource: selectedResource });
+      else if (action === "revision" && selectedResource) void openSourceVersions(selectedResource, "update");
+      else if (action === "update" && selectedResource) {
+        setConfirmation({ action: "update", resource: selectedResource });
+        setConfirmationChoice(1);
+        setActionMessage("");
+      } else if (action === "remove" && selectedResource) {
+        setConfirmation({ action: selectedResource.managed === false ? "remove-unmanaged" : "uninstall", resource: selectedResource });
+        setConfirmationStage(1);
+        setConfirmationChoice(0);
+        setActionMessage("");
+      }
+      return;
+    }
+    if (controlSection === "browse" && selectedCandidate) {
+      if (action === "install") openInstallOptions(selectedCandidate);
+      else if (action === "preview") void runConfirmedAction({ action: "preview", resource: selectedCandidate });
+      else if (action === "revision" || action === "update") {
+        const replacementScope = candidateInstalledScopes.length === 1 ? candidateInstalledScopes[0] : null;
+        void openSourceVersions(
+          replacementScope ? { ...selectedCandidate, scope: replacementScope } : selectedCandidate,
+          replacementScope ? "update" : "install",
+        );
+      }
+      return;
+    }
+    if (controlSection !== "catalogs") return;
+    if (action === "add-catalog" && actions.addCatalog) {
+      setCatalogWizard({ step: "name", intent: "add", originalName: null, name: "", repository: "", mode: "basic", kind: "skill", path: "", entries: [], entryIndex: 0, message: "" });
+    } else if (action === "presets" && actions.addCatalog) {
+      setCatalogPreset({ index: 0 });
+    } else if (action === "edit-catalog" && actions.updateCatalog && userCatalogs.length) {
+      const selected = userCatalogs[Math.min(catalogManagementIndex, userCatalogs.length - 1)];
+      setCatalogWizard({ step: "name", intent: "edit", originalName: selected.name, name: selected.name, repository: selected.repository, mode: selected.mode || "basic", kind: selected.entries?.[0]?.kind || "skill", path: "", entries: selected.mode === "custom" ? [...(selected.entries || [])] : [], entryIndex: 0, message: "" });
+    } else if (action === "refresh-catalog" && actions.refreshCatalog && userCatalogs.length) {
+      const index = Math.min(catalogManagementIndex, userCatalogs.length - 1);
+      setCatalogRefresh({ step: "scope", scope: "one", index, name: "", message: "", failed: false });
+    } else if (action === "remove-catalog" && actions.removeCatalog && userCatalogs.length) {
+      const index = Math.min(catalogManagementIndex, userCatalogs.length - 1);
+      setCatalogRemoval({ step: "select", index, name: userCatalogs[index].name, message: "", failed: false });
+    } else if (action === "import-catalogs" && actions.transferCatalogs) {
+      setCatalogTransfer({ action: "import", step: "paste", content: "", message: "", working: false });
+    } else if (action === "export-catalogs" && actions.transferCatalogs) {
+      setCatalogTransfer({ action: "export", step: "paste", content: "", message: "", working: false });
+    }
+  };
+  const handleMouseTarget = (target: DashboardMouseTarget) => {
+    if (target.type === "modal-choice") {
+      if (confirmation) chooseConfirmation(target.index);
+      return;
+    }
+    if (target.type === "modal-option") {
+      if (screenMode === "install-options" && installResource) {
+        if (target.group === "scope") {
+          const choices = installResource.kind === "instruction" ? ["project"] : ["project", "user"];
+          setInstallScope(choices[Math.min(target.index, choices.length - 1)]);
+          setInstallFocus(0);
+        } else {
+          setInstallTool(["copilot", "claude", "both"][Math.min(target.index, 2)]);
+          setInstallFocus(1);
+        }
+      }
+      return;
+    }
+    if (actionPending || versionLoading || inspection || actionFailure || confirmation || catalogWizard || catalogRemoval ||
+        catalogRefresh || catalogTransfer || catalogPreset || sourceVersionPicker || versionNotice || tourStep !== null || migrationScopes.length ||
+        screenMode === "install-options") return;
+    if (target.type === "section") navigateToSection(target.section);
+    else if (target.type === "focus") {
+      setControlFocus(target.focus);
+      setFilterMenu(null);
+      setFilterMode(target.focus === "search" && controlSection === "inventory");
+      setCatalogFilterMode(target.focus === "search" && controlSection === "browse");
+    } else if (target.type === "filter-open") openFilterMenu(target.filter);
+    else if (target.type === "filter-option") chooseFilterValue(target.filter, target.value);
+    else if (target.type === "row") {
+      if (target.screen === "inventory") setSelectedIndex(target.index);
+      else if (target.screen === "browse") setCatalogIndex(target.index);
+      else setCatalogManagementIndex(target.index);
+      setFilterMenu(null);
+      setFilterMode(false);
+      setCatalogFilterMode(false);
+      setControlFocus("list");
+    } else if (target.type === "action") activateControlAction(target.action);
+  };
+  mouse?.setHandler(handleMouseTarget);
+  const controlFocusOrder: DashboardControlFocus[] = [
+    "tabs",
+    ...(controlsBase.showSearch ? ["search" as const] : []),
+    ...(controlsBase.filters || []).map(({ id }) => id),
+    ...(controlActions.length ? ["actions" as const] : []),
+    "list",
+  ];
+  const moveControlFocus = (backwards = false) => {
+    const index = controlFocusOrder.indexOf(controlFocus);
+    const offset = backwards ? -1 : 1;
+    const next = controlFocusOrder[(index + offset + controlFocusOrder.length) % controlFocusOrder.length];
+    setControlFocus(next);
+    setFilterMenu(null);
+    setFilterMode(next === "search" && controlSection === "inventory");
+    setCatalogFilterMode(next === "search" && controlSection === "browse");
+    if (next === "actions") setControlActionIndex((current) => Math.min(current, Math.max(0, controlActions.length - 1)));
+  };
+
   useInput((input, key) => {
     const character = input.toLocaleLowerCase();
     if (actionPending || versionLoading) return;
@@ -628,7 +897,6 @@ export function Dashboard({
     if (!catalogWizard && !catalogRemoval && !catalogRefresh && !actionPending &&
         character === "m" && screenMode === "inventory" && !filterMode) {
       setScreenMode("catalog-management");
-      setCatalogManagementIndex(0);
       void checkCatalogFreshness();
       return;
     }
@@ -1010,35 +1278,51 @@ export function Dashboard({
     }
 
     if (confirmation) {
-      if ((key.ctrl && character === "c") || key.escape || character === "n") {
-        if (confirmation.action === "install") setScreenMode("install-options");
-        setConfirmation(null);
-        setConfirmationStage(1);
-        setConfirmationChoice(0);
-      } else if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow) {
+      if ((key.ctrl && character === "c") || key.escape || character === "n") chooseConfirmation(0);
+      else if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow) {
         setConfirmationChoice(confirmationChoice === 0 ? 1 : 0);
-      } else if (character === "y" || (key.return && confirmationChoice === 1)) {
-        if (actionPending) return;
-        if (confirmation.action === "remove-unmanaged" && confirmationStage === 1) {
-          setConfirmationStage(2);
-          setConfirmationChoice(0);
-          return;
-        }
-        const requested = confirmation;
-        setConfirmation(null);
-        setConfirmationStage(1);
-        setConfirmationChoice(0);
-        if (requested.action === "install") setScreenMode("inventory");
-        void runConfirmedAction(requested);
-      } else if (key.return) {
-        if (confirmation.action === "install") setScreenMode("install-options");
-        setConfirmation(null);
-        setConfirmationStage(1);
-        setConfirmationChoice(0);
-      }
+      } else if (character === "y") chooseConfirmation(1);
+      else if (key.return) chooseConfirmation(confirmationChoice);
       return;
     }
     if (actionPending) return;
+    if (filterMenu) {
+      const options = controlsBase.filters?.find(({ id }) => id === filterMenu)?.options || [];
+      if (key.tab || input === "\t") moveControlFocus(key.shift);
+      else if (key.escape) setFilterMenu(null);
+      else if ((key.upArrow || key.downArrow) && options.length) {
+        setFilterMenuIndex(cycleIndex(options.length, filterMenuIndex, key.downArrow ? 1 : -1));
+      } else if ((key.return || input === " ") && options.length) {
+        chooseFilterValue(filterMenu, options[Math.min(filterMenuIndex, options.length - 1)]);
+      }
+      return;
+    }
+    if ((key.tab || input === "\t") && screenMode !== "install-options") {
+      moveControlFocus(key.shift);
+      return;
+    }
+    if (controlFocus === "tabs" && (key.leftArrow || key.rightArrow)) {
+      const index = ["inventory", "browse", "catalogs"].indexOf(controlSection);
+      const next = ["inventory", "browse", "catalogs"][(index + (key.rightArrow ? 1 : 2)) % 3] as DashboardSection;
+      navigateToSection(next);
+      return;
+    }
+    if ((controlFocus === "catalog" || controlFocus === "kind" || controlFocus === "license") &&
+        controlsBase.filters?.some(({ id }) => id === controlFocus) && (key.return || input === " ")) {
+      openFilterMenu(controlFocus);
+      return;
+    }
+    if (controlFocus === "actions" && controlActions.length) {
+      if (key.leftArrow || key.rightArrow) {
+        setControlActionIndex(cycleIndex(controlActions.length, controlActionIndex, key.rightArrow ? 1 : -1));
+        return;
+      }
+      if (key.return || input === " ") {
+        const action = controlActions[controlActionIndex];
+        if (action) activateControlAction(action.id);
+        return;
+      }
+    }
     const activeFilter = screenMode === "catalog"
       ? catalogFilterMode
       : screenMode === "inventory" && filterMode;
@@ -1047,14 +1331,25 @@ export function Dashboard({
       return;
     }
 
+    const destination = !activeFilter && screenMode !== "install-options"
+      ? sectionScreens[character]
+      : undefined;
+    if (destination) {
+      navigateToSection(destination === "inventory" ? "inventory" : destination === "catalog" ? "browse" : "catalogs");
+      return;
+    }
+
     if (screenMode === "catalog") {
       if (catalogFilterMode) {
-        if (key.return) setCatalogFilterMode(false);
-        else if (key.escape) {
+        if (key.return) {
+          setCatalogFilterMode(false);
+          setControlFocus("list");
+        } else if (key.escape) {
           setCatalogFilterMode(false);
           setCatalogQuery("");
           resetCatalogLicenseFilter();
           setCatalogIndex(0);
+          setControlFocus("list");
         } else if (key.upArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, -1));
         else if (key.downArrow) setCatalogIndex(cycleIndex(visibleCatalog.length, activeCatalogIndex, 1));
         else if (key.backspace || key.delete) {
@@ -1065,11 +1360,12 @@ export function Dashboard({
           setCatalogIndex(0);
         }
       } else if (key.escape) {
-        setScreenMode("inventory");
+        navigateToSection("inventory");
       } else if (character === "d") {
         setShowDetails((value) => !value);
       } else if (character === "f") {
         setCatalogFilterMode(true);
+        setControlFocus("search");
       } else if (character === "c") {
         setCatalogSourceFilter(cycleCatalogFilter(
           catalogSourceFilter, candidates, "catalog", catalogFilters, userCatalogs,
@@ -1161,11 +1457,15 @@ export function Dashboard({
     }
 
     if (filterMode) {
-      if (key.return) setFilterMode(false);
+      if (key.return) {
+        setFilterMode(false);
+        setControlFocus("list");
+      }
       else if (key.escape) {
         setFilterMode(false);
         setQuery("");
         setSelectedIndex(0);
+        setControlFocus("list");
       } else if (key.upArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, -1));
       else if (key.downArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, 1));
       else if (key.backspace || key.delete) {
@@ -1182,7 +1482,10 @@ export function Dashboard({
     } else if (key.upArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, -1));
     else if (key.downArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, 1));
     else if (character === "d") setShowDetails((value) => !value);
-    else if (character === "f") setFilterMode(true);
+    else if (character === "f") {
+      setFilterMode(true);
+      setControlFocus("search");
+    }
     else if (character === "m") {
       setScreenMode("catalog-management");
       setCatalogManagementIndex(0);
@@ -1301,6 +1604,8 @@ export function Dashboard({
       columns,
     });
   }
+  const screenModalActive = Boolean(modal || versionNotice || tourStep !== null || actionPending || inspection);
+  mouse?.beginFrame();
   if (inspection) {
     baseScreen = h(InspectionScreen, {
       ...inspection,
@@ -1324,7 +1629,8 @@ export function Dashboard({
       showDetails,
       columns,
       rows,
-      modalActive: Boolean(modal || versionNotice || tourStep !== null),
+      controls: { ...controlsBase, modalActive: screenModalActive },
+      modalActive: screenModalActive,
       tourStep,
     });
   } else if (screenMode === "catalog" || screenMode === "install-options") {
@@ -1343,7 +1649,8 @@ export function Dashboard({
       showDetails,
       columns,
       rows,
-      modalActive: Boolean(modal || versionNotice || tourStep !== null),
+      controls: { ...controlsBase, modalActive: screenModalActive },
+      modalActive: screenModalActive,
       tourStep,
     });
   } else {
@@ -1363,7 +1670,8 @@ export function Dashboard({
       canExecute: typeof actions.execute === "function" && Boolean(selectedResource),
       columns,
       rows,
-      modalActive: Boolean(modal || versionNotice || tourStep !== null),
+      controls: { ...controlsBase, modalActive: screenModalActive },
+      modalActive: screenModalActive,
       userCatalogs,
       tourStep,
       inventoryLabels,
@@ -1385,7 +1693,7 @@ export function Dashboard({
   } else if (tourStep !== null && !actionFailure) {
     modal = onboardingModal(tourStep);
   }
-  const overlay = modal && h(ModalOverlay, { modal, columns, rows });
+  const overlay = modal && h(ModalOverlay, { modal, columns, rows, mouse });
   return h(ScreenFrame, { columns, rows }, baseScreen, overlay);
 }
 
@@ -1422,29 +1730,46 @@ export async function runDashboard(
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") return false;
 
   return new Promise((resolve, reject) => {
+    const transport = createDashboardInputTransport(input, output);
     let app;
     let finished = false;
     const onFinish = (success) => {
       if (finished) return;
       finished = true;
       input.removeListener("close", onInputClose);
-      resolve(success);
-      app.unmount();
+      try {
+        app?.unmount();
+      } finally {
+        transport.dispose();
+        resolve(success);
+      }
     };
     const onInputClose = () => onFinish(false);
     input.once("close", onInputClose);
-    app = render(h(Dashboard, { resources, errors, actions, onFinish }), {
-      stdin: input,
-      stdout: output,
-      exitOnCtrlC: false,
-      alternateScreen: true,
-      interactive: true,
-    });
+    try {
+      app = render(h(Dashboard, { resources, errors, actions, onFinish, mouse: transport.mouse }), {
+        stdin: transport.stdin,
+        stdout: output,
+        exitOnCtrlC: false,
+        alternateScreen: true,
+        interactive: true,
+      });
+      transport.enableMouse();
+    } catch (error) {
+      input.removeListener("close", onInputClose);
+      finished = true;
+      transport.dispose();
+      reject(error);
+      return;
+    }
     app.waitUntilExit().catch((error) => {
       if (!finished) {
         input.removeListener("close", onInputClose);
         finished = true;
-        reject(error);
+        try { app.unmount(); } finally {
+          transport.dispose();
+          reject(error);
+        }
       }
     });
   });

@@ -1,5 +1,10 @@
 import type { ReactElement } from 'react';
 import type { Instance } from 'ink';
+import {
+  createDashboardInputTransport,
+  type DashboardInputTransport,
+  type DashboardMouseRegions,
+} from '../../../../cli/src/dashboard/input-transport.mjs';
 import { XTERM_THEME } from './terminalTheme';
 
 export interface BrowserTerminalSession {
@@ -11,8 +16,8 @@ export interface BrowserTerminalSession {
 /** Mount the installed Ink renderer in an isolated, focus-owned xterm terminal. */
 export async function mountDashboardTerminal(
   container: HTMLElement,
-  element: ReactElement,
-  options: { onExit?: () => void } = {},
+  createElement: (mouse: DashboardMouseRegions) => ReactElement,
+  options: { onExit?: () => void; signal?: AbortSignal } = {},
 ): Promise<BrowserTerminalSession> {
   const [{ Terminal }, { FitAddon }, { Readable, Writable }, { render }] = await Promise.all([
     import('@xterm/xterm'),
@@ -21,7 +26,9 @@ export async function mountDashboardTerminal(
     import('ink'),
     import('@xterm/xterm/css/xterm.css'),
   ]);
+  if (options.signal?.aborted) throw options.signal.reason ?? new Error('Terminal mount canceled.');
   await document.fonts.ready;
+  if (options.signal?.aborted) throw options.signal.reason ?? new Error('Terminal mount canceled.');
   const terminalHost = document.createElement('div');
   terminalHost.style.width = '100%';
   terminalHost.style.height = '100%';
@@ -45,11 +52,13 @@ export async function mountDashboardTerminal(
   const fitAddon = new FitAddon();
   let disposed = false;
   let exited = false;
-  let resizeFrame = 0;
   let app: Instance | undefined;
   let observer: ResizeObserver | undefined;
   let inputSubscription: { dispose(): void } | undefined;
   let resizeSubscription: { dispose(): void } | undefined;
+  let inputTransport: DashboardInputTransport | undefined;
+  let abortHandler: (() => void) | undefined;
+  const abort = options.signal ? Promise.withResolvers<void>() : undefined;
 
   const input = Object.assign(new Readable({ read() {} }), {
     isTTY: true,
@@ -77,19 +86,23 @@ export async function mountDashboardTerminal(
   const dispose = () => {
     if (disposed) return;
     // Unmount while the output stream is still usable so Ink releases raw mode,
-    // resize/input subscriptions, React effects, and Yoga nodes normally.
+    // mouse mode, resize/input subscriptions, React effects, and Yoga nodes normally.
     try {
       app?.unmount();
     } finally {
-      disposed = true;
-      observer?.disconnect();
-      cancelAnimationFrame(resizeFrame);
-      inputSubscription?.dispose();
-      resizeSubscription?.dispose();
-      input.destroy();
-      output.destroy();
-      terminal.dispose();
-      terminalHost.remove();
+      try {
+        inputTransport?.dispose();
+      } finally {
+        disposed = true;
+        if (abortHandler) options.signal?.removeEventListener('abort', abortHandler);
+        observer?.disconnect();
+        inputSubscription?.dispose();
+        resizeSubscription?.dispose();
+        input.destroy();
+        output.destroy();
+        terminal.dispose();
+        terminalHost.remove();
+      }
     }
   };
   const fit = () => {
@@ -102,6 +115,11 @@ export async function mountDashboardTerminal(
   };
 
   try {
+    inputTransport = createDashboardInputTransport(
+      input as unknown as Parameters<typeof createDashboardInputTransport>[0],
+      output as unknown as Parameters<typeof createDashboardInputTransport>[1],
+    );
+    const element = createElement(inputTransport.mouse);
     terminal.loadAddon(fitAddon);
     terminal.open(terminalHost);
     terminal.textarea?.setAttribute('aria-label', 'Kitia terminal input');
@@ -114,13 +132,20 @@ export async function mountDashboardTerminal(
     inputSubscription = terminal.onData((data) => {
       if (!disposed && !exited) input.push(data);
     });
-    observer = new ResizeObserver(() => {
-      cancelAnimationFrame(resizeFrame);
-      resizeFrame = requestAnimationFrame(fit);
-    });
+    observer = new ResizeObserver(fit);
     observer.observe(container);
+    if (options.signal?.aborted) throw options.signal.reason ?? new Error('Terminal mount canceled.');
+    abortHandler = () => {
+      try {
+        dispose();
+        abort?.resolve();
+      } catch (error) {
+        abort?.reject(error);
+      }
+    };
+    options.signal?.addEventListener('abort', abortHandler, { once: true });
     app = render(element, {
-      stdin: input,
+      stdin: inputTransport.stdin,
       stdout: output,
       stderr: output,
       interactive: true,
@@ -128,12 +153,15 @@ export async function mountDashboardTerminal(
       patchConsole: false,
       alternateScreen: true,
     });
+    inputTransport.enableMouse();
     // A render/initialization failure must reject the mount, not leave a blank
     // terminal behind an apparently successful session.
-    await Promise.race([
+    const initialRender = Promise.race([
       app.waitUntilRenderFlush(),
       app.waitUntilExit().then(() => { exited = true; }),
     ]);
+    if (abort) await Promise.race([initialRender, abort.promise]);
+    else await initialRender;
     void app.waitUntilExit().then(() => {
       exited = true;
       if (!disposed) options.onExit?.();

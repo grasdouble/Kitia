@@ -16,6 +16,7 @@ export function browserInkPlugins(): Plugin[] {
     buffer: require.resolve('buffer/'),
     events: require.resolve('events/'),
     stream: require.resolve('readable-stream/lib/ours/browser.js'),
+    string_decoder: require.resolve('string_decoder/'),
     path: require.resolve('path-browserify'),
     util: adapter('util.js'),
     process: adapter('process.js'),

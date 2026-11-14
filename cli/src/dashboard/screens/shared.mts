@@ -1,54 +1,30 @@
 "use strict";
 
 import React, { type ReactNode, useEffect, useState } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
+import type { CatalogResource } from "../../catalog/entries.js";
+import type { DashboardControlFocus, DashboardFilter } from "../input-transport.mjs";
 import { DASHBOARD_THEME } from "../colors.js";
-import { fitColumn, fitText, wrapText } from "../helpers.mjs";
+import { dashboardStatus, fitText, wrapText } from "../helpers.mjs";
 
 const h = React.createElement;
 const OSC8_OPEN = "\u001b]8;;";
 const OSC8_CLOSE = "\u001b]8;;\u001b\\";
 
-const kitiaWordmark = [
-  "█  ▄▀  ▀█▀  ▀▀█▀▀  ▀█▀  ▄▀▀▀▄",
-  "█▀▀▄    █     █     █   █▀▀▀█",
-  "▀   ▀  ▀▀▀    ▀    ▀▀▀  ▀   ▀",
-];
-
-const titleColorStops = DASHBOARD_THEME.titleGradientStops;
-const titleColors = Array.from({ length: 96 }, (_, index) => {
-  const segment = Math.floor(index / 32);
-  const start = titleColorStops[segment];
-  const end = titleColorStops[(segment + 1) % titleColorStops.length];
-  return `#${start.map((channel, component) =>
-    Math.round(channel + (end[component] - channel) * (index % 32) / 32)
-      .toString(16).padStart(2, "0")).join("")}`;
-});
-
-function AnimatedTitle({ width, versionLabel, screenName, metadata, phase }: {
+function AnimatedTitle({ width, versionLabel, screenName, metadata }: {
   width: number;
-  phase: number;
   versionLabel: string;
   screenName: string;
   metadata: string;
 }) {
-  const pixelTitle = width >= kitiaWordmark[0].length;
   return h(Box, { width, flexDirection: "column" },
-    ...(pixelTitle
-      ? kitiaWordmark.map((line, row) => h(Text, { key: row },
-        ...Array.from(line, (character, column) => h(Text, {
-          key: column,
-          color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
-        }, character))))
-      : [h(Text, { key: "compact", color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText(`KITIA  ${versionLabel}`, width))]),
-    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: pixelTitle }, fitText(
-      pixelTitle ? `${versionLabel} · ${screenName}` : screenName, width,
-    )),
-    h(Text, { dimColor: true }, fitText(metadata, width)),
-    ...(!pixelTitle ? [h(Text, { key: "blank-1" }, " "), h(Text, { key: "blank-2" }, " ")] : []));
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText("KITIA", width)),
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: true },
+      fitText(`${versionLabel} · ${screenName}`, width)),
+    h(Text, { dimColor: true }, fitText(metadata, width)));
 }
 
-export const DASHBOARD_HEADER_ROWS = 5;
+export const DASHBOARD_HEADER_ROWS = 3;
 function AnimatedBrand({ art, catWidth, textWidth, versionLabel, screenName, metadata }: {
   art: string[];
   catWidth: number;
@@ -57,22 +33,19 @@ function AnimatedBrand({ art, catWidth, textWidth, versionLabel, screenName, met
   screenName: string;
   metadata: string;
 }) {
-  const [phase, setPhase] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setPhase((value) => (value + 1) % titleColors.length), 60);
-    return () => clearInterval(timer);
-  }, []);
   return h(Box, { flexDirection: "row", height: DASHBOARD_HEADER_ROWS, flexShrink: 0 },
     h(Box, { width: catWidth, marginRight: 2, flexDirection: "column" },
-      ...art.map((line, row) => h(Text, { key: row, bold: true, wrap: "truncate-end" },
-        ...Array.from(line.slice(0, catWidth), (character, column) => h(Text, {
-          key: column,
-          color: titleColors[(phase + column * 2 + row * 3) % titleColors.length],
-        }, character))))),
-    h(AnimatedTitle, { width: textWidth, versionLabel, screenName, metadata, phase }));
+      ...art.map((line, row) => h(Text, {
+        key: row,
+        color: DASHBOARD_THEME.semantic.accents.primary,
+        bold: true,
+        wrap: "truncate-end",
+      }, line))),
+    h(AnimatedTitle, { width: textWidth, versionLabel, screenName, metadata }));
 }
 
-const shortcutKey = /^(?:Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])$/;
+
+const shortcutKey = /^(?:Delete|BACKSPACE|ENTER|ESC|PgUp|PgDn|↑↓|[A-Z0-9])$/u;
 
 function shortcutHint(value: string, width: number) {
   const visible = fitText(value, width);
@@ -82,7 +55,7 @@ function shortcutHint(value: string, width: number) {
       bold: true,
     }, visible);
   }
-  const parts = visible.split(/(Delete|BACKSPACE|ENTER|ESC|↑↓|[A-Z])/g);
+  const parts = visible.split(/(Delete|BACKSPACE|ENTER|ESC|PgUp|PgDn|↑↓|[A-Z])/g);
   return h(Text, { dimColor: true }, ...parts.map((part, index) =>
     shortcutKey.test(part)
       ? h(Text, { key: `shortcut-${index}`, bold: true, color: DASHBOARD_THEME.semantic.accents.primary }, part)
@@ -142,6 +115,289 @@ export function Panel({
   }, separateHeader
     ? h(PanelHeader, { title, color }, headerContent)
     : h(Text, { bold: true, color }, title), children);
+}
+export function InventorySummaryCards({ resources, width, stacked = false, compact = false, ultraCompact = false, marginTop = 1 }: {
+  resources: CatalogResource[];
+  width: number;
+  stacked?: boolean;
+  compact?: boolean;
+  ultraCompact?: boolean;
+  marginTop?: number;
+}) {
+  const managed = resources.filter((resource) => resource.managed !== false);
+  const current = managed.filter((resource) => dashboardStatus(resource) === "current").length;
+  const updates = managed.filter((resource) => dashboardStatus(resource) === "update").length;
+  const warnings = managed.filter((resource) => dashboardStatus(resource) === "attention").length;
+  const cards = [
+    {
+      title: "PROJECT",
+      count: resources.filter((resource) => resource.scope === "project").length,
+      managed: managed.filter((resource) => resource.scope === "project").length,
+      color: DASHBOARD_THEME.semantic.terminalScope.project,
+    },
+    {
+      title: "USER",
+      count: resources.filter((resource) => resource.scope === "user").length,
+      managed: managed.filter((resource) => resource.scope === "user").length,
+      color: DASHBOARD_THEME.semantic.terminalScope.user,
+    },
+    {
+      title: "UPDATES",
+      count: updates,
+      note: `${current} current · ${warnings} warning(s)`,
+      color: updates + warnings
+        ? DASHBOARD_THEME.semantic.inventoryStatus.attention
+        : DASHBOARD_THEME.semantic.inventoryStatus.current,
+    },
+  ];
+  if (ultraCompact) {
+    return h(Box, { flexDirection: "row", width, marginTop, justifyContent: "space-between" },
+      ...cards.map((card, index) => h(Text, {
+        key: `compact-summary-${card.title}`,
+        color: card.color,
+        bold: true,
+      }, `${card.title} ${card.count}${index < cards.length - 1 ? " ·" : ""}`)));
+  }
+  const gap = 1;
+  const availableCardWidth = width - gap * 2;
+  const baseCardWidth = Math.floor(availableCardWidth / 3);
+  const cardWidths = cards.map((_, index) => stacked
+    ? width
+    : baseCardWidth + Number(index < availableCardWidth % 3));
+  return h(Box, { flexDirection: stacked ? "column" : "row", width, marginTop, alignItems: "stretch" },
+    ...cards.map((card, index) => {
+      const managedCount = "managed" in card ? card.managed : 0;
+      const note = "managed" in card
+        ? `${managedCount} managed · ${card.count - managedCount} unmanaged`
+        : card.note;
+      const cardNode = compact
+        ? h(Box, {
+          key: card.title,
+          width: cardWidths[index],
+          height: 3,
+          borderStyle: "single",
+          borderColor: card.color,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+        },
+        h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, card.title),
+        h(Text, { bold: true, color: card.color }, String(card.count)))
+        : h(Panel, {
+          key: card.title,
+          title: card.title,
+          color: card.color,
+          width: cardWidths[index],
+          marginTop: stacked && index ? 1 : 0,
+          marginLeft: !stacked && index ? gap : 0,
+        },
+        h(Box, { flexDirection: "row", justifyContent: "space-between" },
+          h(Text, { dimColor: true }, fitText(note, Math.max(1, cardWidths[index] - 8))),
+          h(Text, { bold: true, color: card.color }, String(card.count))));
+      return compact && !stacked ? h(Box, {
+        key: `compact-gap-${card.title}`,
+        marginLeft: index ? gap : 0,
+      }, cardNode) : cardNode;
+    }));
+}
+export interface JoinedWorkspaceLayout {
+  innerWidth: number;
+  listWidth: number;
+  detailsWidth: number;
+  dividerWidth: number;
+  contentHeight: number;
+  listRows: number;
+  detailsRows: number;
+  detailsContentRows: number;
+  firstResourceRowOffset: number;
+}
+
+export function joinedWorkspaceLayout(
+  width: number,
+  height: number,
+  stacked: boolean,
+  showDetails: boolean,
+  detailsFooterRows = 0,
+  listShare = 0.76,
+): JoinedWorkspaceLayout {
+  const innerWidth = Math.max(1, width - 2);
+  const contentHeight = Math.max(1, height - 2);
+  const sideBySide = showDetails && !stacked;
+  const dividerWidth = sideBySide ? 1 : 0;
+  const listWidth = sideBySide
+    ? Math.max(1, Math.floor((innerWidth - dividerWidth) * listShare))
+    : innerWidth;
+  const detailsWidth = sideBySide ? Math.max(1, innerWidth - dividerWidth - listWidth) : 0;
+  const stackedDetails = showDetails && stacked;
+  const bodyRows = Math.max(0, contentHeight - (stackedDetails ? 6 : 3));
+  const detailsRows = sideBySide
+    ? Math.max(1, contentHeight - 2)
+    : stackedDetails
+      ? Math.min(Math.max(0, bodyRows - 1), Math.max(detailsFooterRows + 4, Math.floor(bodyRows * 0.68)))
+      : 0;
+  const listRows = stackedDetails ? Math.max(1, bodyRows - detailsRows) : Math.max(1, bodyRows);
+  return {
+    innerWidth,
+    listWidth,
+    detailsWidth,
+    dividerWidth,
+    contentHeight,
+    listRows,
+    detailsRows,
+    detailsContentRows: Math.max(0, detailsRows - detailsFooterRows),
+    firstResourceRowOffset: 4,
+  };
+}
+
+export function JoinedWorkspace({
+  width,
+  height,
+  layout,
+  showDetails,
+  listTitle,
+  listMeta,
+  listHeader,
+  listRows,
+  detailsTitle,
+  details,
+  detailsFooter,
+  detailsHint,
+  color = DASHBOARD_THEME.semantic.accents.detailPanel,
+}: {
+  width: number;
+  height: number;
+  layout: JoinedWorkspaceLayout;
+  showDetails: boolean;
+  listTitle: string;
+  listMeta: string;
+  listHeader: string;
+  listRows: ReactNode[];
+  detailsTitle: string;
+  details: ReactNode[];
+  detailsFooter?: ReactNode;
+  detailsHint?: string;
+  color?: string;
+}) {
+  const horizontal = (leftWidth: number, rightWidth = 0) => h(Box, {
+    flexDirection: "row",
+    width: leftWidth + rightWidth + Number(Boolean(rightWidth)),
+    height: 1,
+  },
+  h(Text, { color }, "─".repeat(leftWidth)),
+  ...(rightWidth ? [
+    h(Text, { key: "junction", color }, "┼"),
+    h(Text, { key: "right-rule", color }, "─".repeat(rightWidth)),
+  ] : []));
+  const fillRows = (items: ReactNode[], count: number, key: string) => [
+    ...items.slice(0, count),
+    ...Array.from({ length: Math.max(0, count - items.length) }, (_, index) =>
+      h(Text, { key: `${key}-empty-${index}` }, " ")),
+  ];
+  const sideBySide = showDetails && layout.detailsWidth > 0;
+  const titleMetaWidth = Math.min(layout.listWidth, Math.max(12, Math.floor(layout.listWidth * 0.32)));
+  const titleWidth = Math.max(1, layout.listWidth - titleMetaWidth - 1);
+  const listColumnHeight = sideBySide || !showDetails ? layout.contentHeight : 3 + layout.listRows;
+  const listColumn = h(Box, {
+    key: "workspace-list",
+    flexDirection: "column",
+    width: layout.listWidth,
+    height: listColumnHeight,
+    flexShrink: 0,
+  },
+  h(Box, { flexDirection: "row", height: 1, width: layout.listWidth, justifyContent: "space-between" },
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText(listTitle, titleWidth)),
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, fitText(listMeta, titleMetaWidth))),
+  horizontal(layout.listWidth),
+  h(Text, { color: DASHBOARD_THEME.semantic.accents.muted, bold: true }, listHeader),
+  ...fillRows(listRows, layout.listRows, "workspace-row"));
+  const divider = sideBySide ? h(Box, {
+    key: "workspace-divider",
+    flexDirection: "column",
+    width: 1,
+    height: layout.contentHeight,
+    flexShrink: 0,
+  }, ...Array.from({ length: layout.contentHeight }, (_, index) => h(Text, {
+    key: `workspace-divider-${index}`,
+    color,
+  }, index === 1 ? "┼" : "│"))) : null;
+  const detailsContent = details.slice(0, layout.detailsContentRows);
+  const detailsColumnWidth = sideBySide ? layout.detailsWidth : layout.innerWidth;
+  const detailsHeaderWidth = Math.max(1, detailsColumnWidth - 1);
+  const hintWidth = detailsHint ? Math.min(detailsHeaderWidth, detailsHint.length) : 0;
+  const detailsTitleWidth = Math.max(1, detailsHeaderWidth - hintWidth - Number(Boolean(detailsHint)));
+  const detailsHeader = h(Box, {
+    flexDirection: "row",
+    width: detailsHeaderWidth,
+    height: 1,
+    justifyContent: "space-between",
+  },
+  h(Text, { color: DASHBOARD_THEME.semantic.accents.primary, bold: true }, fitText(detailsTitle, detailsTitleWidth)),
+  ...(detailsHint ? [h(Text, {
+    color: DASHBOARD_THEME.semantic.accents.muted,
+    bold: true,
+  }, fitText(detailsHint, hintWidth))] : []));
+  const detailsSection = showDetails ? h(Box, {
+    key: "workspace-details",
+    flexDirection: "column",
+    width: detailsColumnWidth,
+    height: sideBySide ? layout.contentHeight : undefined,
+    flexShrink: 0,
+    paddingLeft: 1,
+  },
+  detailsHeader,
+  horizontal(detailsHeaderWidth),
+  ...detailsContent,
+  ...(detailsFooter ? [detailsFooter] : [])) : null;
+  const content = sideBySide
+    ? h(Box, { flexDirection: "row", width: layout.innerWidth, height: layout.contentHeight, alignItems: "stretch" },
+      listColumn, divider, detailsSection)
+    : h(Box, { flexDirection: "column", width: layout.innerWidth, height: layout.contentHeight, alignItems: "stretch" },
+      listColumn,
+      ...(showDetails ? [
+        h(Text, { key: "workspace-detail-divider", color: DASHBOARD_THEME.semantic.accents.detailPanel },
+          "─".repeat(layout.innerWidth)),
+        detailsSection,
+      ] : []));
+  return h(Box, {
+    width,
+    height,
+    borderStyle: "single",
+    borderColor: color,
+    flexShrink: 0,
+    flexDirection: "column",
+  }, content);
+}
+
+export function useDashboardDetailPaging({ lines, viewport, enabled, filterMode, focus, menuFilter, resetKey }: {
+  lines: ReactNode[];
+  viewport: number;
+  enabled: boolean;
+  filterMode: boolean;
+  focus: DashboardControlFocus;
+  menuFilter?: DashboardFilter | null;
+  resetKey: readonly unknown[];
+}) {
+  const [offset, setOffset] = useState(0);
+  const maxOffset = viewport > 0 ? Math.max(0, lines.length - viewport) : 0;
+  const visibleOffset = Math.min(offset, maxOffset);
+  useEffect(() => setOffset(0), resetKey);
+  useEffect(() => {
+    if (offset !== visibleOffset) setOffset(visibleOffset);
+  }, [offset, visibleOffset]);
+  const canPage = enabled && !filterMode && !menuFilter && (focus === "list" || focus === "actions") && maxOffset > 0;
+  useInput((input, key) => {
+    const step = Math.max(1, viewport - 1);
+    if (key.pageUp || input === "\u001b[5~") {
+      setOffset((current) => Math.max(0, Math.min(current, maxOffset) - step));
+    } else if (key.pageDown || input === "\u001b[6~") {
+      setOffset((current) => Math.min(maxOffset, Math.min(current, maxOffset) + step));
+    }
+  }, { isActive: canPage });
+  return {
+    visibleLines: lines.slice(visibleOffset, visibleOffset + Math.max(0, viewport)),
+    isClipped: maxOffset > 0,
+    canPage,
+  };
 }
 
 export function DetailsPanel({
@@ -205,6 +461,40 @@ export function ShortcutsPanel({ lines, width, marginTop = 0, color, backgroundC
   return h(Panel, { title: "SHORTCUTS", width, marginTop, color, backgroundColor, separateHeader: true },
     ...wrappedShortcutLines(lines, width).map((line) => shortcutHint(line, Math.max(1, (width || 80) - 4))));
 }
+export function shortcutFooterLines(lines: string[], width: number): string[] {
+  const headings = new Set(["Actions", "Filters", "Display", "Navigation"]);
+  const shortcuts = lines.filter((line) => !headings.has(line)).flatMap((line) => line.split(" · "));
+  const lineWidth = Math.max(1, width);
+  const rows: string[] = [];
+  let current = "";
+  for (const shortcut of shortcuts) {
+    const next = current ? `${current} · ${shortcut}` : shortcut;
+    if (current && next.length > lineWidth) {
+      rows.push(current);
+      current = shortcut;
+    } else {
+      current = next;
+    }
+  }
+  if (current) rows.push(current);
+  return rows.flatMap((line) => line.length > lineWidth ? wrapText(line, lineWidth) : [line]);
+}
+
+export function ShortcutFooter({ lines, width }: { lines: string[]; width: number }) {
+  const rows = shortcutFooterLines(lines, width);
+  return rows.length
+    ? h(Box, {
+      position: "absolute",
+      bottom: 0,
+      left: 0,
+      width,
+      flexDirection: "column",
+    },
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.detailPanel }, "─".repeat(width)),
+    ...rows.map((line, index) => h(React.Fragment, { key: `shortcut-footer-${index}` },
+      shortcutHint(line, width))))
+    : null;
+}
 
 export function detailValue(
   key: string,
@@ -265,12 +555,13 @@ export function DashboardHeader({ versionLabel, screenName, metadata, columns }:
   screenName: string;
   metadata: string;
   columns: number;
+  activeSection?: "inventory" | "browse" | "catalogs";
 }) {
   const [grooming, setGrooming] = useState<{ activity: "idle" | "lick" | "scratch" | "wink"; frame: number }>({
     activity: "idle", frame: 0,
   });
   const availableWidth = Math.max(1, columns - 2);
-  const catWidth = Math.min(18, Math.max(1, availableWidth - 3));
+  const catWidth = Math.min(8, Math.max(1, availableWidth - 3));
   const textWidth = Math.max(1, availableWidth - catWidth - 2);
   useEffect(() => {
     let activityTimer: ReturnType<typeof setTimeout>;
@@ -299,19 +590,17 @@ export function DashboardHeader({ versionLabel, screenName, metadata, columns }:
     };
   }, []);
   const sittingFrame = [
-    "       /\\_/\\",
-    grooming.activity === "wink" ? "      (=o.-=)" : "      (=o.o=)",
-    "      /:>^<:\\    )",
-    "     / .| |. \\  /",
-    "     \\__|_|__/_/",
+    " /\\_/\\ ",
+    grooming.activity === "wink" ? "( -.- )" : "( o.o )",
+    " > ^ < ",
   ];
   const lickingFrames = [
-    ["       /\\_/\\", "      (=-.-=)", "      /: v( )   )", "     / .| . \\  /", "     \\__|_|__/_/"],
-    ["       /\\_/\\", "      (=-.-=)", "      /: -( )   )", "     / .| . \\  /", "     \\__|_|__/_/"],
+    [" /\\_/\\ ", "( -.- )", " > v < "],
+    [" /\\_/\\ ", "( -.- )", " > v < "],
   ];
   const scratchingFrames = [
-    ["       /\\_/\\", "      (=o.-=)()", "      /:>^< /   )", "     / .| ./ \\ /", "     \\__|_|__/_/"],
-    ["       /\\_/\\ ()", "      (=o.-=) /", "      /:>^< /   )", "     / .| ./ \\ /", "     \\__|_|__/_/"],
+    [" /\\_/\\ ", "( o.- )", " > ^ < "],
+    [" /\\_/\\ ", "( o.- )", " > ^ < "],
   ];
   const art = grooming.activity === "lick" ? lickingFrames[grooming.frame]
     : grooming.activity === "scratch" ? scratchingFrames[grooming.frame] : sittingFrame;

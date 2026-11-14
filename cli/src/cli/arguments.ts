@@ -347,7 +347,7 @@ Options:
   --dry-run                     Preview files without writing
   --ref <sha-or-prefix>         Install/update a source skill, agent, or instruction at a specific commit
   --force                       Overwrite files or remove modified/untracked source skills
-  F / A / U / Delete            Dashboard only: filter / browse / update / uninstall resources
+  1 / 2 / 3                  Dashboard only: switch Inventory / Browse / Catalogs
   Omit <kind> when the resource ID is unique; ambiguous IDs open a selector.
   -h, --help                    Show this help`);
 }

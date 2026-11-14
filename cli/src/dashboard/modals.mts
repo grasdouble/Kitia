@@ -1,13 +1,15 @@
 "use strict";
 
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, measureElement, Text } from "ink";
+import type { DOMElement } from "ink";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
 import { adaptiveColumnWidths } from "../table-layout.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
 import { DASHBOARD_THEME } from "./colors.js";
 import { Panel, ShortcutsPanel, categorizedShortcutLines, wrappedShortcutLines } from "./screens/shared.mjs";
+import { DashboardMouseRegions, type DashboardMouseRegion } from "./input-transport.mjs";
 
 export interface PendingDashboardAction {
   action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview";
@@ -29,15 +31,22 @@ const MODAL_BACKGROUND = DASHBOARD_THEME.semantic.modal.background;
 const MODAL_FOREGROUND = DASHBOARD_THEME.semantic.modal.foreground;
 
 const { semantic } = DASHBOARD_THEME;
-function choiceLabel(choice, selected) {
-  return selected ? `‹ ${choice.toUpperCase()} ›` : `[ ${choice.toUpperCase()} ]`;
+function choiceLabel(choice) {
+  return choice.toUpperCase();
+}
+
+function choiceButtonWidth(choice) {
+  return choiceLabel(choice).length + 4;
+}
+
+function choiceOutline(choice) {
+  return `╭${"─".repeat(choiceButtonWidth(choice) - 2)}╮`;
 }
 
 function choiceGroup(label, choices, selectedIndex, focused = true) {
   const options = choices.map((choice) => typeof choice === "string" ? { label: choice } : choice);
   const prefix = label ? `${label.padEnd(8)} ` : "";
-  const text = `${prefix}${options.map((choice, index) =>
-    choiceLabel(choice.label, index === selectedIndex)).join(" ")}`;
+  const text = `${prefix}${options.map((choice) => choiceOutline(choice.label)).join(" ")}`;
   return {
     type: "choice-group",
     text,
@@ -200,6 +209,9 @@ export function confirmationModal({
       : confirmation.action === "remove-unmanaged"
         ? permanentRemoval ? "Remove permanently" : "Remove"
         : "Uninstall";
+  const confirmationLabel = permanentRemoval && columns < 44
+    ? columns < 40 ? "REMOVE" : "REMOVE PERMANENT"
+    : actionLabel;
   const conflict = confirmation.conflict;
   const conflictCategory = confirmation.ghForceRetry
     ? "GitHub CLI reported that the skill is already installed and requires --force to overwrite it."
@@ -277,7 +289,11 @@ export function confirmationModal({
       "",
       choiceGroup("", [
         { label: confirmation.forceRetry ? "NO / CANCEL" : "CANCEL" },
-        { label: confirmation.forceRetry ? "YES, RETRY WITH --FORCE" : actionLabel, color: confirmation.action !== "install" ? semantic.accents.danger : semantic.selected },
+        {
+          label: confirmation.forceRetry ? "YES, RETRY WITH --FORCE" : confirmationLabel,
+          color: confirmation.forceRetry || confirmation.action === "uninstall" || confirmation.action === "remove-unmanaged"
+            ? semantic.accents.danger : semantic.accents.primary,
+        },
       ], selectedButton),
       "←/→ CHOOSE · ENTER CONFIRM · Y/N SHORTCUTS",
     ],
@@ -658,17 +674,17 @@ export function onboardingModal(step: number) {
     {
       title: "1/3 · INVENTORY",
       description: "Your installed resources live here. The highlighted list shows status, scope, kind, and catalog; move the selection to inspect an item.",
-      shortcut: "↑ / ↓ move · F filter · C catalog · K kind · D details",
+      shortcut: "1 / 2 / 3 sections · ↑ / ↓ move · F filter · D details",
     },
     {
       title: "2/3 · CATALOG",
       description: "Browse resources available to install. Select a resource with Enter to choose its scope and runtime before installing.",
-      shortcut: "A from inventory · F filter · C catalog · K kind · Enter select",
+      shortcut: "1 / 2 / 3 sections · F filter · C catalog · K kind · Enter select",
     },
     {
       title: "3/3 · CATALOG MANAGEMENT",
       description: "Manage the GitHub catalogs that supply resources. Refreshing updates the catalog index; it does not change installed resources.",
-      shortcut: "M from inventory · A add · E edit · R refresh · Delete remove",
+      shortcut: "1 / 2 / 3 sections · A add · E edit · R refresh · Delete remove",
     },
   ][step];
   return modalFrame(tour.title, [
@@ -699,35 +715,58 @@ export function versionAvailableModal(
   ], columns, semantic.accents.success, 76);
 }
 
-function fixedModalText(text, props) {
-  return h(Box, { flexShrink: 0 }, h(Text, props, text));
+function fixedModalText(text, props, ref = undefined) {
+  return h(Box, { flexShrink: 0, ref }, h(Text, props, text));
 }
 
-function ChoiceGroup({ line }) {
-  const props = { backgroundColor: MODAL_BACKGROUND, color: line.borderColor };
-  const contentWidth = Math.max(0, line.text.length - 3);
-  const contentLength = line.label.length + line.options.reduce((length, option, index) =>
-    length + (index ? 1 : 0) + choiceLabel(option.label, index === line.selectedIndex).length, 0);
+function ChoiceGroup({ line, rowRef, optionRefs = [] }) {
+  const width = line.text.length;
+  const borderColor = line.borderColor || semantic.accents.muted;
+  const contentWidth = Math.max(0, width - 3);
+  const buttonWidths = line.options.map((option) => choiceButtonWidth(option.label));
+  const contentLength = line.label.length + buttonWidths.reduce((length, buttonWidth, index) =>
+    length + buttonWidth + Number(index > 0), 0);
   const padding = Math.max(0, contentWidth - contentLength);
-  return h(Box, { width: line.text.length, flexDirection: "row" },
-    fixedModalText("│ ", props),
-    fixedModalText(line.label, props),
-    ...line.options.map((option, index) => fixedModalText(
-      `${index ? " " : ""}${choiceLabel(option.label, index === line.selectedIndex)}`,
-      {
-        backgroundColor: MODAL_BACKGROUND,
-        color: index === line.selectedIndex
-          ? option.color || line.color || semantic.selected
-          : MODAL_FOREGROUND,
-        bold: index === line.selectedIndex || line.focused,
-        dimColor: index !== line.selectedIndex && !line.focused,
+  const vertical = (values, textProps, cellWidth) => h(Box, {
+    flexDirection: "column", width: cellWidth, height: 3, flexShrink: 0,
+  }, ...values.map((text, index) => h(Text, {
+    key: `choice-cell-${index}`,
+    backgroundColor: MODAL_BACKGROUND,
+    ...textProps,
+  }, text)));
+  const options = line.options.flatMap((option, index) => {
+    const active = index === line.selectedIndex;
+    const label = choiceLabel(option.label);
+    const buttonWidth = buttonWidths[index];
+    const color = active ? option.color || semantic.accents.primary : semantic.accents.neutral;
+    const frameColor = active ? color : semantic.accents.muted;
+    return [
+      ...(index ? [vertical([" ", " ", " "], { color: MODAL_BACKGROUND }, 1)] : []),
+      h(Box, {
+        key: `choice-button-${index}`,
+        ref: optionRefs[index],
+        flexDirection: "column",
+        width: buttonWidth,
+        height: 3,
+        flexShrink: 0,
       },
-    )),
-    fixedModalText(
-      " ".repeat(padding),
-      { backgroundColor: MODAL_BACKGROUND, color: MODAL_BACKGROUND },
-    ),
-    fixedModalText("│", props));
+      h(Text, { backgroundColor: MODAL_BACKGROUND, color: frameColor }, `╭${"─".repeat(buttonWidth - 2)}╮`),
+      h(Text, {
+        backgroundColor: MODAL_BACKGROUND,
+        color,
+        bold: active && line.focused,
+      }, `│ ${label} │`),
+      h(Text, { backgroundColor: MODAL_BACKGROUND, color: frameColor }, `╰${"─".repeat(buttonWidth - 2)}╯`)),
+    ];
+  });
+  return h(Box, { ref: rowRef, width, height: 3, flexDirection: "row" },
+    vertical(["│ ", "│ ", "│ "], { color: borderColor }, 2),
+    vertical([" ".repeat(line.label.length), line.label, " ".repeat(line.label.length)],
+      { color: semantic.accents.label }, line.label.length),
+    ...options,
+    vertical([" ".repeat(padding), " ".repeat(padding), " ".repeat(padding)],
+      { color: MODAL_BACKGROUND }, padding),
+    vertical(["│", "│", "│"], { color: borderColor }, 1));
 }
 
 function SelectableOption({ line }) {
@@ -750,7 +789,7 @@ function SelectableOption({ line }) {
     fixedModalText("│", { backgroundColor: MODAL_BACKGROUND, color: line.borderColor }));
 }
 
-function ModalLine({ line }) {
+function ModalLine({ line, choiceRefs = undefined }) {
   const commonProps = {
     color: line.color || MODAL_FOREGROUND,
     backgroundColor: MODAL_BACKGROUND,
@@ -758,32 +797,110 @@ function ModalLine({ line }) {
     dimColor: line.dimColor,
   };
   if (line.component === "choice-group") {
-    return h(ChoiceGroup, { line });
+    return h(ChoiceGroup, { line, rowRef: choiceRefs?.row, optionRefs: choiceRefs?.options });
   }
   if (line.component === "selectable-option") {
     return h(SelectableOption, { line });
   }
-  if (line.text?.startsWith("│") && line.text.endsWith("│")) {
-    return h(Text, { backgroundColor: MODAL_BACKGROUND },
+  const content = line.text?.startsWith("│") && line.text.endsWith("│")
+    ? h(Text, { backgroundColor: MODAL_BACKGROUND },
       h(Text, { color: line.borderColor }, "│"),
       h(Text, commonProps, line.text.slice(1, -1)),
-      h(Text, { color: line.borderColor }, "│"));
-  }
-  return h(Text, commonProps, line.text || " ");
+      h(Text, { color: line.borderColor }, "│"))
+    : h(Text, commonProps, line.text || " ");
+  return choiceRefs?.row
+    ? h(Box, { ref: choiceRefs.row, width: line.text?.length || 1, height: 1, flexShrink: 0 }, content)
+    : content;
 }
 
-export function ModalOverlay({ modal, columns, rows }: {
+export function ModalOverlay({ modal, columns, rows, mouse }: {
   modal: ReturnType<typeof modalFrame>;
   columns: number;
   rows: number;
+  mouse?: DashboardMouseRegions;
 }) {
   const shortcutsRows = modal.shortcuts.length
     ? wrappedShortcutLines(modal.shortcuts, modal.width).length + 4
     : 0;
-  const modalHeight = modal.lines.length + modal.headerLines.length + (modal.panelTitle ? 4 : 0) +
+  const choiceRows = modal.lines.filter(({ component }) => component === "choice-group").length * 2;
+  const modalHeight = modal.lines.length + choiceRows + modal.headerLines.length + (modal.panelTitle ? 4 : 0) +
     (shortcutsRows ? shortcutsRows + 1 : 0);
   const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
+  const choiceRefs = React.useRef<Array<{
+    row: React.RefObject<DOMElement>;
+    options: React.RefObject<DOMElement>[];
+  } | null>>([]);
+  choiceRefs.current.length = modal.lines.length;
+  for (const [lineIndex, line] of modal.lines.entries()) {
+    if (!modal.panelTitle && line.options?.length && typeof line.bodyText === "string") {
+      const current = choiceRefs.current[lineIndex];
+      choiceRefs.current[lineIndex] = {
+        row: current?.row || React.createRef<DOMElement>(),
+        options: line.component === "choice-group"
+          ? line.options.map((_, index) => current?.options[index] || React.createRef<DOMElement>())
+          : [],
+      };
+    } else {
+      choiceRefs.current[lineIndex] = null;
+    }
+  }
+  React.useLayoutEffect(() => {
+    const regions: DashboardMouseRegion[] = [];
+    if (!modal.panelTitle) {
+      for (const [lineIndex, line] of modal.lines.entries()) {
+        if (!line.options?.length || typeof line.bodyText !== "string") continue;
+        const group = String(line.label || "").trim().toLowerCase();
+        if (group && group !== "scope" && group !== "client") continue;
+        const refs = choiceRefs.current[lineIndex];
+        const row = refs?.row.current;
+        if (!row) continue;
+        const rowLayout = measureElement(row);
+        const bodyOffset = typeof line.text === "string" ? line.text.indexOf(line.bodyText) : -1;
+        for (const [index, option] of line.options.entries()) {
+          const label = typeof option === "string" ? option : option.label;
+          const target = group
+            ? { type: "modal-option" as const, group: group as "scope" | "client", index }
+            : { type: "modal-choice" as const, index };
+          const node = refs?.options[index]?.current;
+          if (node) {
+            const optionLayout = measureElement(node);
+            const visibleWidth = Math.max(0, Math.min(
+              optionLayout.clientWidth,
+              rowLayout.x + rowLayout.clientWidth - optionLayout.x,
+              columns - optionLayout.x,
+            ));
+            if (visibleWidth && optionLayout.clientHeight) regions.push({
+              left: optionLayout.x + 1,
+              right: optionLayout.x + visibleWidth,
+              top: optionLayout.y + 1,
+              bottom: optionLayout.y + optionLayout.clientHeight,
+              target,
+            });
+            continue;
+          }
+          const outline = choiceOutline(label);
+          const offset = line.bodyText.indexOf(outline);
+          if (bodyOffset < 0 || offset < 0) continue;
+          const start = rowLayout.x + bodyOffset + offset;
+          const visibleWidth = Math.max(0, Math.min(
+            outline.length,
+            rowLayout.clientWidth - bodyOffset - offset,
+            columns - start,
+          ));
+          if (visibleWidth) regions.push({
+            left: start + 1,
+            right: start + visibleWidth,
+            top: rowLayout.y + 1,
+            bottom: rowLayout.y + rowLayout.clientHeight,
+            target,
+          });
+        }
+      }
+    }
+    mouse?.replace("modal", regions);
+    return () => mouse?.replace("modal", []);
+  });
   return h(Box, {
     position: "absolute",
     top,
@@ -799,8 +916,12 @@ export function ModalOverlay({ modal, columns, rows }: {
       backgroundColor: MODAL_BACKGROUND,
       separateHeader: true,
       headerContent: modal.headerLines.map((line, index) => h(ModalLine, { key: `modal-header-${index}`, line })),
-    }, ...modal.lines.map((line, index) => h(ModalLine, { key: `modal-line-${index}`, line })))
-    : modal.lines.map((line, index) => h(ModalLine, { key: `modal-line-${index}`, line })),
+      }, ...modal.lines.map((line, index) => h(ModalLine, {
+        key: `modal-line-${index}`, line, choiceRefs: choiceRefs.current[index] || undefined,
+      })))
+    : modal.lines.map((line, index) => h(ModalLine, {
+      key: `modal-line-${index}`, line, choiceRefs: choiceRefs.current[index] || undefined,
+    })),
   ...(modal.shortcuts.length
     ? [
       h(Text, { key: "modal-shortcuts-gap", backgroundColor: MODAL_BACKGROUND }, " ".repeat(modal.width)),

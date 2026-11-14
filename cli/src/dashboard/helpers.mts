@@ -179,6 +179,48 @@ function matchesCatalogFilter(
   return catalogFilterValues(resource, property, labels).includes(filter);
 }
 
+function uniqueFilterChoices(
+  resources: CatalogResource[],
+  property: CatalogFilterProperty,
+  labels?: Map<CatalogResource, string>,
+) {
+  return [...new Set(resources.flatMap((resource) => catalogFilterValues(resource, property, labels)).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export function inventoryFilterOptions(
+  resources: CatalogResource[],
+  property: CatalogFilterProperty,
+  catalogFilter: string,
+  kindFilter: string,
+  licenseFilter: string,
+  catalogs: InventoryCatalogConfiguration[] = [],
+): string[] {
+  const labels = inventoryCatalogLabels(resources, catalogs);
+  const eligible = resources.filter((resource) =>
+    (property === "catalog" || catalogFilter === "all" || matchesCatalogFilter(resource, "catalog", catalogFilter, labels)) &&
+    (property === "kind" || kindFilter === "all" || matchesCatalogFilter(resource, "kind", kindFilter, labels)) &&
+    (property === "license" || licenseFilter === "all" || matchesCatalogFilter(resource, "license", licenseFilter, labels)));
+  return ["all", ...uniqueFilterChoices(eligible, property, labels)];
+}
+
+export function catalogFilterOptions(
+  resources: CatalogResource[],
+  property: CatalogFilterProperty,
+  filters: { catalog: string; kind: string; license: string },
+  catalogs: InventoryCatalogConfiguration[] = [],
+): string[] {
+  const labels = inventoryCatalogLabels(resources, catalogs);
+  const eligible = property === "catalog"
+    ? resources.filter((resource) => filters.kind === "all" || matchesCatalogFilter(resource, "kind", filters.kind, labels))
+    : property === "kind"
+      ? resources.filter((resource) => filters.catalog === "all" || matchesCatalogFilter(resource, "catalog", filters.catalog, labels))
+      : filterCatalogResources(resources, "", filters.catalog, filters.kind, catalogs);
+  const values = uniqueFilterChoices(eligible, property, labels)
+    .filter((value) => property !== "license" || eligible.some((resource) => matchesLicense(resource, value)));
+  return ["all", ...values];
+}
+
 export function cycleFilter(
   current: string,
   resources: CatalogResource[],

@@ -23,6 +23,7 @@ const navigationKeys = [
   ['PgDn', '\u001b[6~', 'Page Down'],
 ] as const;
 const actionKeys = [
+  ['1', 'Inventory'], ['2', 'Browse resources'], ['3', 'Catalogs'],
   ['A', 'Browse / add'], ['U', 'Update'], ['P', 'Preview / presets'], ['V', 'Revisions'],
   ['F', 'Search'], ['C', 'Catalog filter'], ['K', 'Kind filter'], ['L', 'License filter'],
   ['D', 'Toggle details'], ['M', 'Manage catalogs'], ['N', 'Connect catalog'],
@@ -50,9 +51,11 @@ export function TuiDemo() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     const session = createTuiDemoSession();
-    const element = <Dashboard {...session} onFinish={() => { if (active) setPhase('ended'); }} />;
-    void mountDashboardTerminal(container.current!, element).then((mounted) => {
+    void mountDashboardTerminal(container.current!, (mouse) => (
+      <Dashboard {...session} mouse={mouse} onFinish={() => { if (active) setPhase('ended'); }} />
+    ), { signal: controller.signal }).then((mounted) => {
       if (!active) {
         mounted.dispose();
         return;
@@ -66,6 +69,7 @@ export function TuiDemo() {
     });
     return () => {
       active = false;
+      controller.abort();
       terminal.current?.dispose();
       terminal.current = null;
     };
@@ -88,11 +92,11 @@ export function TuiDemo() {
   }
 
   return <main id="main" className={`shell ${styles.page}`} style={themeStyle}>
-    <div className={styles.intro}><div><p className={styles.eyebrow}>The terminal dashboard · in your browser</p><h1>Try the real interface.</h1><p>The same dashboard components, screens, and keyboard controls as the Kitia TUI.</p></div><Link to="/" hash="commands" data-ga-event="demo_install_cli">Get the CLI <span aria-hidden="true">↗</span></Link></div>
+    <div className={styles.intro}><div><p className={styles.eyebrow}>The terminal dashboard · in your browser</p><h1>Try the real interface.</h1><p>The same dashboard components, screens, mouse interactions, and keyboard controls as the Kitia TUI.</p></div><Link to="/" hash="commands" data-ga-event="demo_install_cli">Get the CLI <span aria-hidden="true">↗</span></Link></div>
     <p className={styles.notice}><strong>Safe demo workspace.</strong> The interface is real; catalog data and operations are simulated in memory. No GitHub access, local file changes, or security audits. Audit wording inside the TUI is illustrative here. Reset or reload restores the sample workspace.</p>
     <section className={styles.workspace} aria-label="Terminal dashboard playground">
       <header className={styles.toolbar}><span>kitia dashboard <span className={styles.demoLabel}>DEMO</span></span><div><button type="button" disabled={phase !== 'ready'} onClick={() => terminal.current?.focus()}>Focus terminal</button><button type="button" onClick={reset}>{phase === 'ended' ? 'Restart demo' : 'Reset demo'}</button></div></header>
-      <p id="terminal-instructions" className={styles.instructions}>Click inside the terminal and use your keyboard. Start with <kbd>A</kbd> to browse, <kbd>P</kbd> to preview, or <kbd>?</kbd> for the guide. The buttons below send the same keys.</p>
+    <p id="terminal-instructions" className={styles.instructions}>Click tabs, filters, options, rows, actions, and confirmation choices in the terminal, or click inside it and use your keyboard. Press <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> to switch sections; <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> moves between controls, and arrows plus <kbd>Enter</kbd> select. Press <kbd>?</kbd> for the guide. When search is focused, type normally; numbers are text. The buttons below send the same keys.</p>
       <div className={styles.screen}>
         <div ref={container} className={styles.terminal} role="group" aria-label="Kitia terminal" aria-describedby="terminal-instructions" />
         {phase !== 'ready' && <div className={styles.overlay} role={phase === 'error' ? 'alert' : 'status'}>

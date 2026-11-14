@@ -4,17 +4,18 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
 import type { ScanError } from "../../catalog/lifecycle.js";
+import { adaptiveColumnWidths } from "../../table-layout.js";
 import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";
 import {
-  colorForStatus, dashboardStatus, detailPanelLayout, filterInventory, inventoryCatalogLabels, wrapText,
-  issueLine, tableColumns, tableLine, fitText,
+  colorForStatus, dashboardStatus, filterInventory, inventoryCatalogLabels, issueLine, tableLine, fitText, wrapText,
 } from "../helpers.mjs";
 import {
-  categorizedShortcutLines, DashboardHeader, DetailsPanel, Panel, ShortcutsPanel, detailField, detailLocations,
-  detailValue, wrappedShortcutLines,
+  categorizedShortcutLines, DashboardHeader, DASHBOARD_HEADER_ROWS, InventorySummaryCards, JoinedWorkspace, ShortcutFooter,
+  detailLocations, joinedWorkspaceLayout, shortcutFooterLines, useDashboardDetailPaging,
 } from "./shared.mjs";
-
+import { DashboardActionButtons, dashboardActionButtonRows, DashboardControls, dashboardControlsLayout,
+  type DashboardControlsProps } from "../controls.mjs";
 const h = React.createElement;
 export function InventoryScreen({
   resources,
@@ -32,6 +33,7 @@ export function InventoryScreen({
   showDetails,
   columns,
   rows,
+  controls,
   modalActive = false,
   userCatalogs = [],
   inventoryLabels: suppliedInventoryLabels,
@@ -52,6 +54,7 @@ export function InventoryScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
+  controls: DashboardControlsProps;
   modalActive?: boolean;
   userCatalogs?: InventoryCatalogConfiguration[];
   inventoryLabels?: Map<CatalogResource, string>;
@@ -61,304 +64,254 @@ export function InventoryScreen({
   const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels, licenseFilter);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const managedResources = resources.filter((resource) => resource.managed !== false);
-  const unmanaged = resources.length - managedResources.length;
-  const current = managedResources.filter((resource) => dashboardStatus(resource) === "current").length;
-  const updates = managedResources.filter((resource) => dashboardStatus(resource) === "update").length;
-  const attention = managedResources.filter((resource) => dashboardStatus(resource) === "attention").length;
-  const kinds = Object.fromEntries(["skill", "agent", "instruction"].map((kind) => [
-    kind, resources.filter((resource) => resource.kind === kind).length,
-  ]));
-  const catalogCount = new Set(resources.filter((resource) => resource.managed !== false && resource.source_repository)
-    .map((resource) => resource.catalog)).size;
-  const needsReview = updates + attention;
-  const sideBySide = columns >= 76;
-  const contentWidth = Math.max(1, columns - 6);
-  const inventoryLayout = detailPanelLayout(columns, columns >= 132 ? 0.64 : 0.68);
-  const inventorySideBySide = showDetails && inventoryLayout.sideBySide;
-  const inventoryListWidth = inventorySideBySide ? inventoryLayout.listWidth! : columns;
-  const inventoryDetailsWidth = inventorySideBySide ? inventoryLayout.detailsWidth! : columns;
-  const listContentWidth = Math.max(1, inventorySideBySide ? inventoryListWidth - 4 : contentWidth);
-  const inventoryFilterLines = wrapText(
-    `Filter ${filterMode ? `${query}▏` : query || "(F to filter)"} · Catalog ${catalogFilter.toUpperCase()} · Kind ${kindFilter.toUpperCase()} · License ${licenseFilter.toUpperCase()}`,
-    listContentWidth,
+  const controlsState = { ...controls, modalActive };
+  const tabsProps = { ...controlsState, part: "tabs" as const, showSearch: false };
+  const tabsLayout = dashboardControlsLayout(tabsProps);
+  const ultraCompactSummary = rows < 40;
+  const compactSummary = rows < 50 || columns < 76;
+  const summaryBlockRows = ultraCompactSummary ? 1 : 1 + (compactSummary ? 3 : 4);
+  const filterRowOffset = tabsLayout.height + summaryBlockRows;
+  const filterProps = {
+    ...controlsState,
+    part: "filters" as const,
+    layout: "toolbar" as const,
+    rowOffset: filterRowOffset,
+  };
+  const filterLayout = dashboardControlsLayout(filterProps);
+  const detailPagingFocus = !modalActive && !filterMode && !controls.menuFilter &&
+    (controls.focus === "list" || controls.focus === "actions");
+  const shortcutLines = modalActive ? [] : filterMode
+    ? categorizedShortcutLines({
+      Filters: ["TYPE to search", "BACKSPACE edit", "ENTER apply", "ESC clear"],
+      Navigation: ["↑↓ navigate"],
+    })
+    : categorizedShortcutLines({
+      Actions: [
+        ...(catalogAvailable ? ["A install"] : []),
+        ...(canExecute && selected && selected.scope && (
+          selected.managed === false
+            ? Boolean(selected.paths?.length)
+            : Boolean(selected.source_repository && selected.source_path)
+        ) ? ["P preview"] : []),
+        ...(canExecute && selected && selected.managed !== false &&
+            selected.source_repository && selected.source_path ? ["V revision"] : []),
+        ...(canExecute && selected
+          ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
+          : []),
+      ],
+      Filters: ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])],
+      Display: ["D details"],
+      Navigation: ["1/2/3 sections · M catalogs", "↑↓ navigate",
+        ...(showDetails && selected && detailPagingFocus ? ["PgUp/PgDn details"] : []), "? guide", "Q quit"],
+    });
+  const footerRows = shortcutFooterLines(shortcutLines, columns - 2).length + Number(Boolean(shortcutLines.length));
+  const warningLines = errors.flatMap((error) => wrapText(
+    `${error.scope.toUpperCase()} · ${error.code}: ${error.message}`,
+    Math.max(1, columns - 2),
+  ));
+  const warningBlockRows = warningLines.length ? warningLines.length + 1 : 0;
+  const workspaceGap = 1;
+  const workspaceHeight = Math.max(1, rows - (
+    DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height + warningBlockRows +
+    workspaceGap + footerRows
+  ));
+  const stackedWorkspace = columns < 94;
+  const outerWorkspaceWidth = columns - 2;
+  const initialWorkspaceLayout = joinedWorkspaceLayout(
+    outerWorkspaceWidth, workspaceHeight, stackedWorkspace, showDetails, 0, 0.76,
   );
-  const detailsContentWidth = Math.max(1, inventorySideBySide ? inventoryDetailsWidth - 4 : contentWidth);
-  const cardGap = 1;
-  const cardWidth = Math.floor((columns - 2 - cardGap * 2) / 3);
-  const summaryCards = [
-    { title: "RESOURCES", value: resources.length, note: `${catalogCount} catalog(s) connected`, color: DASHBOARD_THEME.semantic.accents.primary },
-    { title: "MANAGED", value: managedResources.length, note: `${current} current · ${unmanaged} unmanaged`, color: DASHBOARD_THEME.semantic.inventoryStatus.current },
-    { title: "NEEDS REVIEW", value: needsReview, note: `${updates} update(s) · ${attention} warning(s)`, color: needsReview ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.inventoryStatus.current },
-  ];
-  const summaryPanels = h(Box, {
-    flexDirection: sideBySide ? "row" : "column",
-    alignItems: "stretch",
-  }, ...summaryCards.map((card, index) => h(Panel, {
-    key: card.title,
-    title: card.title,
-    color: card.color,
-    width: sideBySide ? cardWidth : undefined,
-    marginTop: sideBySide ? 0 : index ? 1 : 0,
-    marginLeft: sideBySide && index ? cardGap : 0,
-  },
-  h(Text, { bold: true, color: card.color }, String(card.value).padStart(2, "0")),
-  h(Text, { dimColor: true }, fitText(card.note, sideBySide ? cardWidth - 4 : contentWidth)))));
-  const warnings = errors.length
-    ? h(Panel, { title: "SCAN WARNINGS", marginTop: 1 },
-      ...errors.map((error, index) => h(Text, {
-        key: `warning-${index}`,
+  const initialDetailsWidth = initialWorkspaceLayout.detailsWidth
+    ? initialWorkspaceLayout.detailsWidth - 1
+    : initialWorkspaceLayout.innerWidth - 1;
+  const actionRows = dashboardActionButtonRows(controlsState, Math.max(1, initialDetailsWidth));
+  const workspaceLayout = joinedWorkspaceLayout(
+    outerWorkspaceWidth, workspaceHeight, stackedWorkspace, showDetails, actionRows, 0.76,
+  );
+  const listContentWidth = workspaceLayout.listWidth;
+  const detailsContentWidth = Math.max(1, workspaceLayout.detailsWidth
+    ? workspaceLayout.detailsWidth - 1
+    : workspaceLayout.innerWidth - 1);
+  const footer = !modalActive ? h(ShortcutFooter, { lines: shortcutLines, width: columns - 2 }) : null;
+  const warnings = warningLines.length
+    ? h(Box, { width: columns - 2, marginTop: 1, flexDirection: "column" },
+      ...warningLines.map((line, index) => h(Text, {
+        key: `inventory-warning-${index}`,
         color: DASHBOARD_THEME.semantic.inventoryStatus.attention,
-      }, fitText(
-        `${error.scope.toUpperCase()} · ${error.code}: ${error.message}`,
-        contentWidth,
-      ))))
+      }, line)))
     : null;
-  const longestId = visible.reduce((length, resource) =>
-    Math.max(length, String(resource.id || "").length), 2);
-  const longestCatalog = visible.reduce((length, resource) =>
-    Math.max(length, (inventoryLabels.get(resource) || "-").length), 7);
-  const columnsByField = tableColumns(
-    listContentWidth, longestId, longestCatalog,
-  );
-  const tableHeader = tableLine([
-    ["", columnsByField.marker],
-    ["STATUS", columnsByField.status],
-    ["SCOPE", columnsByField.scope],
-    ["KIND", columnsByField.kind],
-    ["ID", columnsByField.id],
-    ["CATALOG", columnsByField.catalog],
-  ]);
+  const visibleIds = visible.reduce((longest, resource) => Math.max(longest, String(resource.id || "").length), 8);
+  const ultraCompactTable = listContentWidth < 28;
+  const compactTable = listContentWidth < 58;
+  const widths = ultraCompactTable
+    ? [0, listContentWidth, 0, 0, 0]
+    : adaptiveColumnWidths(listContentWidth, [
+      { contentWidth: 2, minWidth: compactTable ? 1 : 2, maxWidth: 2, shrinkWeight: 0 },
+      { contentWidth: Math.max(12, visibleIds), minWidth: compactTable ? 4 : 8, growWeight: 4 },
+      { contentWidth: compactTable ? 5 : 11, minWidth: compactTable ? 3 : 5, growWeight: 1 },
+      { contentWidth: compactTable ? 5 : 7, minWidth: compactTable ? 3 : 5, growWeight: 1 },
+      { contentWidth: compactTable ? 8 : 17, minWidth: compactTable ? 4 : 6, growWeight: 2 },
+    ]);
+  const [markerWidth, resourceWidth, kindWidth, scopeWidth, statusWidth] = widths;
+  const tableHeader = ultraCompactTable
+    ? fitText("RESOURCE", listContentWidth)
+    : tableLine([
+      ["", markerWidth],
+      ["RESOURCE", resourceWidth],
+      ["KIND", kindWidth],
+      ["SCOPE", scopeWidth],
+      ["STATUS", statusWidth],
+    ]);
+  const first = Math.max(0, Math.min(activeIndex - workspaceLayout.listRows + 1, visible.length - workspaceLayout.listRows));
+  const page = visible.slice(first, first + workspaceLayout.listRows);
+  const tableRows = page.map((resource, index) => {
+    const selectedRow = first + index === activeIndex;
+    const status = dashboardStatus(resource);
+    const row = ultraCompactTable
+      ? fitText(`${selectedRow ? "› " : ""}${resource.id}`, listContentWidth)
+      : tableLine([
+        [selectedRow ? "›" : "", markerWidth],
+        [resource.id, resourceWidth],
+        [resource.kind, kindWidth],
+        [resource.scope || "-", scopeWidth],
+        [status ? status === "update" ? "Update available" : `${status[0].toUpperCase()}${status.slice(1)}` : "Current", statusWidth],
+      ]);
+    return h(Text, {
+      key: `${resource.managed === false ? "unmanaged" : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
+      color: selectedRow ? DASHBOARD_THEME.semantic.selectedForeground : resolveRowColor(resource.kind, false, colorForStatus(status)),
+      backgroundColor: selectedRow ? DASHBOARD_THEME.semantic.selected : undefined,
+      bold: selectedRow,
+    }, row);
+  });
+  if (!tableRows.length) tableRows.push(h(Text, { key: "inventory-empty", dimColor: true }, "No matching resources."));
+
+  const detailFieldLines = (key: string, label: string, value: unknown, maxLines = 1,
+    color: string = DASHBOARD_THEME.semantic.accents.muted) => {
+    const labelText = `${label} `;
+    const valueWidth = Math.max(1, detailsContentWidth - labelText.length);
+    return wrapText(value, valueWidth, maxLines).map((line, index) => h(Text, {
+      key: `${key}-${index}`,
+    },
+    h(Text, {
+      color: DASHBOARD_THEME.semantic.accents.label,
+      bold: true,
+    }, index ? " ".repeat(labelText.length) : labelText),
+    h(Text, { color }, fitText(line, valueWidth))));
+  };
   const description = selected?.description || "No description available.";
-  const sourceLocation = selected?.source_repository
-    ? `https://github.com/${selected.source_repository}`
-    : "";
-  const locationValues = [
-    ...(selected?.managed === false && Array.isArray(selected.paths)
-      ? selected.paths.map((text) => ({ text }))
-      : []),
-    ...(sourceLocation ? [{ text: sourceLocation, href: sourceLocation }] : []),
-  ];
-  const locations = locationValues.map(({ text }) => text).join(" · ") || "-";
-  const issues = selected?.managed === false
+  const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
+  const statusLabel = selected?.managed === false ? "Unmanaged"
+    : selectedStatus === "update" ? "Update available"
+      : selectedStatus === "attention" ? "Warning" : "Current";
+  const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
+  const installedPath = selected?.paths?.join(" · ") || selected?.source_path || "-";
+  const sourceLocation = selected?.source_repository ? `https://github.com/${selected.source_repository}` : "";
+  const selectedIssues = selected?.managed === false
     ? "Not managed by Kitia; removal requires two confirmations."
     : selected?.issues?.length
       ? selected.issues.map(issueLine).join(" · ")
       : "Healthy · no recorded issues";
-  const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
-  const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
-  const compactDetails = rows < 40;
-  const inlineDetails = columns < 76 && rows >= 36 && rows < 50;
-  const largeScreenContext = selected && columns >= 112 && rows >= 50
-    ? [
-      ...(selected.category ? [{ label: "CATEGORY", value: selected.category, maxLines: 2 }] : []),
-      ...(selected.tags?.length
-        ? [{ label: "TAGS", value: selected.tags.join(" · "), maxLines: 2 }]
-        : []),
-      ...(selected.use_when ? [{ label: "USE WHEN", value: selected.use_when, maxLines: 3 }] : []),
-      ...(selected.example ? [{ label: "EXAMPLE", value: selected.example, maxLines: 3 }] : []),
-      ...(selected.prerequisites?.length
-        ? [{ label: "PREREQUISITES", value: selected.prerequisites.join(" · "), maxLines: 2 }]
-        : []),
-    ]
-    : [];
   const detailRows = selected
     ? [
-      ...(!compactDetails ? [
-        { label: "CATALOG", value: inventoryLabels.get(selected) || "-", maxLines: 1 },
-        { label: "SCOPE", value: selected.scope?.toUpperCase() || "-", maxLines: 1 },
+      h(Text, { key: "inventory-resource-title", bold: true }, `${selected.kind} · ${selected.id}`),
+      ...detailFieldLines("inventory-description", "DESCRIPTION", description, Infinity),
+      ...detailFieldLines("inventory-catalog", "CATALOG", inventoryLabels.get(selected) || selected.catalog || "-", Infinity),
+      ...detailFieldLines("inventory-license", "LICENSE", selected.license_status || selected.license_spdx || "-", Infinity),
+      ...detailFieldLines("inventory-status", "STATUS", statusLabel, Infinity, colorForStatus(selectedStatus)),
+      ...(selectedIssues ? detailFieldLines("inventory-issues", "ISSUES", selectedIssues, Infinity) : []),
+      ...detailFieldLines("inventory-revision", "REVISION", displayVersion, Infinity),
+      ...detailFieldLines("inventory-path", "PATH", installedPath, Infinity),
+      ...(sourceLocation ? [
+        ...detailFieldLines("inventory-source-label", "SOURCE", selected.source_repository || "", Infinity),
+        ...detailLocations("inventory-source", [{ text: sourceLocation, href: sourceLocation }], detailsContentWidth),
       ] : []),
-      { label: "STATUS", value: `[ ${selectedStatus.toUpperCase()} ]`, maxLines: 1 },
-      { label: "", value: issues, maxLines: Infinity },
-      ...largeScreenContext,
-      ...(!compactDetails ? [
-        { label: "VERSION", value: displayVersion, maxLines: Infinity },
-        { label: "LOCATIONS", value: locations, maxLines: Infinity },
-        { label: "DESCRIPTION", value: description, maxLines: Infinity },
-      ] : []),
-      ...(actionMessage
-        ? [{ label: "", value: actionMessage, maxLines: Infinity }]
+      ...(selected.category ? detailFieldLines("inventory-category", "CATEGORY", selected.category, Infinity) : []),
+      ...(selected.tags?.length ? detailFieldLines("inventory-tags", "TAGS", selected.tags.join(" · "), Infinity) : []),
+      ...(selected.use_when ? detailFieldLines("inventory-use-when", "USE WHEN", selected.use_when, Infinity) : []),
+      ...(selected.example ? detailFieldLines("inventory-example", "EXAMPLE", selected.example, Infinity) : []),
+      ...(selected.prerequisites?.length
+        ? detailFieldLines("inventory-prerequisites", "PREREQUISITES", selected.prerequisites.join(" · "), Infinity)
         : []),
+      ...(selected.owner ? detailFieldLines("inventory-owner", "OWNER", selected.owner, Infinity) : []),
+      ...(selected.expected_output
+        ? detailFieldLines("inventory-expected-output", "EXPECTED OUTPUT", selected.expected_output, Infinity)
+        : []),
+      ...(selected.limitations?.length
+        ? detailFieldLines("inventory-limitations", "LIMITATIONS", selected.limitations.join(" · "), Infinity)
+        : []),
+      ...(selected.deprecation_reason
+        ? detailFieldLines("inventory-deprecation", "DEPRECATION", selected.deprecation_reason, Infinity)
+        : []),
+      ...(selected.replacement
+        ? detailFieldLines("inventory-replacement", "REPLACEMENT", selected.replacement, Infinity)
+        : []),
+      ...((selected.apply_to || selected.applyTo)?.length
+        ? detailFieldLines("inventory-apply-to", "APPLIES TO", (selected.apply_to || selected.applyTo)!.join(" · "), Infinity)
+        : []),
+      ...(actionMessage ? detailFieldLines("inventory-action", "MESSAGE", actionMessage, Infinity) : []),
     ]
-    : [{
-      label: "",
-      value: errors.length
-        ? "No resource selected; see scan warnings above."
-        : resources.length ? "No matching resource selected." : "No resources found.",
-      maxLines: 1,
-    }];
-  const selectionContent = detailRows.flatMap((row, index) =>
-    row.label === "LOCATIONS"
-      ? [
-        h(Text, { key: "inventory-locations-label", color: DASHBOARD_THEME.semantic.accents.label, bold: true },
-          fitText(row.label, detailsContentWidth)),
-        ...detailLocations("inventory-locations", locationValues, detailsContentWidth),
-      ]
-      : row.label
-        ? inlineDetails && row.label !== "LOCATIONS"
-          ? wrapText(row.value, Math.max(1, detailsContentWidth - row.label.length - 1), row.maxLines)
-            .map((line, lineIndex) => h(Text, { key: `inventory-${index}-inline-${lineIndex}` },
-              h(Text, {
-                color: DASHBOARD_THEME.semantic.accents.label,
-                bold: true,
-              }, lineIndex === 0 ? `${row.label} ` : " ".repeat(row.label.length + 1)),
-              h(Text, {
-                color: row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
-              }, line)))
-          : detailField(
-            `inventory-${index}`,
-            row.label,
-            row.value,
-            detailsContentWidth,
-            row.maxLines,
-            row.label === "STATUS" ? colorForStatus(selectedStatus) : DASHBOARD_THEME.semantic.accents.muted,
-          )
-        : detailValue(`inventory-${index}`, row.value, detailsContentWidth, row.maxLines));
-  const compactShortcuts = columns < 76 && rows < 40 && showDetails;
-  const shortcutLines = modalActive ? [] : compactShortcuts
-    ? filterMode
-      ? ["TYPE to search", "ENTER apply · ESC clear"]
-      : selected && canExecute
-        ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall", "Q quit"]
-        : ["F filter", "Q quit"]
-    : filterMode
-      ? categorizedShortcutLines({
-        Filters: ["TYPE to search", "BACKSPACE edit", "ENTER apply", "ESC clear"],
-        Navigation: ["↑↓ navigate"],
-      })
-      : categorizedShortcutLines({
-        Actions: [
-          ...(catalogAvailable ? ["A install"] : []),
-          ...(canExecute && selected && selected.scope && (
-            selected.managed === false
-              ? Boolean(selected.paths?.length)
-              : Boolean(selected.source_repository && selected.source_path)
-          ) ? ["P preview"] : []),
-          ...(canExecute && selected && selected.managed !== false &&
-              selected.source_repository && selected.source_path ? ["V revision"] : []),
-          ...(canExecute && selected
-            ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
-            : []),
-        ],
-        Filters: ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])],
-        Display: ["D details"],
-        Navigation: ["M catalogs", "↑↓ navigate", "? guide", "Q quit"],
-      });
-  const inventoryShortcutWidth = inventorySideBySide ? inventoryDetailsWidth : columns - 2;
-  const fullSummaryPanelRows = sideBySide ? 5 : 17;
-  const warningPanelRows = errors.length ? errors.length + 4 : 0;
-  const detailsPanelRows = showDetails ? selectionContent.length + 5 : 0;
-  const shortcutsPanelRows = modalActive ? 0 : wrappedShortcutLines(shortcutLines, inventoryShortcutWidth).length + 5;
-  const detailsVerticalOverhead = inventorySideBySide
-    ? 0
-    : detailsPanelRows + shortcutsPanelRows;
-  const requiredRowsForSummary = 6 + fullSummaryPanelRows + warningPanelRows +
-    7 + detailsVerticalOverhead + 2;
-  const summaryCompactPanel = h(Panel, { title: "SUMMARY" },
-    h(Text, { dimColor: true }, fitText(
-      `RES ${resources.length} · MAN ${managedResources.length} · REVIEW ${needsReview}`,
-      contentWidth,
-    )));
-  const showFullSummaryPanels = rows >= requiredRowsForSummary;
-  const summaryPanelRows = showFullSummaryPanels ? fullSummaryPanelRows : 4;
-  const panels = showFullSummaryPanels ? summaryPanels : summaryCompactPanel;
-  // Reclaim blank panel gaps before sacrificing content in a cramped terminal.
-  const stackedOverflow = inventorySideBySide ? 0 : Math.max(
-    0, 6 + summaryPanelRows + warningPanelRows + 7 + detailsVerticalOverhead + 1 - rows,
-  );
-  const shortcutsMarginTop = stackedOverflow > 0 || (inventorySideBySide &&
-    selectionContent.length + 4 + shortcutsPanelRows > rows - (6 + summaryPanelRows + warningPanelRows)) ? 0 : 1;
-  const selectionMarginTop = inventorySideBySide || stackedOverflow > Number(Boolean(shortcutsPanelRows)) ? 0 : 1;
-  const listMarginTop = stackedOverflow > Number(Boolean(shortcutsPanelRows)) + Number(showDetails) ? 0 : 1;
-  const reclaimedRows = inventorySideBySide ? 0 : 1 - listMarginTop +
-    (showDetails ? 1 - selectionMarginTop : 0) + (shortcutsPanelRows ? 1 - shortcutsMarginTop : 0);
-  const viewport = Math.max(
-    1,
-    rows - (6 + summaryPanelRows + warningPanelRows + 7 + (inventoryFilterLines.length - 1) +
-      detailsVerticalOverhead - reclaimedRows),
-  );
-  const first = Math.max(0, Math.min(activeIndex - viewport + 1, visible.length - viewport));
-  const page = visible.slice(first, first + viewport);
-  const pageRange = visible.length ? `${first + 1}-${first + page.length}` : "0-0";
-  const tableRows = page.length
-    ? page.map((resource, index) => {
-      const selectedRow = first + index === activeIndex;
-      const status = dashboardStatus(resource);
-      const row = tableLine([
-        [selectedRow ? "›" : "", columnsByField.marker],
-        [status.toUpperCase(), columnsByField.status],
-        [resource.scope.toUpperCase(), columnsByField.scope],
-        [resource.kind === "instruction" ? "instr" : resource.kind, columnsByField.kind],
-        [resource.id, columnsByField.id],
-        [inventoryLabels.get(resource) || "-", columnsByField.catalog],
-      ]);
-      return h(Text, {
-        key: `${resource.managed === false ? "unmanaged" : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
-        color: resolveRowColor(resource.kind, selectedRow, colorForStatus(status)),
-        bold: selectedRow,
-      }, row);
-    })
-    : [h(Text, { key: "empty", dimColor: true }, fitText("No matching resources.", listContentWidth))];
-  if (!inventorySideBySide) {
-    while (tableRows.length < viewport) {
-      tableRows.push(h(Text, { key: `empty-${tableRows.length}` }, " "));
-    }
-  }
-  const resourcePanel = h(Panel, {
-    title: "INVENTORY",
-    separateHeader: true,
-    width: inventorySideBySide ? inventoryListWidth : undefined,
-    color: tourStep === 0 ? DASHBOARD_THEME.semantic.inventoryStatus.attention : DASHBOARD_THEME.semantic.selected,
-    marginTop: listMarginTop,
-    headerContent: h(React.Fragment, null,
-      h(Text, { bold: true }, fitText(`RESOURCES ${visible.length}/${resources.length} · ${pageRange}`, listContentWidth)),
-      ...inventoryFilterLines.map((line, index) => h(Text, {
-        key: `inventory-filter-${index}`,
-        color: filterMode || query || catalogFilter !== "all" || kindFilter !== "all" || licenseFilter !== "all"
-          ? DASHBOARD_THEME.semantic.selected : DASHBOARD_THEME.semantic.accents.muted,
-      }, line))),
-  },
-  h(Text, { bold: true }, tableHeader),
-  ...tableRows);
-  const selectionPanel = showDetails ? h(DetailsPanel, {
-    title: selected ? `${selected.kind.toUpperCase()} - ${fitText(selected.id, Math.max(1, detailsContentWidth - selected.kind.length - 3))}` : "SELECTION",
-    width: inventorySideBySide ? inventoryDetailsWidth : undefined,
-    marginTop: selectionMarginTop,
-    flexGrow: inventorySideBySide ? 1 : 0,
-    flexShrink: inventorySideBySide ? 1 : 0,
-  }, selectionContent) : null;
-  const shortcutsPanel = modalActive ? null : ShortcutsPanel({
-    lines: shortcutLines,
-    width: inventoryShortcutWidth,
-    marginTop: shortcutsMarginTop,
+    : [h(Text, {
+      key: "inventory-empty-detail",
+      color: DASHBOARD_THEME.semantic.accents.muted,
+    }, errors.length
+      ? "No resource selected; see scan warnings above."
+      : resources.length ? "No matching resource selected." : "No resources found.")];
+  const detailPaging = useDashboardDetailPaging({
+    lines: detailRows,
+    viewport: workspaceLayout.detailsContentRows,
+    enabled: showDetails && !modalActive,
+    filterMode,
+    focus: controls.focus,
+    menuFilter: controls.menuFilter,
+    resetKey: [selected?.id, selected?.kind, selected?.scope, query, catalogFilter, kindFilter, licenseFilter, columns, rows, showDetails],
   });
-  const detailsColumn = h(Box, {
-    flexDirection: "column",
-    alignItems: "stretch",
-    width: inventorySideBySide ? inventoryDetailsWidth : undefined,
-    height: inventorySideBySide ? viewport + 7 : undefined,
-    marginTop: inventorySideBySide ? 1 : 0,
-    marginLeft: inventorySideBySide ? 1 : 0,
-  }, ...(showDetails
-    ? [selectionPanel, shortcutsPanel]
-    : inventorySideBySide ? [h(Box, { key: "shortcuts-spacer", flexGrow: 1 }), shortcutsPanel] : [shortcutsPanel]));
-  const inventoryPanels = h(Box, {
-    flexDirection: inventorySideBySide ? "row" : "column",
-    alignItems: "stretch",
-    width: columns - 2,
-  }, resourcePanel, detailsColumn);
-
-
-  return h(Box, { flexDirection: "column", paddingX: 1 },
+  const actionButtons = actionRows
+    ? DashboardActionButtons({ controls: controlsState, width: detailsContentWidth })
+    : null;
+  const workspaceTop = DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height +
+    warningBlockRows + workspaceGap + 1;
+  const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
+  controls.mouse?.replace("inventory-rows", modalActive ? [] : page.map((_, index) => ({
+    left: 3,
+    right: workspaceLayout.listWidth + 2,
+    top: firstResourceRow + index,
+    bottom: firstResourceRow + index,
+    target: { type: "row" as const, screen: "inventory" as const, index: first + index },
+  })));
+  return h(Box, { width: columns, height: rows, flexDirection: "column", paddingX: 1, position: "relative" },
     h(DashboardHeader, {
       versionLabel,
       screenName: "INVENTORY",
-      metadata: `RESOURCES ${visible.length}/${resources.length} · ${pageRange} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()}`,
+      metadata: `RESOURCES ${visible.length}/${resources.length} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()} · LICENSE ${licenseFilter.toUpperCase()}`,
       columns,
     }),
-    panels,
+    h(DashboardControls, tabsProps),
+    h(InventorySummaryCards, {
+      resources,
+      width: columns - 2,
+      compact: compactSummary,
+      ultraCompact: ultraCompactSummary,
+      marginTop: ultraCompactSummary ? 0 : 1,
+    }),
+    h(DashboardControls, filterProps),
     warnings,
-    inventoryPanels,
+    h(Box, { width: columns - 2, marginTop: workspaceGap },
+      h(JoinedWorkspace, {
+        width: outerWorkspaceWidth,
+        height: workspaceHeight,
+        layout: workspaceLayout,
+        showDetails,
+        listTitle: "INSTALLED RESOURCES",
+        listMeta: `${visible.length} results`,
+        listHeader: tableHeader,
+        listRows: tableRows,
+        detailsTitle: "SELECTION DETAILS",
+        details: detailPaging.visibleLines,
+        detailsFooter: actionButtons,
+        detailsHint: detailPaging.canPage ? "PgUp/PgDn" : undefined,
+        color: tourStep === 0
+          ? DASHBOARD_THEME.semantic.inventoryStatus.attention
+          : DASHBOARD_THEME.semantic.accents.detailPanel,
+      })),
+    footer,
   );
-
 }

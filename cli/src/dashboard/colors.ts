@@ -8,6 +8,7 @@ export const DASHBOARD_THEME = {
       instruction: "green",
     },
     selected: "blue",
+    selectedForeground: "whiteBright",
     inventoryStatus: {
       unmanaged: "gray",
       attention: "yellow",
@@ -40,6 +41,7 @@ export const DASHBOARD_THEME = {
       detailPanel: "blue",
       muted: "gray",
       label: "white",
+      neutral: "white",
       shortcutCategory: "magenta",
       warning: "yellow",
       success: "green",

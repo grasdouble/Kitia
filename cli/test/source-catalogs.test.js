@@ -422,7 +422,7 @@ test("dashboard revision picker applies a selected full SHA to a confirmed instr
   let finished = false;
   try {
     await waitForFrame((frame) =>
-      frame.includes("INVENTORY") && frame.includes("INSTRUCTION - review") && frame.includes("V revision"),
+      frame.includes("INVENTORY") && frame.includes("instruction · review") && frame.includes("V revision"),
     "loaded instruction and revision shortcut");
     input.write("v");
     await waitForFrame((frame) => frame.includes("RESOURCE REVISIONS"), "revision picker");
@@ -438,7 +438,8 @@ test("dashboard revision picker applies a selected full SHA to a confirmed instr
     await waitForFrame((frame) => frame.includes("CONFIRM UPDATE"), "update confirmation");
     assert.ok(visibleFrame().includes(selectedSha));
     input.write("y");
-    await waitForFrame((frame) => frame.includes("Updated selected revision."), "successful update result");
+    await waitForFrame((frame) => frame.replace(/[│]/g, " ").replace(/\s+/g, " ").includes("Updated selected revision."),
+      "successful update result");
     assert.deepEqual(actions, [{ action: "update", resource: "review", ref: selectedSha }]);
     input.write("q");
     assert.equal(await done, true);
@@ -1911,7 +1912,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   const { addCatalogModal, catalogTransferModal, refreshCatalogModal, removeCatalogModal } =
     await import("../dist/dashboard/modals.mjs");
   const repository = "https://github.com/example/test";
-  const userCatalogsReadyFrame = /^(?=[\s\S]*USER CATALOGS)(?=[\s\S]*SHORTCUTS)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|REMOVE CATALOG|IMPORT CATALOGS|REFRESH CATALOG))/;
+  const userCatalogsReadyFrame = /^(?=[\s\S]*USER CATALOGS)(?=[\s\S]*ESC inventory)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|REMOVE CATALOG|IMPORT CATALOGS|REFRESH CATALOG))/;
   const catalogModal = removeCatalogModal({
     catalogs: [{ name: "Test", repository }],
     state: { step: "select", index: 0, name: "Test", message: "", failed: false },
@@ -2118,7 +2119,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.match(management.renderedOutput, /A add/);
   assert.match(management.renderedOutput, /Delete remove/);
   assert.match(management.renderedOutput, /R refresh/);
-  assert.match(management.renderedOutput, /SHORTCUTS/);
+  assert.match(management.renderedOutput, /ESC inventory/);
   const presetRequests = [];
   const presetManager = await driveRefresh([
     ["m", /USER CATALOGS/], ["p", /PRESET/], ["\x1b[B", /› Matt Pocock/],
@@ -2271,7 +2272,9 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.equal(exportManager.result, true);
   assert.deepEqual(exportTransfers, [{ action: "export", content: "" }]);
   assert.match(exportManager.renderedOutput, /EXPORT CATALOGS/);
-  assert.match(management.renderedOutput, /FRESHNESS[^\n]*\n[^\n]*UNKNOWN/);
+  const managementText = require("node:util").stripVTControlCharacters(management.renderedOutput)
+    .replace(/[│]/g, " ").replace(/\s+/g, " ");
+  assert.match(managementText, /FRESHNESS\s+UNKNOWN/);
   const currentManager = await driveRefresh(["m", "q"], refresh, {
     checkCatalogFreshness: async () => [{ name: "Test", status: "current" }],
   });
@@ -2404,7 +2407,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.equal(initialDashboard.result, true);
   assert.doesNotMatch(initialDashboard.renderedOutput, /A add catalog|Delete remove selected|R refresh/);
   assert.doesNotMatch(initialDashboard.renderedOutput, /G refresh/);
-  assert.match(initialDashboard.renderedOutput, /SHORTCUTS/);
+  assert.match(initialDashboard.renderedOutput, /↑↓ navigate/);
   assert.match(initialDashboard.renderedOutput, /F filter/);
   assert.match(initialDashboard.renderedOutput, /↑↓ navigate/);
   const ignoredInventoryRefresh = await driveRefresh(["g", "q"], refresh);
@@ -2703,7 +2706,7 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
     resource.catalog === "Tracked" && resource.id === "kitia-tracked" && resource.managed !== false));
 });
 
-test("inventory TUI labels a tracked user skill with its custom source folder", async () => {
+test("inventory TUI labels a tracked user skill with its custom source folder", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-source-label-"));
@@ -2781,19 +2784,38 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
       ],
     }],
   });
+  t.after(async () => {
+    if (!input.destroyed) input.destroy();
+    await done.catch(() => {});
+    if (!output.destroyed) output.destroy();
+  });
   await waitForOutput(output, () => rendered,
-    (text) => text.includes("grill-me") && text.includes("MattPucock[productivity]"),
-    "tracked source label");
+    (text) => selectedDetailsFrame(text).includes("skill · grill-me") ||
+      selectedDetailsFrame(text).includes("skill · manual-skill"),
+    "initial selected inventory details");
+  let initialFrame = selectedDetailsFrame(rendered);
+  if (!initialFrame.includes("skill · grill-me")) {
+    const previousLength = rendered.length;
+    input.write("\x1b[B");
+    await waitForOutput(output, () => rendered,
+      (text) => text.length > previousLength && selectedDetailsFrame(text).includes("skill · grill-me"),
+      "tracked skill details after moving selection");
+    initialFrame = selectedDetailsFrame(rendered);
+  }
+  assert.ok(initialFrame.includes("manual-skill"), "unmanaged resource remains in the inventory list");
+  assert.ok(initialFrame.includes("Unmanaged"), "unmanaged status remains visible in the list");
+  const detailLines = assertSeparatedPanelHeader(initialFrame, "SELECTION DETAILS", "skill · grill-me");
+  const catalogDetails = detailLines.join("").replace(/\s/g, "");
+  assert.ok(catalogDetails.includes("CATALOGMattPucock[productivity]"));
+  const descriptionDetails = detailLines.join(" ").replace(/\s+/g, " ");
+  assert.ok(descriptionDetails.includes("DESCRIPTION A relentless interview to sharpen a plan or design."));
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
   output.destroy();
-  const plain = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-  assert.match(plain, /grill-me\s+MattPucock\[productivity\]/);
-  assert.match(plain, /UNMANAGED\s+USER\s+skill\s+manual-skill\s+-/);
 });
 
-test("inventory TUI renders multiple configured custom folders and preserves other catalog labels", async () => {
+test("inventory TUI renders multiple configured custom folders and preserves other catalog labels", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const resource = (catalog, id, source_path, managed = true) => ({
@@ -2838,19 +2860,53 @@ test("inventory TUI renders multiple configured custom folders and preserves oth
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
   const done = runDashboard(resources, input, output, [], { userCatalogs });
+  t.after(async () => {
+    if (!input.destroyed) input.destroy();
+    await done.catch(() => {});
+    if (!output.destroyed) output.destroy();
+  });
   await waitForOutput(output, () => rendered,
-    (text) => text.includes("engineering-skill") && text.includes("manual-skill"),
-    "configured source labels");
+    (text) => resources.some(({ id }) => selectedDetailsFrame(text).includes(`skill · ${id}`)),
+    "initial selected inventory details");
+  const expectedLabels = new Map([
+    ["engineering-skill", "MattPucock[engineering]"],
+    ["productivity-skill", "MattPucock[productivity]"],
+    ["basic-skill", "BasicCatalog"],
+    ["unmapped-skill", "MattPucock"],
+    ["manual-skill", "-"],
+  ]);
+  let frame = selectedDetailsFrame(rendered);
+  const observed = new Set();
+  for (let index = 0; index < resources.length; index += 1) {
+    const selected = resources.find(({ id }) => frame.includes(`skill · ${id}`));
+    assert.ok(selected, `a resource is selected in frame ${index + 1}`);
+    const expectedLabel = expectedLabels.get(selected.id);
+    assert.ok(frame.includes("CATALOG") && frame.includes(expectedLabel),
+      `${selected.id} shows its catalog/source-folder label ${expectedLabel}`);
+    if (selected.id === "manual-skill") {
+      assert.match(frame, /Unmanaged/);
+      assert.match(frame, /CATALOG\s+-/);
+    }
+    observed.add(selected.id);
+    if (index + 1 < resources.length) {
+      const previousFrame = frame;
+      const previousLength = rendered.length;
+      input.write("\x1b[B");
+      const nextOutput = await waitForOutput(output, () => rendered, (text) => {
+        if (text.length <= previousLength) return false;
+        const nextFrame = selectedDetailsFrame(text);
+        return nextFrame && nextFrame !== previousFrame &&
+          resources.some(({ id }) => nextFrame.includes(`skill · ${id}`));
+      }, `next inventory detail after ${selected.id}`);
+      frame = selectedDetailsFrame(nextOutput);
+    }
+  }
+  assert.deepEqual(observed, new Set(resources.map(({ id }) => id)),
+    "every tracked and unmanaged resource remains reachable in the inventory list");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
   output.destroy();
-  const plain = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-  assert.match(plain, /engineering-skill\s+MattPucock\[engineering\]/);
-  assert.match(plain, /productivity-skill\s+MattPucock\[productivity\]/);
-  assert.match(plain, /basic-skill\s+BasicCatalog/);
-  assert.match(plain, /unmapped-skill\s+MattPucock/);
-  assert.match(plain, /UNMANAGED\s+PROJECT\s+skill\s+manual-skill\s+-/);
 });
 
 test("removing an unmanaged skill deletes its entire detected folder", async () => {
@@ -3021,10 +3077,11 @@ test("dashboard update reaches the production CLI and reports a safe local-confl
 
 
 function selectedDetailsFrame(rendered) {
-  const start = rendered.lastIndexOf("\u001b[?2026h");
-  const end = rendered.indexOf("\u001b[?2026l", start);
-  assert.ok(start >= 0 && end > start, "dashboard emits a complete synchronized frame");
-  return require("node:util").stripVTControlCharacters(rendered.slice(start, end));
+  const end = rendered.lastIndexOf("\u001b[?2026l");
+  const start = rendered.lastIndexOf("\u001b[?2026h", end);
+  return start >= 0 && end > start
+    ? require("node:util").stripVTControlCharacters(rendered.slice(start, end))
+    : "";
 }
 
 function assertSeparatedPanelHeader(frame, title, firstBody, metadata = []) {
@@ -3057,7 +3114,8 @@ function assertSeparatedPanelHeader(frame, title, firstBody, metadata = []) {
   return body;
 }
 
-test("dashboard renders the resource list and selection panel at wide and narrow widths", async () => {
+
+test("dashboard renders the resource list and selection panel at wide and narrow widths", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   for (const columns of [160, 100]) {
@@ -3084,45 +3142,45 @@ test("dashboard renders the resource list and selection panel at wide and narrow
       source_path: "skills/manual-skill",
       source_ref: "abcdef0123456789abcdef0123456789abcdef01",
     }], input, output);
+    t.after(async () => {
+      if (!input.destroyed) input.destroy();
+      await done.catch(() => {});
+      if (!output.destroyed) output.destroy();
+    });
     await waitForOutput(output, () => rendered,
-      (text) => text.includes("SKILL - manual-skill"), "selected inventory details");
+      (text) => selectedDetailsFrame(text).includes("skill · manual-skill"), "selected inventory details");
+    const frame = selectedDetailsFrame(rendered);
     input.write("q");
     assert.equal(await done, true);
-    assert.match(rendered, /RESOURCES/);
-    assert.match(rendered, /SKILL - manual-skill/);
-    assert.match(rendered, /VERSION/);
-    const inventoryRow = rendered.split(/\r?\n/).find((line) => line.includes("manual-skill"));
+    assert.match(frame, /INSTALLED RESOURCES/);
+    assert.match(frame, /skill · manual-skill/);
+    assert.match(frame, /REVISION[\s\S]*abcdef0/);
+    const detailLines = assertSeparatedPanelHeader(frame, "SELECTION DETAILS", "skill · manual-skill");
+    const compactDetailText = detailLines.join("").replace(/\s/g, "");
+    assert.ok(compactDetailText.includes("https://github.com/example/manual-skill"),
+      "the complete source URL remains available across wrapped detail rows");
+    assert.ok(detailLines.join(" ").replace(/\s+/g, " ")
+      .includes("DESCRIPTION A manually maintained skill."));
+    const inventoryRow = frame.split(/\r?\n/).find((line) => line.includes("manual-skill") && line.includes("Current"));
     assert.ok(inventoryRow, "inventory row is rendered");
     assert.doesNotMatch(inventoryRow, /A manually maintained skill/);
-    assert.doesNotMatch(rendered, /DESC\s/);
-    assert.match(rendered, /STATUS[\s\S]*SCOPE[\s\S]*KIND[\s\S]*ID[\s\S]*CATALOG/);
-    const plainRendered = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-    const header = plainRendered.split(/\r?\n/).find((line) => /STATUS/.test(line) && /CATALOG/.test(line));
+    assert.doesNotMatch(frame, /DESC\s/);
+    const header = frame.split(/\r?\n/).find((line) =>
+      line.includes("RESOURCE") && line.includes("KIND") && line.includes("SCOPE") && line.includes("STATUS"));
     assert.ok(header, "inventory header is rendered");
     const column = (label) => header.indexOf(label);
-    assert.ok(column("STATUS") < column("SCOPE") && column("SCOPE") < column("KIND") &&
-      column("KIND") < column("ID") && column("ID") < column("CATALOG"));
-    assert.ok(column("CATALOG") - column("ID") >= 12, "catalog receives flexible width after the ID column");
-    const selectedPanel = rendered.slice(rendered.lastIndexOf("SKILL - manual-skill"));
-    const catalogLabel = selectedPanel.indexOf("CATALOG");
-    const catalogValue = selectedPanel.indexOf("a-very-long-external-catalog-name");
-    assert.ok(selectedPanel.slice(catalogLabel, catalogValue).includes(" "),
-      "inline detail labels remain separated from their values");
-    assert.match(selectedPanel, /a-very-long-external-catalog-name-for-layo(?:\.\.\.|ut)/);
-    assert.match(selectedPanel, /abcdef0/);
-    assert.match(selectedPanel, /https:\/\/github\.com\/example\/manual-skill/);
-    assert.match(selectedPanel, /A manually maintained skill\./);
-    assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "SKILL - manual-skill", "CATALOG");
+    assert.ok(column("RESOURCE") < column("KIND") && column("KIND") < column("SCOPE") &&
+      column("SCOPE") < column("STATUS"), "inventory columns preserve their resource/kind/scope/status order");
     if (columns >= 112) {
-      assert.match(rendered, /LOCATIONS/);
-      assert.match(rendered, /DESCRIPTION/);
-      assert.match(rendered, /STATUS/);
+      assert.match(frame, /PATH[\s\S]*skills\/manual-skill/);
+      assert.match(frame, /DESCRIPTION/);
+      assert.match(frame, /STATUS/);
     }
     input.destroy();
     output.destroy();
   }
 });
-test("catalog browser renders ordered columns without list descriptions at wide and narrow widths", async () => {
+test("catalog browser renders ordered columns without list descriptions at wide and narrow widths", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   for (const columns of [160, 100]) {
@@ -3145,32 +3203,35 @@ test("catalog browser renders ordered columns without list descriptions at wide 
       id: "catalog-skill",
       description: "Catalog panel toggle behavior.",
     }] });
+    t.after(async () => {
+      if (!input.destroyed) input.destroy();
+      await done.catch(() => {});
+      if (!output.destroyed) output.destroy();
+    });
     await waitForOutput(output, () => rendered, (text) => text.includes("INVENTORY"), "initial inventory");
     input.write("a");
     await waitForOutput(output, () => rendered,
-      (text) => text.includes("CATALOG RESOURCES") && text.includes("catalog-skill"),
-      "catalog resources table");
-    const plainRendered = rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-    const header = plainRendered.split(/\r?\n/).find((line) => /INSTALLED/.test(line) && /SOURCE/.test(line));
+      (text) => selectedDetailsFrame(text).includes("CATALOG RESOURCES"), "catalog resources table");
+    const frame = selectedDetailsFrame(rendered);
+    const header = frame.split(/\r?\n/).find((line) =>
+      line.includes("RESOURCE") && line.includes("KIND") && line.includes("CATALOG") && line.includes("INSTALLED"));
     assert.ok(header, "catalog header is rendered");
-    assert.ok(header.indexOf("INSTALLED") < header.indexOf("SOURCE") &&
-      header.indexOf("SOURCE") < header.indexOf("KIND") && header.indexOf("KIND") < header.indexOf("ID"));
-    assert.ok(header.indexOf("KIND") - header.indexOf("SOURCE") >= 12, "Source allocation fits MattPucock");
-    assert.ok(header.indexOf("ID") - header.indexOf("KIND") >= 12, "ID column remains usable");
-    const row = plainRendered.split(/\r?\n/).find((line) =>
-      line.includes(sourceName) && line.includes("catalog-skill"));
+    assert.ok(header.indexOf("RESOURCE") < header.indexOf("KIND") &&
+      header.indexOf("KIND") < header.indexOf("CATALOG") && header.indexOf("CATALOG") < header.indexOf("INSTALLED"));
+    const row = frame.split(/\r?\n/).find((line) =>
+      line.includes(sourceName) && line.includes("instruction") && line.includes("catalog-skill"));
     assert.ok(row, "catalog row is rendered");
-    const sourcePosition = row.indexOf(sourceName);
-    const kindPosition = row.indexOf("instruction");
-    const idPosition = row.indexOf("catalog-skill");
-    assert.ok(sourcePosition >= 0 && kindPosition > sourcePosition && idPosition > kindPosition,
-      `source, kind, and ID values render in order: ${JSON.stringify({ sourcePosition, kindPosition, idPosition, row })}`);
-    const listRow = row.split("│ │", 1)[0];
-    assert.doesNotMatch(listRow, /Catalog panel toggle behavior\./);
-    const listHeader = header.split("│ │", 1)[0];
-    assert.doesNotMatch(listHeader, /DESC/);
-    assert.match(rendered, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
-    assertSeparatedPanelHeader(selectedDetailsFrame(rendered), "INSTRUCTION - catalog-skill", "CATALOG");
+    const positions = ["catalog-skill", "instruction", sourceName].map((label) => row.indexOf(label));
+    assert.ok(positions.every((position) => position >= 0), "resource, kind, and catalog values remain in the row");
+    assert.ok(positions[0] < positions[1] && positions[1] < positions[2],
+      `resource, kind, and catalog order is retained: ${JSON.stringify({ positions, row })}`);
+    assert.doesNotMatch(row, /Catalog panel toggle behavior\./);
+    assert.doesNotMatch(header, /DESC/);
+    const detailLines = assertSeparatedPanelHeader(frame, "SELECTION DETAILS", "instruction ·");
+    assert.ok(detailLines.join(" ").replace(/\s+/g, " ").includes("instruction · catalog-skill"),
+      "the full resource title remains available when wrapped");
+    assert.ok(detailLines.join(" ").replace(/\s+/g, " ")
+      .includes("DESCRIPTION Catalog panel toggle behavior."));
     input.write("q");
     assert.equal(await done, true);
     input.destroy();
@@ -3539,7 +3600,7 @@ for (const [kind, columns, rows, hasAudit] of [
     }
   });
 }
-test("dashboard toggles the selection panel with D", async () => {
+test("dashboard toggles the selection panel with D", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const input = new PassThrough();
@@ -3562,18 +3623,22 @@ test("dashboard toggles the selection panel with D", async () => {
     managed: true,
     description: "Description toggle behavior.",
   }], input, output);
+  t.after(async () => {
+    if (!input.destroyed) input.destroy();
+    await done.catch(() => {});
+    if (!output.destroyed) output.destroy();
+  });
   await waitForOutput(output, () => rendered,
-    (text) => text.includes("SKILL - manual-skill") && text.includes("\u001b[?2026l"),
-    "initial selected details");
+    (text) => selectedDetailsFrame(text).includes("skill · manual-skill"), "initial selected details");
   const beforeHide = rendered.length;
   input.write("d");
   await waitForOutput(output, () => rendered.slice(beforeHide),
-    (text) => text.includes("\u001b[?2026l") && !text.includes("SKILL - manual-skill"),
+    (text) => text.includes("\u001b[?2026l") && !selectedDetailsFrame(text).includes("SELECTION DETAILS"),
     "hidden details frame");
   const beforeShow = rendered.length;
   input.write("d");
   await waitForOutput(output, () => rendered.slice(beforeShow),
-    (text) => text.includes("\u001b[?2026l") && text.includes("SKILL - manual-skill"),
+    (text) => text.includes("\u001b[?2026l") && selectedDetailsFrame(text).includes("SELECTION DETAILS"),
     "shown details frame");
   input.write("q");
   assert.equal(await done, true);
@@ -3581,7 +3646,7 @@ test("dashboard toggles the selection panel with D", async () => {
   output.destroy();
 });
 
-test("dashboard toggles the catalog entry panel with D", async () => {
+test("dashboard toggles the catalog entry panel with D", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const input = new PassThrough();
@@ -3602,29 +3667,31 @@ test("dashboard toggles the catalog entry panel with D", async () => {
     description: "Catalog panel toggle behavior.",
   }];
   const done = runDashboard([], input, output, [], { catalogResources: candidates });
+  t.after(async () => {
+    if (!input.destroyed) input.destroy();
+    await done.catch(() => {});
+    if (!output.destroyed) output.destroy();
+  });
   await waitForOutput(output, () => rendered, (text) => text.includes("INVENTORY"), "initial inventory");
   input.write("a");
   await waitForOutput(output, () => rendered,
-    (text) => text.includes("CATALOG RESOURCES") && text.includes("SKILL - catalog-skill"),
+    (text) => selectedDetailsFrame(text).includes("CATALOG RESOURCES") &&
+      selectedDetailsFrame(text).includes("skill · catalog-skill"),
     "catalog entry details");
-  const resourcesTitle = rendered.indexOf("CATALOG RESOURCES");
-  const entryTitle = rendered.indexOf("SKILL - catalog-skill");
-  assert.equal(
-    rendered.lastIndexOf("\n", resourcesTitle),
-    rendered.lastIndexOf("\n", entryTitle),
-  );
-  const entryPanel = rendered.slice(entryTitle);
-  assert.match(entryPanel, /CATALOG[^\n]*\n[^\n]*sample-catalog/);
-  assert.match(entryPanel, /DESCRIPTION[^\n]*\n[^\n]*Catalog panel toggle behavior\./);
+  const entryFrame = selectedDetailsFrame(rendered);
+  const entryDetails = assertSeparatedPanelHeader(entryFrame, "SELECTION DETAILS", "skill · catalog-skill");
+  const entryText = entryDetails.join(" ").replace(/\s+/g, " ");
+  assert.ok(entryText.includes("CATALOG sample-catalog"));
+  assert.ok(entryText.includes("DESCRIPTION Catalog panel toggle behavior."));
   const beforeHide = rendered.length;
   input.write("d");
   await waitForOutput(output, () => rendered.slice(beforeHide),
-    (text) => text.includes("\u001b[?2026l") && !text.includes("SKILL - catalog-skill"),
+    (text) => text.includes("\u001b[?2026l") && !selectedDetailsFrame(text).includes("SELECTION DETAILS"),
     "hidden catalog entry frame");
   const beforeShow = rendered.length;
   input.write("d");
   await waitForOutput(output, () => rendered.slice(beforeShow),
-    (text) => text.includes("\u001b[?2026l") && text.includes("SKILL - catalog-skill"),
+    (text) => text.includes("\u001b[?2026l") && selectedDetailsFrame(text).includes("SELECTION DETAILS"),
     "shown catalog entry frame");
   input.write("q");
   assert.equal(await done, true);
@@ -3632,7 +3699,7 @@ test("dashboard toggles the catalog entry panel with D", async () => {
   output.destroy();
 });
 
-test("dashboard toggles catalog management details with D", async () => {
+test("dashboard toggles catalog management details with D", async (t) => {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
   const input = new PassThrough();
@@ -3650,28 +3717,33 @@ test("dashboard toggles catalog management details with D", async () => {
     userCatalogs: [{ name: "Sample", repository: "example/sample" }],
     checkCatalogFreshness: async () => [{ name: "Sample", status: "current" }],
   });
+  t.after(async () => {
+    if (!input.destroyed) input.destroy();
+    await done.catch(() => {});
+    if (!output.destroyed) output.destroy();
+  });
   await waitForOutput(output, () => rendered, (text) => text.includes("INVENTORY"), "initial inventory");
   input.write("m");
   await waitForOutput(output, () => rendered,
-    (text) => text.includes("USER CATALOGS 1") && text.includes("CATALOG - Sample"),
+    (text) => selectedDetailsFrame(text).includes("USER CATALOGS 1") &&
+      selectedDetailsFrame(text).includes("REPOSITORY example/sample"),
     "catalog management details");
-  const managementHeader = rendered.indexOf("USER CATALOGS 1");
-  const panelTop = rendered.indexOf("┌", managementHeader);
-  const panelTopEnd = rendered.indexOf("\n", panelTop);
-  assert.ok((rendered.slice(panelTop, panelTopEnd).match(/┌/g) || []).length >= 2);
-  const detailsPanel = rendered.slice(rendered.indexOf("CATALOG - Sample"));
-  assert.match(detailsPanel, /REPOSITORY example\/sample/);
-  assert.match(detailsPanel, /FRESHNESS UP TO DATE/);
-  assert.match(rendered, /Updates catalog metadata only/);
+  const managementFrame = selectedDetailsFrame(rendered);
+  assert.match(managementFrame, /USER CATALOGS 1/);
+  assert.match(managementFrame, /Sample/);
+  assert.match(managementFrame, /REPOSITORY example\/sample/);
+  assert.match(managementFrame, /FRESHNESS UP TO DATE/);
+  assert.match(managementFrame, /CONNECTED CATALOGS 1/);
+  assert.match(managementFrame, /FRESHNESS UP TO DATE/);
   const beforeHide = rendered.length;
   input.write("d");
   await waitForOutput(output, () => rendered.slice(beforeHide),
-    (text) => text.includes("\u001b[?2026l") && !text.includes("Updates catalog metadata only"),
+    (text) => text.includes("\u001b[?2026l") && !selectedDetailsFrame(text).includes("FRESHNESS UP TO DATE"),
     "hidden management details frame");
   const beforeShow = rendered.length;
   input.write("d");
   await waitForOutput(output, () => rendered.slice(beforeShow),
-    (text) => text.includes("\u001b[?2026l") && text.includes("Updates catalog metadata only"),
+    (text) => text.includes("\u001b[?2026l") && selectedDetailsFrame(text).includes("FRESHNESS UP TO DATE"),
     "shown management details frame");
   input.write("q");
   assert.equal(await done, true);
@@ -3685,11 +3757,9 @@ for (const [screen, dimensions] of [
   ["management", [[160, 40], [112, 40], [100, 50], [160, 24], [120, 36], [100, 29]]],
 ]) {
   for (const [columns, rows] of dimensions) {
-    test(`${screen} table, details and shortcuts retain single dividers and navigation at ${columns}x${rows}`, { timeout: 5_000 }, async () => {
+    test(`${screen} rows, details and shortcuts stay reachable at ${columns}x${rows}`, { timeout: 5_000 }, async () => {
       const { PassThrough } = require("node:stream");
       const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
-      const { wrappedShortcutLines } = await import("../dist/dashboard/screens/shared.mjs");
-      const { detailPanelLayout } = require("../dist/dashboard/helpers.mjs");
       const input = new PassThrough();
       input.isTTY = true;
       input.setRawMode = () => {};
@@ -3725,8 +3795,8 @@ for (const [screen, dimensions] of [
         ...(screen === "management" ? { userCatalogs: catalogs } : {}),
       });
       const title = (index) => screen === "management"
-        ? `CATALOG - ${catalogs[index].name}`
-        : `SKILL - ${resources[index].id}`;
+        ? `catalog-${String(index).padStart(2, "0")}`
+        : `resource-${String(index).padStart(2, "0")}`;
       const frame = () => {
         const value = selectedDetailsFrame(rendered);
         assert.ok(value.trimEnd().split(/\r?\n/).length <= rows,
@@ -3744,71 +3814,62 @@ for (const [screen, dimensions] of [
         input.write(key);
         return waitForFrame(expected, start);
       };
-      const assertListAndShortcuts = (value, detailsVisible = true, query = "",
-        catalogFilter = "ALL", kindFilter = "ALL", licenseFilter = "ALL") => {
-        const tableTitle = screen === "inventory" ? "INVENTORY"
+      const assertListAndShortcuts = (value, detailsVisible = true, query = "") => {
+        const plain = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+        const lines = plain.split(/\r?\n/);
+        const tableTitle = screen === "inventory" ? "INSTALLED RESOURCES"
           : screen === "catalog" ? "CATALOG RESOURCES" : "CONNECTED CATALOGS 60";
-        const metadata = screen === "inventory"
-          ? [new RegExp(`^RESOURCES ${query ? 10 : 60}/60 · \\d+-\\d+$`),
-            `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter} · License ${licenseFilter}`]
-          : screen === "catalog"
-            ? [new RegExp(`^RESOURCES \\d+/60 · \\d+-\\d+$`),
-              `Filter ${query || "(F to filter)"} · Catalog ${catalogFilter} · Kind ${kindFilter} · License ${licenseFilter}`]
-            : [];
-        const tableBody = assertSeparatedPanelHeader(value, tableTitle,
-          screen === "inventory" ? "STATUS" : screen === "catalog" ? "INST" : "CATALOG", metadata);
-        const headings = tableBody[0];
-        assert.match(headings, screen === "inventory" ? /STATUS\s+SCOPE\s+KIND\s+ID\s+CATALOG/
-          : screen === "catalog" ? /INST(?:ALLED)?\s+SOURCE\s+KIND\s+ID/
-            : /CATALOG\s+REPOSITORY\s+RES(?:OURCES)?\s+INST(?:ALLED)?\s+FRESHNESS/);
-        const visibleRows = tableBody.slice(1).filter((line) =>
-          line.includes(screen === "management" ? "catalog-" : "resource-"));
-        assert.ok(visibleRows.length > 0, "data rows stay below their column headings");
-        if (screen === "inventory") {
-          const countLine = value.split(/\r?\n/).find((line) => /RESOURCES \d+\/60 ·/.test(line));
-          const [, first, last] = countLine.match(/· (\d+)-(\d+)/);
-          assert.equal(Number(last) - Number(first) + 1, visibleRows.length,
-            "the header range matches the unchanged visible row budget");
-          assert.ok(visibleRows[0].includes(resources[Number(first) - 1 + (query ? 50 : 0)].id));
-          assert.ok(visibleRows.at(-1).includes(resources[Number(last) - 1 + (query ? 50 : 0)].id));
+        assert.ok(plain.includes(tableTitle));
+        if (screen !== "management") {
+          const headerPattern = screen === "inventory"
+            ? /RESOURCE\s+KIND\s+SCOPE\s+STATUS/
+            : /RESOURCE\s+KIND\s+CATALOG\s+INSTALLED/;
+          const tableHeader = lines.find((line) => headerPattern.test(line));
+          assert.ok(tableHeader, "resource column headings remain visible");
+          assert.match(tableHeader, headerPattern);
+          const resultCount = query ? 10 : 60;
+          assert.ok(plain.includes(`${resultCount} results`), "the list metadata matches active filters");
+          assert.ok(lines.some((line) => /resource-\d\d/.test(line)), "data rows remain visible below the headings");
+          assert.equal(plain.includes("SELECTION DETAILS"), detailsVisible);
+        } else {
+          assert.ok(lines.some((line) => /catalog-\d\d/.test(line)) &&
+            lines.some((line) => /org\/repo-\d/.test(line)),
+          "catalog card names and repositories remain visible");
+          assert.equal(plain.includes("FRESHNESS"), detailsVisible);
+          assert.equal(plain.includes("Refresh updates metadata only; installed content stays unchanged."),
+            detailsVisible && rows >= 30);
         }
-        const shortcuts = screen === "inventory"
-          ? ["Filters", "F filter · C catalog · K kind · L license", "Display", "D details",
-            "Navigation", "M catalogs · ↑↓ navigate · ? guide · Q quit"]
+        const shortcutTokens = screen === "inventory"
+          ? ["F filter", "C catalog", "K kind", "L license", "D details", "1/2/3 sections", "M catalogs", "↑↓ navigate", "? guide", "Q quit"]
           : screen === "catalog"
-            ? ["Actions", "ENTER install · V revisions · P preview/audit",
-              "Filters", "F filter · C catalog · K kind · L license",
-              "Display", "D details", "Navigation", "↑↓ navigate · ESC back · ? guide · Q quit"]
-            : ["Display", "D details", "Navigation", "↑↓ nav · ? guide · ESC inventory · Q quit"];
-        const layout = detailPanelLayout(columns, screen === "inventory" && columns >= 132 ? 0.64 : 0.68);
-        const shortcutWidth = detailsVisible && layout.sideBySide ? layout.detailsWidth : columns - 2;
-        const expected = wrappedShortcutLines(shortcuts, shortcutWidth);
-        const actual = assertSeparatedPanelHeader(value, "SHORTCUTS", expected[0]);
-        assert.deepEqual(actual, expected, "every wrapped shortcut remains visible below its single divider");
-        if (screen === "catalog" && columns === 112 && detailsVisible) {
-          assert.ok(expected.length > 1, "the narrow side column exercises shortcut wrapping");
-        }
+            ? ["ENTER install", "V revisions", "P preview/audit", "F filter", "C catalog", "K kind", "L license", "D details", "1/2/3 sections", "ESC back", "↑↓ navigate", "? guide", "Q quit"]
+            : ["D details", "ESC inventory", "1/2/3 sections", "↑↓ navigate", "? guide", "Q quit"];
+        for (const token of shortcutTokens) assert.ok(plain.includes(token), `shortcut remains reachable: ${token}`);
       };
       const assertSelection = (value, index) => {
-        const firstBody = screen === "management"
-          ? rows < 30 ? `REPOSITORY ${catalogs[index].repository}` : "REPOSITORY"
-          : screen === "inventory" && rows < 40 ? "STATUS" : "CATALOG";
-        assertSeparatedPanelHeader(value, title(index), firstBody);
         assertListAndShortcuts(value);
-        const selectedRow = value.split(/\r?\n/).find((line) =>
-          line.includes("›") && line.includes(screen === "management" ? catalogs[index].name : resources[index].id));
-        assert.ok(selectedRow, "the selected list row remains in the visible page");
+        if (screen === "management") {
+          assert.ok(value.includes(`catalog-${String(index).padStart(2, "0")}`));
+        } else {
+          const selectedRow = value.split(/\r?\n/).find((line) =>
+            line.includes("›") && line.includes(`resource-${String(index).padStart(2, "0")}`));
+          assert.ok(selectedRow, "the selected list row remains in the visible page");
+        }
         if (screen === "management") {
           assert.match(value, new RegExp(`org/repo-${index}(?:\\s|│)`));
           assert.match(value, /FRESHNESS/);
-          assert.match(value, /Updates catalog metadata only/);
+          assert.equal(value.includes("Refresh updates metadata only; installed content stays unchanged."), rows >= 30);
+          if (rows < 30) assert.match(value, /FRESHNESS UNKNOWN/);
         } else if (screen === "catalog" || rows >= 40) {
-          const plain = value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-          assert.ok(plain.includes("Selected description") && plain.includes(`${index}.`),
-            "the compact selected description remains visible when wrapped across rows");
-          assert.match(value, /org\/repo/);
-        } else {
-          assert.match(value, /Healthy · no recorded issues/);
+          const detailLines = assertSeparatedPanelHeader(value, "SELECTION DETAILS",
+            `skill · resource-${String(index).padStart(2, "0")}`);
+          const compactDetailText = detailLines.join("").replace(/\s/g, "");
+          assert.ok(compactDetailText.includes(`DESCRIPTIONSelecteddescription${index}.`),
+            "the selected description remains complete in the details viewport");
+          assert.ok(compactDetailText.includes("org/repo"), "the complete source repository remains in the details panel");
+        } else if (rows < 40) {
+          assert.ok(value.includes("Healthy · no recorded issues") || value.includes("PgUp/PgDn"),
+            "short detail panes keep status visible or expose paging");
         }
       };
       try {
@@ -3817,8 +3878,8 @@ for (const [screen, dimensions] of [
           : await press(screen === "catalog" ? "a" : "m", title(0));
         assertSelection(initial, 0);
         assertSelection(await press("\u001b[A", title(59)), 59);
-        const hidden = await press("d", "SHORTCUTS");
-        assert.doesNotMatch(hidden, /SKILL - resource-|CATALOG - catalog-/);
+        const hidden = await press("d", "↑↓ navigate");
+        assert.doesNotMatch(hidden, /SELECTION DETAILS|Refresh updates metadata only; installed content stays unchanged\./);
         assertListAndShortcuts(hidden, false);
         assertSelection(await press("d", title(59)), 59);
         assertSelection(await press("\u001b[B", title(0)), 0);
@@ -3833,11 +3894,11 @@ for (const [screen, dimensions] of [
           assert.ok(lastMatch.split(/\r?\n/).some((line) => line.includes("›") && line.includes("resource-59")),
             "filtered navigation keeps the last matching row selected and visible");
           if (screen === "catalog") {
-            assertListAndShortcuts(await press("l", "License MIT"), true, "resource-5", "ALL", "ALL", "MIT");
+            assertListAndShortcuts(await press("l", "License [MIT]"), true, "resource-5");
           }
           if (screen === "inventory") {
-            assertListAndShortcuts(await press("c", "Catalog SAMPLE"), true, "resource-5", "SAMPLE");
-            assertListAndShortcuts(await press("k", "Kind SKILL"), true, "resource-5", "SAMPLE", "SKILL");
+            assertListAndShortcuts(await press("c", "Catalog [sample]"), true, "resource-5");
+            assertListAndShortcuts(await press("k", "Kind [skill]"), true, "resource-5");
           }
         }
         input.write("q");
@@ -4321,7 +4382,7 @@ test("real GH update progress and sanitized output reach the TUI through its wor
     waitForOutput(output, visibleFrame, predicate, `dashboard ${message}`, 10_000);
   let finished = false;
   try {
-    await waitForFrame((frame) => frame.includes("SHORTCUTS"), "Inventory");
+    await waitForFrame((frame) => frame.includes("↑↓ navigate"), "Inventory");
     input.write("a");
     await waitForFrame((frame) => frame.includes("CATALOG RESOURCES"), "Catalog");
     input.write("v");

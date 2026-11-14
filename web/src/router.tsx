@@ -34,7 +34,7 @@ const demoRoute = createRoute({
   component: lazyRouteComponent(() => import('./components/demo/TuiDemo'), 'TuiDemo'),
   head: () => ({ meta: [
     { title: 'Kitia · Terminal Dashboard Demo' },
-    { name: 'description', content: "Try Kitia's actual terminal dashboard in your browser, with the same screens and keyboard controls and safe sample data." },
+    { name: 'description', content: "Try Kitia's actual terminal dashboard in your browser, with the same screens, mouse and keyboard controls, and safe sample data." },
     { name: 'theme-color', content: '#080e18' },
   ] }),
 });

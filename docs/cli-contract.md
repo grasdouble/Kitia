@@ -16,23 +16,14 @@ Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
 On interactive dashboard launch, Kitia checks npm for a newer stable release.
-Every dashboard screen uses a five-line header with a stationary ASCII cat on
-the left. On wider terminals, a three-line pixel-block KITIA wordmark appears on
-the right, followed by the version/screen name and screen-specific metadata.
-The mascot and pixel wordmark share a smoothly cycling cyan/violet/pink gradient
-and a single 60 ms animation clock. The mascot remains animated in compact-title
-mode; the clock stops when the header unmounts.
-Narrow terminals use a compact text title instead, retaining the same header height.
-After a random 10–20 seconds of rest,
-it chooses with equal probability to lick a raised paw, scratch its ear, or wink.
-Licking and scratching alternate two poses every 300 ms for 2–4 seconds;
-a wink lasts 180 ms. Each animation finishes before the next rest period starts.
-The mascot stays in the same position throughout; there is no walking animation.
-While the request is pending, the
-version line is `Kitia - Checking version update`; afterward it shows
-`Kitia - <version>` or `Kitia - <version> - New version available`. Check
-failures are silent. Other commands and non-interactive launches skip the
-check.
+Every dashboard screen uses a compact three-row header: a three-line cat at left
+and `KITIA`, the version/screen name, and screen-specific metadata at right.
+The cat and title use semantic theme colors, not an animated gradient. After a
+randomized 10–20-second rest, the cat randomly shows a lick or scratch for 2–4
+seconds or a wink for 180 ms; it stays in place. While the version check is
+pending, the version slot reads `Checking version update`; afterward it shows
+the installed version or `<installed> - New version available`. Check failures
+are silent. Other commands and non-interactive launches skip the check.
 
 | Command family | Contract |
 |---|---|
@@ -109,6 +100,11 @@ Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
 Operations that can block run in a worker thread so rendering and animation
 continue during the work.
+When Inventory or Browse selection details are clipped, PageUp/PageDown moves the
+detail viewport without changing the selected resource. Paging is available
+while list or contextual-action focus is active; Search, filter menus, and modals
+retain their own keyboard input. The footer and panel hint show the paging
+shortcut only while the details pager can receive it.
 Preview uses a dedicated screen below the dashboard header and opens directly
 on source-file content, not an initial tree page. With enough terminal width
 and height, source files occupy the main pane on the left; the right sidebar
@@ -165,43 +161,45 @@ blockquote or list containers. Shell aliases use the Bash grammar, and SQL uses
 a generic SQL grammar rather than dialect-specific parsing. These lexical source
 colors are not a rendered CommonMark or MDX view.
 This presentation does not change CLI output, JSON output or command syntax.
-Inventory, catalog browser, and catalog management distribute available list
-width across their columns. Catalog tables limit padding for short status and
-count fields, leaving more room for source names, IDs, and repository URLs.
-The dashboard colors each inventory and catalog row by resource kind: yellow for
-skills, cyan for agents, and green for instructions. Statuses remain labeled in
-text. Selecting a row overrides its kind color with blue highlighting and
-marks it with `›` in the fixed-width leading marker column on inventory, catalog
-browser, and catalog management screens. Unknown kinds retain the
-existing status-based inventory color or proprietary-license catalog
-highlighting, when applicable. CLI tables retain their existing presentation.
-On wide terminals, an open details panel shares the viewport; hiding it lets
-the table expand. Selected-content details in inventory, the catalog browser,
-and catalog management separate their existing title from the body with one
-theme-colored divider row. The title text and colors, selected-row highlighting,
-metadata, and keyboard actions remain unchanged; filename and page labels remain
-Preview-only. This applies to skills, agents, and instructions alike, including
-stacked details on narrow terminals. The Inventory, Catalog Resources, Connected
-Catalogs, and Resource Revisions table panels group their existing title first
-and their existing metadata next, above one theme-colored divider. Inventory
-and Catalog Resources show `RESOURCES n/total · range`, then the shared
-`Filter query · Catalog value · Kind value · License value` line, wrapping
-this full summary above the same divider as needed. Connected Catalogs has no
-separate metadata lines: its count remains in the title. Resource Revisions
-keeps its resource/action context and, when paginated, its existing Showing
-range above the divider; no column labels are added to revisions. Existing
-table column headings and data rows remain below the divider. Moving these
-metadata lines reserves header rows
-and can reduce the responsive list row budget; selected-row visibility and
-pagination reflect the available body rows. Framed `SHORTCUTS` panels, including
-modal shortcut frames, place each nonempty category—Actions, Filters, Display,
-and Navigation—in order on its own purple heading line, followed by its
-shortcuts. Search mode shows only applicable categories. The panels retain their
-metadata-free title/divider/body structure and complete keyboard hints,
-including conditional controls. Shortcut keys, selection colors, navigation,
-filters, and the `D` details toggle are unchanged. Summary cards, warnings,
-non-table modal main title bars, and the five-line global dashboard header are
-unchanged.
+The compact header is followed by section tabs, summary cards, and a responsive
+controls row. The terminal-rendered tabs are `Inventory`, `Browse resources`,
+and `Catalogs`, with live counts of installed resources, available candidates,
+and connected catalogs respectively; the counts are unfiltered. The selected
+tab has a thin underline. Project and User cards report resource totals with
+managed and unmanaged counts; Updates reports its count plus current and warning
+totals.
+Inventory and Browse combine a bordered Search field with outlined Kind,
+Catalog, and License selectors, in that visual order. Rounded outlined action
+buttons use semantic primary, danger, and neutral emphasis. Keyboard navigation
+follows the visible control order. Below 40 terminal rows, these controls use
+compact single-row fields with side borders and no top or bottom borders; at
+shorter heights, dashboard summaries also switch to a compact presentation.
+These are terminal-rendering conventions, not pixel-identical browser controls.
+
+Inventory and Browse use joined list/details workspaces. Inventory columns are
+`RESOURCE`, `KIND`, `SCOPE`, and `STATUS`; Browse columns are `RESOURCE`, `KIND`,
+`CATALOG`, and `INSTALLED`. On wide terminals, the list and selection details
+share a divider; on narrow terminals, they stack. Inventory details include the
+catalog label, license, status, full revision, paths, source location, and
+resource metadata. Browse details include description, catalog, license,
+installed scopes, and pinned source. Long values wrap instead of being silently
+truncated; PageUp/PageDown paginate clipped details without changing selection.
+
+Catalogs is a selectable card list, not a table. Cards show repository, resource
+and installed counts, and freshness. The selected card contains its details and
+Edit, Refresh, and Remove actions; Add and Presets remain above the card list.
+
+Rows use semantic theme colors: skills are yellow, agents cyan, and instructions
+green. Selected rows use the blue selection surface and `›` marker in Inventory
+and Browse; the selected Catalogs card uses the same blue surface with a white
+foreground. Unknown kinds use the status-based Inventory fallback or the
+proprietary-license Browse warning color. CLI text tables retain their existing
+format.
+
+The normal dashboard uses a compact, wrapping horizontal shortcut footer rather
+than a separate sidebar. Its hints follow control focus, so active search and
+filter controls, open menus, and modals retain their own keyboard input. Preview
+and modal surfaces keep their context-specific framed `SHORTCUTS` panels.
 Preview uses the same framed `SHORTCUTS` panel: `Display` lists source, audit,
 and tree controls; `Navigation` lists pane focus, pagination, and close
 controls. The panel reserves its full height before pane pagination is sized.
@@ -259,11 +257,11 @@ not change CLI command syntax, options, output contracts, or audit semantics.
 Selected-resource details expose license status and, when source provenance is
 available, the pinned repository/path/commit. Missing license metadata is shown
 as undeclared; incomplete pin metadata may show as unknown.
-The inventory's Catalog column shows the configured source-catalog name for a
-tracked artifact with source-repository metadata. For a custom user catalog, it
-adds the folder selected by the saved path mapping, such as
-`MattPucock[engineering]`. Untracked artifacts and managed records without a
-source association display `-`.
+Inventory selection details show a `CATALOG` label for tracked artifacts with
+source-repository metadata. Custom user catalogs include the folder selected by
+the saved path mapping, such as `MattPucock[engineering]`. Browse keeps catalog
+identity in both its `CATALOG` column and selection details. Untracked artifacts
+and managed records without a source association display `-`.
 
 From inventory, uppercase `A`/`U` install or update resources, and `Delete`
 uninstalls the selection. Press `M` for catalog management; there, `A` adds a
