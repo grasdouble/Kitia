@@ -2,7 +2,7 @@
 
 import React, { type ReactNode } from "react";
 import { Text } from "ink";
-import { DASHBOARD_THEME } from "../colors.js";
+import { DASHBOARD_THEME } from "../../colors.js";
 
 const h = React.createElement;
 

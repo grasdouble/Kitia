@@ -8,7 +8,7 @@ import { clipped } from "./control-rendering.mjs";
 import { SectionTabs } from "./section-tabs.mjs";
 import { TextInput } from "./text-input.mjs";
 import { SelectInput } from "./select-input.mjs";
-import { ControlActionRow } from "./action-rows.mjs";
+import { ActionButtonRow } from "./action-button-row.mjs";
 import { FilterMenu } from "./filter-menu.mjs";
 
 const h = React.createElement;
@@ -114,7 +114,7 @@ export function ControlLayout({ controls, layout, onRegion }: {
           onRegion(item, x, line.row, line.row + 2);
           x += item.width;
         }
-        children.push(ControlActionRow({ line, controls, width: layout.width, toolbar: true }));
+        children.push(ActionButtonRow({ line, controls, width: layout.width, toolbar: true }));
       }
     }
   }

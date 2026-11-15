@@ -13,12 +13,12 @@ import { categorizedShortcutLines, shortcutFooterLines } from "../components/sho
 import { DashboardHeader } from "../components/dashboard-header.mjs";
 import { JoinedWorkspace } from "../components/joined-workspace.mjs";
 import { ResourceBrowserChrome, resourceBrowserPlan } from "../components/resource-browser.mjs";
-import { resourceTableRows, resourceTableWindow } from "../components/resource-table.mjs";
+import { resourceTableRows, resourceTableWindow } from "../components/table/resource-table.mjs";
 import { SelectionDetails, useDashboardDetailPaging } from "../components/selection-details.mjs";
 import { ShortcutFooter } from "../components/shortcuts/shortcut-footer.mjs";
 import { Controls } from "../controls.mjs";
 import type { ControlsProps } from "../components/controls/control-layout-plan.mjs";
-import { ActionButtons } from "../components/controls/action-rows.mjs";
+import { ActionButtons } from "../components/controls/action-button-layout.mjs";
 const h = React.createElement;
 export function CatalogScreen({
   candidates,

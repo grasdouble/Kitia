@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
 test("resource table windows keep the selected row visible and retain absolute indices", async () => {
-  const { resourceTableWindow, resourceTableRows } = await import("../../../../dist/dashboard/components/resource-table.mjs");
+  const { resourceTableWindow, resourceTableRows } = await import("../../../../../dist/dashboard/components/table/resource-table.mjs");
   const items = ["zero", "one", "two", "three", "four"];
   const window = resourceTableWindow(items, 3, 2);
   assert.deepEqual(window, { first: 2, items: ["two", "three"] });
@@ -32,8 +32,8 @@ test("resource table windows keep the selected row visible and retain absolute i
 
 test("resource table rows centralize selection styling and empty state", async () => {
   const { ResourceTableRow, resourceTableRows, resourceTableWindow } =
-    await import("../../../../dist/dashboard/components/resource-table.mjs");
-  const { DASHBOARD_THEME } = await import("../../../../dist/dashboard/colors.js");
+    await import("../../../../../dist/dashboard/components/table/resource-table.mjs");
+  const { DASHBOARD_THEME } = await import("../../../../../dist/dashboard/colors.js");
   const items = ["one", "two", "three", "four"];
   const window = resourceTableWindow(items, 2, 2);
   assert.equal(window.first, 1);

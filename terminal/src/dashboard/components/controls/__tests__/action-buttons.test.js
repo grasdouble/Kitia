@@ -5,8 +5,9 @@ const React = require("react");
 const { test } = require("node:test");
 const { renderTerminal } = require("../../__tests__/render-terminal.js");
 
-test("control action rows and contextual buttons share layout and register hit regions", async () => {
-  const { ControlActionRow, ActionButtons } = await import("../../../../../dist/dashboard/components/controls/action-rows.mjs");
+test("action button rows and contextual buttons share layout and register hit regions", async () => {
+  const { ActionButtonRow } = await import("../../../../../dist/dashboard/components/controls/action-button-row.mjs");
+  const { ActionButtons } = await import("../../../../../dist/dashboard/components/controls/action-button-layout.mjs");
   const controls = {
     columns: 64,
     section: "inventory",
@@ -21,7 +22,7 @@ test("control action rows and contextual buttons share layout and register hit r
   const { dashboardActionButtonLines } = await import("../../../../../dist/dashboard/components/controls/control-layout-plan.mjs");
   const lines = dashboardActionButtonLines(controls, 40);
   assert.equal(lines.length, 1);
-  const rowFrame = await renderTerminal(ControlActionRow({
+  const rowFrame = await renderTerminal(ActionButtonRow({
     line: lines[0], controls, width: 40, selectedSurface: true,
   }), { columns: 44, rows: 5 });
   assert.ok(rowFrame.includes("Remove"));

@@ -16,7 +16,7 @@ import { Controls } from "../controls.mjs";
 import {
   dashboardActionButtonRows, dashboardControlsLayout, type ControlsProps,
 } from "../components/controls/control-layout-plan.mjs";
-import { ActionButtons } from "../components/controls/action-rows.mjs";
+import { ActionButtons } from "../components/controls/action-button-layout.mjs";
 
 
 const h = React.createElement;
