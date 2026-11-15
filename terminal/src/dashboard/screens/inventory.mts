@@ -64,7 +64,7 @@ export function InventoryScreen({
   const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels, licenseFilter);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const controlsState = { ...controls, modalActive };
+  const controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
   const tabsProps = { ...controlsState, part: "tabs" as const, showSearch: false };
   const tabsLayout = dashboardControlsLayout(tabsProps);
   const ultraCompactSummary = rows < 40;
@@ -93,11 +93,9 @@ export function InventoryScreen({
             ? Boolean(selected.paths?.length)
             : Boolean(selected.source_repository && selected.source_path)
         ) ? ["P preview"] : []),
-        ...(canExecute && selected && selected.managed !== false &&
-            selected.source_repository && selected.source_path ? ["V revision"] : []),
-        ...(canExecute && selected
-          ? [selected.managed === false ? "Delete remove" : "U update · Delete uninstall"]
-          : []),
+        ...(canExecute && selected && selected.managed !== false && dashboardStatus(selected) === "update"
+          ? ["U update"] : []),
+        ...(canExecute && selected ? [selected.managed === false ? "Delete remove" : "Delete uninstall"] : []),
       ],
       Filters: ["F filter", ...(resources.length ? ["C catalog", "K kind", "L license"] : [])],
       Display: ["D details"],
@@ -185,69 +183,92 @@ export function InventoryScreen({
   if (!tableRows.length) tableRows.push(h(Text, { key: "inventory-empty", dimColor: true }, "No matching resources."));
 
   const detailFieldLines = (key: string, label: string, value: unknown, maxLines = 1,
-    color: string = DASHBOARD_THEME.semantic.accents.muted) => {
-    const labelText = `${label} `;
-    const valueWidth = Math.max(1, detailsContentWidth - labelText.length);
-    return wrapText(value, valueWidth, maxLines).map((line, index) => h(Text, {
-      key: `${key}-${index}`,
-    },
+    color: string = DASHBOARD_THEME.semantic.accents.muted) => [
     h(Text, {
+      key: `${key}-label`,
       color: DASHBOARD_THEME.semantic.accents.label,
       bold: true,
-    }, index ? " ".repeat(labelText.length) : labelText),
-    h(Text, { color }, fitText(line, valueWidth))));
-  };
+    }, fitText(label, detailsContentWidth)),
+    ...wrapText(value, detailsContentWidth, maxLines).map((line, index) => h(Text, {
+      key: `${key}-${index}`,
+      color,
+    }, fitText(line, detailsContentWidth))),
+  ];
+  const hasDetail = (value: unknown) => typeof value === "string"
+    ? Boolean(value.trim()) && value !== "-"
+    : value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
+  const detailFieldRows = (fields: Array<{ key: string; label: string; value: unknown; color?: string }>) =>
+    fields.filter(({ value }) => hasDetail(value)).flatMap((field, index) => [
+      ...(index ? [h(Text, { key: `${field.key}-gap` }, " ")] : []),
+      ...detailFieldLines(field.key, field.label, field.value, Infinity, field.color),
+    ]);
   const description = selected?.description || "No description available.";
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
-  const statusLabel = selected?.managed === false ? "Unmanaged"
-    : selectedStatus === "update" ? "Update available"
-      : selectedStatus === "attention" ? "Warning" : "Current";
-  const displayVersion = selected?.source_ref || (selected?.version ? selected.version.slice(0, 7) : "-");
-  const installedPath = selected?.paths?.join(" · ") || selected?.source_path || "-";
-  const sourceLocation = selected?.source_repository ? `https://github.com/${selected.source_repository}` : "";
-  const selectedIssues = selected?.managed === false
+  const revision = selected?.source_ref || selected?.version;
+  const installedRevision = hasDetail(revision) ? String(revision).slice(0, 7) : undefined;
+  const catalog = selected ? inventoryLabels.get(selected) || selected.catalog : undefined;
+  const license = selected?.license_spdx || selected?.license_status;
+  const installedPath = selected?.paths?.join(" · ");
+  const sourceLocation = selected?.source_repository
+    ? `https://github.com/${selected.source_repository}` : "";
+  const selectedIssues = selected?.issues?.length ? selected.issues.map(issueLine).join(" · ") : undefined;
+  const unmanagedNote = selected?.managed === false
     ? "Not managed by Kitia; removal requires two confirmations."
-    : selected?.issues?.length
-      ? selected.issues.map(issueLine).join(" · ")
-      : "Healthy · no recorded issues";
+    : undefined;
+  const coreDetails = detailFieldRows(selected ? [
+    { key: "inventory-catalog", label: "CATALOG", value: catalog },
+    { key: "inventory-license", label: "LICENSE", value: license },
+    { key: "inventory-revision", label: "INSTALLED REVISION", value: installedRevision },
+    { key: "inventory-path", label: "INSTALLED PATH", value: installedPath },
+  ] : []);
+  const optionalDetailParts: React.ReactNode[][] = [];
+  const addOptionalField = (key: string, label: string, value: unknown, color?: string) => {
+    if (hasDetail(value)) optionalDetailParts.push(detailFieldLines(key, label, value, Infinity, color));
+  };
+  if (selected) {
+    addOptionalField("inventory-issues", "ISSUES", selectedIssues);
+    addOptionalField("inventory-note", "NOTE", unmanagedNote);
+    if (sourceLocation) optionalDetailParts.push([
+      h(Text, {
+        key: "inventory-source-label",
+        color: DASHBOARD_THEME.semantic.accents.label,
+        bold: true,
+      }, fitText("SOURCE", detailsContentWidth)),
+      ...detailLocations("inventory-source", [{ text: sourceLocation, href: sourceLocation }], detailsContentWidth),
+    ]);
+    addOptionalField("inventory-source-path", "SOURCE PATH", selected.source_path);
+    addOptionalField("inventory-category", "CATEGORY", selected.category);
+    addOptionalField("inventory-tags", "TAGS", selected.tags?.join(" · "));
+    addOptionalField("inventory-use-when", "USE WHEN", selected.use_when);
+    addOptionalField("inventory-example", "EXAMPLE", selected.example);
+    addOptionalField("inventory-prerequisites", "PREREQUISITES", selected.prerequisites?.join(" · "));
+    addOptionalField("inventory-owner", "OWNER", selected.owner);
+    addOptionalField("inventory-expected-output", "EXPECTED OUTPUT", selected.expected_output);
+    addOptionalField("inventory-limitations", "LIMITATIONS", selected.limitations?.join(" · "));
+    addOptionalField("inventory-deprecation", "DEPRECATION", selected.deprecation_reason);
+    addOptionalField("inventory-replacement", "REPLACEMENT", selected.replacement);
+    addOptionalField("inventory-apply-to", "APPLIES TO", (selected.apply_to || selected.applyTo)?.join(" · "));
+    addOptionalField("inventory-action", "MESSAGE", actionMessage);
+  }
+  const optionalDetails = optionalDetailParts.flatMap((part, index) => [
+    ...(index ? [h(Text, { key: `inventory-optional-gap-${index}` }, " ")] : []),
+    ...part,
+  ]);
   const detailRows = selected
     ? [
-      h(Text, { key: "inventory-resource-title", bold: true }, `${selected.kind} · ${selected.id}`),
-      ...detailFieldLines("inventory-description", "DESCRIPTION", description, Infinity),
-      ...detailFieldLines("inventory-catalog", "CATALOG", inventoryLabels.get(selected) || selected.catalog || "-", Infinity),
-      ...detailFieldLines("inventory-license", "LICENSE", selected.license_status || selected.license_spdx || "-", Infinity),
-      ...detailFieldLines("inventory-status", "STATUS", statusLabel, Infinity, colorForStatus(selectedStatus)),
-      ...(selectedIssues ? detailFieldLines("inventory-issues", "ISSUES", selectedIssues, Infinity) : []),
-      ...detailFieldLines("inventory-revision", "REVISION", displayVersion, Infinity),
-      ...detailFieldLines("inventory-path", "PATH", installedPath, Infinity),
-      ...(sourceLocation ? [
-        ...detailFieldLines("inventory-source-label", "SOURCE", selected.source_repository || "", Infinity),
-        ...detailLocations("inventory-source", [{ text: sourceLocation, href: sourceLocation }], detailsContentWidth),
-      ] : []),
-      ...(selected.category ? detailFieldLines("inventory-category", "CATEGORY", selected.category, Infinity) : []),
-      ...(selected.tags?.length ? detailFieldLines("inventory-tags", "TAGS", selected.tags.join(" · "), Infinity) : []),
-      ...(selected.use_when ? detailFieldLines("inventory-use-when", "USE WHEN", selected.use_when, Infinity) : []),
-      ...(selected.example ? detailFieldLines("inventory-example", "EXAMPLE", selected.example, Infinity) : []),
-      ...(selected.prerequisites?.length
-        ? detailFieldLines("inventory-prerequisites", "PREREQUISITES", selected.prerequisites.join(" · "), Infinity)
-        : []),
-      ...(selected.owner ? detailFieldLines("inventory-owner", "OWNER", selected.owner, Infinity) : []),
-      ...(selected.expected_output
-        ? detailFieldLines("inventory-expected-output", "EXPECTED OUTPUT", selected.expected_output, Infinity)
-        : []),
-      ...(selected.limitations?.length
-        ? detailFieldLines("inventory-limitations", "LIMITATIONS", selected.limitations.join(" · "), Infinity)
-        : []),
-      ...(selected.deprecation_reason
-        ? detailFieldLines("inventory-deprecation", "DEPRECATION", selected.deprecation_reason, Infinity)
-        : []),
-      ...(selected.replacement
-        ? detailFieldLines("inventory-replacement", "REPLACEMENT", selected.replacement, Infinity)
-        : []),
-      ...((selected.apply_to || selected.applyTo)?.length
-        ? detailFieldLines("inventory-apply-to", "APPLIES TO", (selected.apply_to || selected.applyTo)!.join(" · "), Infinity)
-        : []),
-      ...(actionMessage ? detailFieldLines("inventory-action", "MESSAGE", actionMessage, Infinity) : []),
+      h(Text, {
+        key: "inventory-resource-kind",
+        color: resolveRowColor(selected.kind, false, colorForStatus(selectedStatus)),
+      }, fitText(selected.kind, detailsContentWidth)),
+      h(Text, { key: "inventory-kind-gap" }, " "),
+      h(Text, { key: "inventory-resource-title", bold: true }, fitText(selected.id, detailsContentWidth)),
+      h(Text, { key: "inventory-title-gap" }, " "),
+      ...wrapText(description, detailsContentWidth, Infinity).map((line, index) => h(Text, {
+        key: `inventory-description-${index}`,
+        color: DASHBOARD_THEME.semantic.accents.muted,
+      }, fitText(line, detailsContentWidth))),
+      ...(coreDetails.length ? [h(Text, { key: "inventory-description-gap" }, " "), ...coreDetails] : []),
+      ...(optionalDetails.length ? [h(Text, { key: "inventory-core-gap" }, " "), ...optionalDetails] : []),
     ]
     : [h(Text, {
       key: "inventory-empty-detail",

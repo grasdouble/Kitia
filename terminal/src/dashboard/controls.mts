@@ -45,6 +45,10 @@ export interface DashboardControlsProps {
   menuIndex?: number;
   menuOverlayOnly?: boolean;
   modalActive?: boolean;
+  /** Keep action pairs together when they fit, without mixing adjacent groups on narrow panels. */
+  actionPairs?: boolean;
+  /** Omit the heading row when contextual buttons directly follow selection details. */
+  hideActionHeading?: boolean;
   actions?: DashboardControlButton[];
   actionsInToolbar?: boolean;
   actionIndex?: number;
@@ -623,12 +627,29 @@ function actionButtonLines(props: DashboardControlsProps, width: number) {
     width: Math.min(safeWidth, Math.max(1, action.label.length + 4)),
     target: { type: "action", action: action.id },
   }));
-  return splitControlLines(items, safeWidth, 0, "actions", 3);
+  if (!props.actionPairs) return splitControlLines(items, safeWidth, 0, "actions", 3);
+  const lines: ControlLine[] = [];
+  for (let index = 0; index < items.length;) {
+    const pair = items.slice(index, index + 2);
+    if (pair.length === 2 && pair[0].width + 1 + pair[1].width <= safeWidth) {
+      lines.push({ row: lines.length * 3, kind: "actions", items: pair });
+    } else {
+      for (const item of pair) {
+        lines.push({
+          row: lines.length * 3,
+          kind: "actions",
+          items: [{ ...item, width: Math.min(item.width, safeWidth) }],
+        });
+      }
+    }
+    index += pair.length;
+  }
+  return lines;
 }
 
 export function dashboardActionButtonRows(props: DashboardControlsProps, width: number) {
   const rows = actionButtonLines(props, width).length;
-  return rows ? 1 + rows * 3 : 0;
+  return rows ? Number(!props.hideActionHeading) + rows * 3 : 0;
 }
 
 export function DashboardActionButtons({ controls, width }: {
@@ -671,7 +692,7 @@ function DashboardActionButtonsLayout({ controls, width }: {
     return () => controls.mouse?.replace("actions", []);
   });
   const output: React.ReactNode[] = [];
-  if (lines.length) output.push(h(Text, {
+  if (lines.length && !controls.hideActionHeading) output.push(h(Text, {
     key: "action-heading",
     color: controls.selectedSurface
       ? DASHBOARD_THEME.semantic.selectedForeground : DASHBOARD_THEME.semantic.accents.shortcutCategory,

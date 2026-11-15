@@ -1052,13 +1052,226 @@ test("tabs, bordered filters, and menus stay clickable across responsive widths"
     }
   }
 });
+test("Inventory details order installed metadata and pair only contextual actions", async () => {
+  const revision = "a3d7f09b6c1d2e3f4a5b6c7d8e9f0123456789";
+  const resource = {
+    catalog: "toolkit", kind: "skill", id: "code-review", scope: "project", managed: true,
+    status: "attention", issues: [{ code: "UPDATE_AVAILABLE" }],
+    description: "Review changes for correctness, security, and maintainability.",
+    license_status: "declared", license_spdx: "MIT", source_ref: revision,
+    source_repository: "org/toolkit", source_path: "skills/code-review",
+    paths: ["./.agents/skills/code-review/SKILL.md"],
+  };
+  const candidate = { catalog: "toolkit", kind: "skill", id: "candidate" };
+  const dashboard = await startInteractiveDashboard([resource], {
+    catalogResources: [candidate],
+    execute: async () => ({ code: 0, resources: [] }),
+    listSourceVersions: async () => [],
+  }, { columns: 160, rows: 64 });
+  try {
+    const frame = dashboard.frame();
+    const details = detailBodyText(frame);
+    assert.ok(details.startsWith("skillcode-review"), "the colored kind eyebrow precedes the prominent ID");
+    assert.ok(details.includes("Reviewchangesforcorrectness,security,andmaintainability."));
+    assert.ok(!details.includes("DESCRIPTION"), "the description has no redundant field label");
+    assert.equal(details.includes("STATUS"), false, "status stays in the Inventory table without duplication in details");
+    assert.equal(selectedDetailsFrame(frame).includes("ACTIONS"), false,
+      "contextual buttons directly follow details without a redundant heading");
+    assert.ok(frame.includes("A install"), "the direct Inventory install shortcut remains available");
+    assert.equal(frame.includes("Install resource"), false,
+      "Inventory selection details do not add a global install action button");
+
+    const actionRegions = dashboard.mouse.getRegions()
+      .filter(({ target }) => target.type === "action")
+      .sort((left, right) => left.top - right.top || left.left - right.left);
+    assert.deepEqual(actionRegions.map(({ target }) => target.action), ["update", "remove", "preview", "revision"],
+      "the contextual grid retains eligible actions in keyboard order");
+    assert.equal(actionRegions[0].top, actionRegions[1].top, "Update and Uninstall share the first action row");
+    assert.equal(actionRegions[2].top, actionRegions[3].top, "Preview and Revisions share the second action row");
+    assert.ok(actionRegions[2].top > actionRegions[0].top);
+    const metadata = ["CATALOGtoolkit", "LICENSEMIT", "INSTALLEDREVISIONa3d7f09", "INSTALLEDPATH./.agents/skills/code-review/SKILL.md"];
+    const positions = metadata.map((value) => details.indexOf(value));
+    assert.ok(positions.every((position) => position >= 0), "all four installed metadata fields are visible");
+    assert.deepEqual(positions, [...positions].sort((left, right) => left - right),
+      "catalog, license, installed revision, and installed path appear in reference order");
+    assert.equal(details.includes(revision), false, "the installed revision is displayed as its seven-character prefix");
+    assert.ok(details.indexOf("INSTALLEDPATH") < details.indexOf("ISSUES"),
+      "real issue details follow the core installed metadata");
+    assert.ok(details.includes("Updateavailable"));
+    assert.equal(details.includes("STATUS"), false, "status is not duplicated in Inventory details");
+
+
+    dashboard.input.write("a");
+    const browse = await dashboard.wait((next) => next.includes("CATALOG RESOURCES"),
+      "the direct Inventory install shortcut opens Browse");
+    assert.ok(browse.includes("Install resource"), "Browse retains its selected-candidate install action");
+  } finally {
+    await dashboard.stop();
+  }
+});
+test("Browse details mirror Inventory hierarchy and retain catalog-specific metadata and actions", async () => {
+  const candidate = {
+    catalog: "toolkit", kind: "skill", id: "candidate-review",
+    description: "Review catalog selections.", license_status: "MIT",
+    source_repository: "org/toolkit", source_path: "skills/review",
+    source_ref: "0123456789abcdef0123456789abcdef01234567",
+  };
+  const actions = {
+    catalogResources: [candidate],
+    execute: async () => ({ code: 0, resources: [] }),
+    listSourceVersions: async () => [],
+  };
+  const openBrowse = async (resources, catalogActions, name) => {
+    const dashboard = await startInteractiveDashboard(resources, catalogActions, { columns: 200, rows: 64 });
+    dashboard.input.write("2");
+    const frame = await dashboard.wait((next) => next.includes("CATALOG RESOURCES") && next.includes("SELECTION DETAILS"),
+      `${name} Browse details`);
+    return { dashboard, frame };
+  };
+
+  const installedBoth = ["project", "user"].map((scope) => ({
+    catalog: candidate.catalog, kind: candidate.kind, id: candidate.id, scope, managed: true,
+  }));
+  const allActions = await openBrowse(installedBoth, actions, "installed candidate");
+  try {
+    const details = detailBodyText(allActions.frame);
+    assert.ok(details.startsWith("skillcandidate-reviewReviewcatalogselections."),
+      "Browse uses the colored-kind eyebrow, prominent ID, and unlabeled description hierarchy");
+    assert.ok(!details.includes("DESCRIPTION"), "Browse does not add a redundant description label");
+    const metadata = [
+      "CATALOGtoolkit", "LICENSEMIT", "INSTALLEDINboth",
+      "PINNEDSOURCEorg/toolkit/skills/review@0123456789abcdef0123456789abcdef01234567",
+    ];
+    const positions = metadata.map((value) => details.indexOf(value));
+    assert.ok(positions.every((position) => position >= 0), "all Browse-specific metadata values are visible");
+    assert.deepEqual(positions, [...positions].sort((left, right) => left - right),
+      "catalog, license, installed scopes, and pinned source appear in order");
+    const detailsRows = selectedDetailsFrame(allActions.frame).split(/\r?\n/);
+    for (const [label, value] of [["CATALOG", "toolkit"], ["LICENSE", "MIT"], ["INSTALLED IN", "both"]]) {
+      const labelRow = detailsRows.findIndex((row) => row.includes(label));
+      assert.ok(labelRow >= 0, `${label} has its own metadata label row`);
+      assert.ok(detailsRows[labelRow + 1]?.includes(value), `${label} value is stacked beneath its label`);
+    }
+    assert.equal(selectedDetailsFrame(allActions.frame).includes("ACTIONS"), false,
+      "contextual Browse actions omit the redundant heading");
+    const pairedActionRegions = allActions.dashboard.mouse.getRegions()
+      .filter(({ target }) => target.type === "action")
+      .sort((left, right) => left.top - right.top || left.left - right.left);
+    assert.deepEqual(pairedActionRegions.map(({ target }) => target.action), ["install", "preview", "revision", "update"],
+      "Browse keeps its candidate-specific action order");
+    assert.equal(pairedActionRegions[0].top, pairedActionRegions[1].top,
+      "Install and Preview / audit share a row when space permits");
+    assert.equal(pairedActionRegions[2].top, pairedActionRegions[3].top,
+      "Revisions and Update share a row when space permits");
+  } finally {
+    await allActions.dashboard.stop();
+  }
+
+  const notInstalled = await openBrowse([], actions, "not-installed candidate");
+  try {
+    const actionIds = notInstalled.dashboard.mouse.getRegions()
+      .filter(({ target }) => target.type === "action")
+      .sort((left, right) => left.top - right.top || left.left - right.left)
+      .map(({ target }) => target.action);
+    assert.deepEqual(actionIds, ["install", "preview", "revision"],
+      "Update appears only when the candidate is installed in a scope");
+    assert.ok(detailBodyText(notInstalled.frame).includes("INSTALLEDINnone"));
+  } finally {
+    await notInstalled.dashboard.stop();
+  }
+
+  const localCandidate = {
+    catalog: "local", kind: "skill", id: "local-candidate", source_repository: "org/local",
+  };
+  const noProvenance = await openBrowse([{
+    catalog: "local", kind: "skill", id: "local-candidate", scope: "project", managed: true,
+  }], { ...actions, catalogResources: [localCandidate] }, "candidate without complete source metadata");
+  try {
+    const details = detailBodyText(noProvenance.frame);
+    assert.ok(details.includes("LICENSEnotdeclared"), "missing license metadata uses the declared fallback");
+    assert.ok(details.includes("PINNEDSOURCEorg/local/unknown@unknown"),
+      "incomplete pinned-source metadata uses explicit unknown placeholders");
+    assert.ok(details.includes("INSTALLEDINproject"), "a single installed scope is named directly");
+    const actionIds = noProvenance.dashboard.mouse.getRegions()
+      .filter(({ target }) => target.type === "action")
+      .sort((left, right) => left.top - right.top || left.left - right.left)
+      .map(({ target }) => target.action);
+    assert.deepEqual(actionIds, ["install", "preview", "update"],
+      "Update remains available for an installed candidate while Revisions requires a source path");
+  } finally {
+    await noProvenance.dashboard.stop();
+  }
+  const noExecute = await openBrowse(installedBoth, {
+    catalogResources: [candidate],
+    listSourceVersions: async () => [],
+  }, "candidate without an execute handler");
+  try {
+    assert.deepEqual(noExecute.dashboard.mouse.getRegions().filter(({ target }) => target.type === "action"), [],
+      "Browse actions are unavailable when execution is unavailable");
+  } finally {
+    await noExecute.dashboard.stop();
+  }
+});
+ 
+test("Inventory update action and shortcut require an available update", async () => {
+  const revision = "abcdef0123456789abcdef0123456789abcdef01";
+  const resource = {
+    catalog: "sample", kind: "skill", id: "current-resource", scope: "project", managed: true,
+    status: "current", source_repository: "org/repo", source_path: "skills/current-resource",
+    source_ref: revision, paths: [".agents/skills/current-resource/SKILL.md"],
+  };
+  const calls = [];
+  const actions = {
+    execute: async (operation, selected) => {
+      calls.push({ operation, id: selected.id });
+      return { code: 0, resources: [] };
+    },
+    listSourceVersions: async () => [],
+  };
+  const currentDashboard = await startInteractiveDashboard([resource], actions);
+  try {
+    let frame = currentDashboard.frame();
+    assert.ok(!frame.includes("Update resource"), "an up-to-date managed resource has no Update button");
+    assert.ok(!frame.includes("U update"), "an up-to-date managed resource has no U update hint");
+    assert.ok(frame.includes("Uninstall"), "Uninstall remains available for an up-to-date resource");
+    currentDashboard.input.write("u");
+    await new Promise((resolve) => setImmediate(resolve));
+    frame = currentDashboard.frame();
+    assert.ok(!frame.includes("CONFIRM UPDATE"), "U does not open update confirmation when no update is available");
+    assert.deepEqual(calls, [], "U does not execute an update for a current resource");
+  } finally {
+    await currentDashboard.stop();
+  }
+
+  const updateDashboard = await startInteractiveDashboard([{
+    ...resource,
+    id: "outdated-resource",
+    status: "attention",
+    issues: [{ code: "UPDATE_AVAILABLE" }],
+  }], actions);
+  try {
+    const frame = updateDashboard.frame();
+    assert.ok(frame.includes("Update resource"), "an update-available resource has an Update button");
+    assert.ok(frame.includes("U update"), "an update-available resource has a U update hint");
+    updateDashboard.input.write("u");
+    await updateDashboard.wait((next) => next.includes("CONFIRM UPDATE"),
+      "U opens the existing update confirmation for an available update");
+    assert.deepEqual(calls, [], "update still requires confirmation before execution");
+    updateDashboard.input.write("\u001b");
+    await updateDashboard.wait((next) => !next.includes("CONFIRM UPDATE"), "update confirmation cancels cleanly");
+  } finally {
+    await updateDashboard.stop();
+  }
+});
+
 test("Inventory detail paging reveals every metadata field at narrow and short sizes without stealing action focus", async () => {
   const resource = {
     catalog: "pager-catalog",
     kind: "skill",
     id: "paged-resource",
     scope: "project",
-    status: "current",
+    status: "attention",
+    issues: [{ code: "UPDATE_AVAILABLE" }],
     source_repository: "example/pager",
     source_path: "skills/paged-resource",
     source_ref: "0123456789abcdef0123456789abcdef01234567",
@@ -1091,7 +1304,7 @@ test("Inventory detail paging reveals every metadata field at narrow and short s
       assert.ok(!frame.includes("Pager replacement"), "later metadata starts outside the first detail page");
 
       let pages = 0;
-      while (!frame.includes("APPLIES TO") && pages < 8) {
+      while (!frame.includes("APPLIES TO") && pages < 24) {
         const previousDetails = selectedDetailsFrame(frame);
         dashboard.input.write("\u001b[6~");
         try {
@@ -1256,7 +1469,7 @@ test("inventory action hitboxes follow Ink layout across descriptions, focus, an
     const calls = [];
     const resource = {
       catalog: "sample", kind: "skill", id: "local-testing", scope: "project", managed: true,
-      status: "current", description, source_repository: "org/repo",
+      status: "attention", issues: [{ code: "UPDATE_AVAILABLE" }], description, source_repository: "org/repo",
       source_path: "skills/local-testing", source_ref: "abcdef0123456789abcdef0123456789abcdef01",
     };
     const dashboard = await startInteractiveDashboard([resource], {
@@ -1287,7 +1500,7 @@ test("inventory action hitboxes follow Ink layout across descriptions, focus, an
       assert.deepEqual(calls, [{ operation: "preview", id: "local-testing" }]);
       if (focusActions) {
         dashboard.input.write("\u001b");
-        await dashboard.wait((frame) => frame.includes("SELECTION DETAILS") && frame.includes("ACTIONS"),
+        await dashboard.wait((frame) => frame.includes("SELECTION DETAILS") && frame.includes("Update resource") && frame.includes("Uninstall"),
           "Preview closes back to contextual actions");
         clickRenderedTarget(dashboard,
           (target) => target.type === "action" && target.action === "update", "Update resource");

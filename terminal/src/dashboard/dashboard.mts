@@ -6,7 +6,7 @@ import { render, useInput, useWindowSize } from "ink";
 import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
 import type { CatalogResource } from "../catalog/entries.js";
 import type { ScanError } from "../catalog/lifecycle.js";
-import { catalogFilterOptions, cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, filterCatalogResources, filterInventory, inventoryCatalogLabels, inventoryFilterOptions,
+import { catalogFilterOptions, cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, dashboardStatus, filterCatalogResources, filterInventory, inventoryCatalogLabels, inventoryFilterOptions,
   mergeRefreshedCatalogResources,
 } from "./helpers.mjs";
 import { type DashboardControlButton, type DashboardControlFilter } from "./controls.mjs";
@@ -290,14 +290,14 @@ export function Dashboard({
   ];
   const controlActions: DashboardControlButton[] = controlSection === "inventory"
     ? [
-      ...(selectedResource && selectedResource.managed !== false && actions.execute ? [{ id: "update", label: "Update resource" }] : []),
+      ...(selectedResource && selectedResource.managed !== false && dashboardStatus(selectedResource) === "update" && actions.execute
+        ? [{ id: "update", label: "Update resource" }] : []),
       ...(selectedResource && actions.execute ? [{ id: "remove", label: selectedResource.managed === false ? "Remove" : "Uninstall" }] : []),
       ...(actions.execute && selectedResource?.scope && (selectedResource.managed === false
         ? Boolean(selectedResource.paths?.length)
         : Boolean(selectedResource.source_repository && selectedResource.source_path)) ? [{ id: "preview", label: "Preview / audit" }] : []),
       ...(selectedResource?.managed !== false && selectedResource?.source_repository && selectedResource?.source_path && actions.listSourceVersions && actions.execute
         ? [{ id: "revision", label: "Revisions" }] : []),
-      ...(candidates.length && actions.execute ? [{ id: "install", label: "Install resource" }] : []),
     ]
     : controlSection === "browse"
       ? [
@@ -674,16 +674,10 @@ export function Dashboard({
   };
   const activateControlAction = (action: string) => {
     if (controlSection === "inventory") {
-      if (action === "install" && candidates.length && actions.execute) {
-        setCatalogQuery("");
-        resetCatalogLicenseFilter();
-        setCatalogIndex(0);
-        setActionMessage("");
-        navigateToSection("browse");
-      }
-      else if (action === "preview" && selectedResource) void runConfirmedAction({ action: "preview", resource: selectedResource });
+      if (action === "preview" && selectedResource) void runConfirmedAction({ action: "preview", resource: selectedResource });
       else if (action === "revision" && selectedResource) void openSourceVersions(selectedResource, "update");
-      else if (action === "update" && selectedResource) {
+      else if (action === "update" && selectedResource && selectedResource.managed !== false &&
+          dashboardStatus(selectedResource) === "update") {
         setConfirmation({ action: "update", resource: selectedResource });
         setConfirmationChoice(1);
         setActionMessage("");
@@ -1526,7 +1520,7 @@ export function Dashboard({
       setCatalogFilterMode(false);
       setActionMessage("");
     } else if (character === "u" && selectedResource && selectedResource.managed !== false &&
-        typeof actions.execute === "function") {
+        dashboardStatus(selectedResource) === "update" && typeof actions.execute === "function") {
       setConfirmation({ action: "update", resource: selectedResource });
       setConfirmationChoice(1);
       setActionMessage("");

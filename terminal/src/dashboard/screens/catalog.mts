@@ -61,7 +61,7 @@ export function CatalogScreen({
   });
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const controlsState = { ...controls, modalActive };
+  const controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
   const tabsProps = { ...controlsState, part: "tabs" as const, showSearch: false };
   const tabsLayout = dashboardControlsLayout(tabsProps);
   const ultraCompactSummary = rows < 40;
@@ -170,30 +170,51 @@ export function CatalogScreen({
   });
   if (!tableRows.length) tableRows.push(h(Text, { key: "catalog-empty", dimColor: true }, "No matching catalog resources."));
 
-  const detailFieldLines = (key: string, label: string, value: unknown, maxLines = 1) => {
-    const labelText = `${label} `;
-    const valueWidth = Math.max(1, detailsContentWidth - labelText.length);
-    return wrapText(value, valueWidth, maxLines).map((line, index) => h(Text, {
+  const detailFieldLines = (key: string, label: string, value: unknown, maxLines = 1) => [
+    h(Text, {
+      key: `${key}-label`,
+      color: DASHBOARD_THEME.semantic.accents.label,
+      bold: true,
+    }, fitText(label, detailsContentWidth)),
+    ...wrapText(value, detailsContentWidth, maxLines).map((line, index) => h(Text, {
       key: `${key}-${index}`,
-    },
-    h(Text, { color: DASHBOARD_THEME.semantic.accents.label, bold: true },
-      index ? " ".repeat(labelText.length) : labelText),
-    h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, fitText(line, valueWidth))));
-  };
-  const installedScopes = selected ? installedScopesFor(selected).join(", ") || "none" : "none";
+      color: DASHBOARD_THEME.semantic.accents.muted,
+    }, fitText(line, detailsContentWidth))),
+  ];
+  const detailFieldRows = (fields: Array<{ key: string; label: string; value: unknown }>) =>
+    fields.flatMap((field, index) => [
+      ...(index ? [h(Text, { key: `${field.key}-gap` }, " ")] : []),
+      ...detailFieldLines(field.key, field.label, field.value, Infinity),
+    ]);
+  const installedScopes = selected ? installedScopesFor(selected) : [];
+  const installedIn = installedScopes.includes("project") && installedScopes.includes("user")
+    ? "both"
+    : installedScopes[0] || "none";
+  const description = selected?.description || "No description available.";
+  const source = selected?.source_repository
+    ? `${selected.source_repository}/${selected.source_path || "unknown"}@${selected.source_ref || "unknown"}`
+    : undefined;
   const entryContent = selected
     ? [
-      h(Text, { key: "catalog-entry-title", bold: true }, `${selected.kind} · ${selected.id}`),
-      ...detailFieldLines("catalog-entry-description", "DESCRIPTION", selected.description || "No description available.", Infinity),
-      ...detailFieldLines("catalog-entry-catalog", "CATALOG", candidateLabel(selected), Infinity),
-      ...detailFieldLines("catalog-entry-license", "LICENSE", selected.license_status || "not declared", Infinity),
-      ...detailFieldLines("catalog-entry-installed", "INSTALLED IN", installedScopes, Infinity),
-      ...(selected.source_repository ? detailFieldLines(
-        "catalog-entry-source",
-        "PINNED SOURCE",
-        `${selected.source_repository}/${selected.source_path || "unknown"}@${selected.source_ref || "unknown"}`,
-        Infinity,
-      ) : []),
+      h(Text, {
+        key: "catalog-entry-kind",
+        color: resolveRowColor(selected.kind, false, selected.license_status === "Proprietary"
+          ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined),
+      }, fitText(selected.kind, detailsContentWidth)),
+      h(Text, { key: "catalog-entry-kind-gap" }, " "),
+      h(Text, { key: "catalog-entry-title", bold: true }, fitText(selected.id, detailsContentWidth)),
+      h(Text, { key: "catalog-entry-title-gap" }, " "),
+      ...wrapText(description, detailsContentWidth, Infinity).map((line, index) => h(Text, {
+        key: `catalog-entry-description-${index}`,
+        color: DASHBOARD_THEME.semantic.accents.muted,
+      }, fitText(line, detailsContentWidth))),
+      h(Text, { key: "catalog-entry-description-gap" }, " "),
+      ...detailFieldRows([
+        { key: "catalog-entry-catalog", label: "CATALOG", value: candidateLabel(selected) },
+        { key: "catalog-entry-license", label: "LICENSE", value: selected.license_status || "not declared" },
+        { key: "catalog-entry-installed", label: "INSTALLED IN", value: installedIn },
+        ...(source ? [{ key: "catalog-entry-source", label: "PINNED SOURCE", value: source }] : []),
+      ]),
     ]
     : [h(Text, {
       key: "catalog-entry-empty",

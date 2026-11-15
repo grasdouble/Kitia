@@ -2789,26 +2789,34 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
     await done.catch(() => {});
     if (!output.destroyed) output.destroy();
   });
+  const selectedPanelContent = (text) => {
+    const frame = selectedDetailsFrame(text);
+    const lines = frame.split(/\r?\n/);
+    const heading = lines.findIndex((line) => line.includes("SELECTION DETAILS"));
+    if (heading < 0) return "";
+    const column = lines[heading].indexOf("SELECTION DETAILS");
+    return lines.slice(heading + 2).map((line) => line.slice(column).split("│", 1)[0]).join(" ");
+  };
   await waitForOutput(output, () => rendered,
-    (text) => selectedDetailsFrame(text).includes("skill · grill-me") ||
-      selectedDetailsFrame(text).includes("skill · manual-skill"),
-    "initial selected inventory details");
+    (text) => selectedDetailsFrame(text).includes("SELECTION DETAILS"), "initial selected inventory details");
   let initialFrame = selectedDetailsFrame(rendered);
-  if (!initialFrame.includes("skill · grill-me")) {
+  if (!selectedPanelContent(rendered).includes("A relentless interview")) {
     const previousLength = rendered.length;
     input.write("\x1b[B");
     await waitForOutput(output, () => rendered,
-      (text) => text.length > previousLength && selectedDetailsFrame(text).includes("skill · grill-me"),
+      (text) => text.length > previousLength && selectedPanelContent(text).includes("A relentless interview"),
       "tracked skill details after moving selection");
     initialFrame = selectedDetailsFrame(rendered);
   }
   assert.ok(initialFrame.includes("manual-skill"), "unmanaged resource remains in the inventory list");
   assert.ok(initialFrame.includes("Unmanaged"), "unmanaged status remains visible in the list");
-  const detailLines = assertSeparatedPanelHeader(initialFrame, "SELECTION DETAILS", "skill · grill-me");
-  const catalogDetails = detailLines.join("").replace(/\s/g, "");
-  assert.ok(catalogDetails.includes("CATALOGMattPucock[productivity]"));
-  const descriptionDetails = detailLines.join(" ").replace(/\s+/g, " ");
-  assert.ok(descriptionDetails.includes("DESCRIPTION A relentless interview to sharpen a plan or design."));
+  const detailLines = assertSeparatedPanelHeader(initialFrame, "SELECTION DETAILS", "skill");
+  const compactDetailText = detailLines.join("").replace(/\s/g, "");
+  assert.ok(compactDetailText.startsWith("skillgrill-meArelentlessinterviewtosharpenaplanordesign."),
+    "kind, resource ID, and unlabeled description follow the current Inventory hierarchy");
+  assert.ok(!detailLines.join(" ").includes("DESCRIPTION"), "the Inventory description has no redundant field label");
+  assert.ok(compactDetailText.includes("CATALOGMattPucock[productivity]"),
+    "the custom catalog folder remains visible in Inventory details");
   input.write("q");
   assert.equal(await done, true);
   input.destroy();
