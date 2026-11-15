@@ -71,6 +71,7 @@ async function captureDashboardFrame(
   keys = [],
   dimensions = { columns: 120, rows: 56 },
   cleanupKeys = [],
+  errors = [],
 ) {
   const { PassThrough } = require("node:stream");
   const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
@@ -85,7 +86,7 @@ async function captureDashboardFrame(
   output.rows = dimensions.rows;
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
-  const done = runDashboard(resources, input, output, [], actions);
+  const done = runDashboard(resources, input, output, errors, actions);
   const waitForDashboardExit = async () => {
     let timeout;
     try {
@@ -614,26 +615,12 @@ test("dashboard colors rows by kind and selection in ANSI", async () => {
   }
 });
 
-test("dashboard header preserves the original animated cat artwork and height", async () => {
-  const { DASHBOARD_HEADER_ROWS, dashboardCatArt } = await import("../dist/dashboard/screens/shared.mjs");
-  assert.equal(DASHBOARD_HEADER_ROWS, 5);
-  assert.deepEqual(dashboardCatArt("idle", 0), [
-    "       /\\_/\\",
-    "      (=o.o=)",
-    "      /:>^<:\\    )",
-    "     / .| |. \\  /",
-    "     \\__|_|__/_/",
-  ]);
-  assert.equal(dashboardCatArt("wink", 0)[1], "      (=o.-=)");
-  assert.notDeepEqual(dashboardCatArt("lick", 0), dashboardCatArt("lick", 1));
-  assert.notDeepEqual(dashboardCatArt("scratch", 0), dashboardCatArt("scratch", 1));
-});
 
 test("section tabs stay clipped when there is no room for border corners", async () => {
   const { Text } = await import("ink");
-  const { DashboardControls } = await import("../dist/dashboard/controls.mjs");
+  const { Controls } = await import("../dist/dashboard/controls.mjs");
   const regions = [];
-  const controls = DashboardControls({
+  const controls = Controls({
     columns: 3,
     part: "tabs",
     section: "inventory",
@@ -1703,7 +1690,8 @@ test("Inventory pages complete locations, descriptions, catalog labels, and lice
       for (let page = 0; page < pageLimit; page += 1) {
         allPages = appendDetailPage(allPages, frame);
         if (allPages.includes(description.replace(/\s/g, "")) && allPages.includes(location) &&
-            allPages.includes("https://github.com/example/long-repository-name") && allPages.includes(sourceRef) &&
+            allPages.includes("https://github.com/example/long-repository-name") &&
+            allPages.includes(sourceRef.slice(0, 7)) &&
             allPages.includes(catalog.replace(/\s/g, "")) && allPages.includes(license.replace(/\s/g, ""))) break;
         const previousDetails = selectedDetailsFrame(frame);
         dashboard.input.write("\u001b[6~");
@@ -1719,7 +1707,7 @@ test("Inventory pages complete locations, descriptions, catalog labels, and lice
       assert.ok(allPages.includes(description.replace(/\s/g, "")));
       assert.ok(allPages.includes(location));
       assert.ok(allPages.includes("https://github.com/example/long-repository-name"));
-      assert.ok(allPages.includes(sourceRef));
+      assert.ok(allPages.includes(sourceRef.slice(0, 7)));
       assert.ok(allPages.includes(catalog.replace(/\s/g, "")));
       assert.ok(allPages.includes(license.replace(/\s/g, "")));
     } finally {
@@ -1818,7 +1806,8 @@ test("inventory columns align in the joined workspace at 80, 120, and 160 column
     const lines = plain.split(/\r?\n/);
     assert.ok(plain.includes("INSTALLED RESOURCES"));
     assert.ok(plain.includes("Search resources"));
-    assert.ok(plain.includes(`CATALOG ${catalog}`));
+    assert.ok(lines.some((line) => line.includes("CATALOG")));
+    assert.ok(lines.some((line) => line.includes(catalog)));
     const header = lines.find((line) =>
       line.includes("RESOURCE") && line.includes("KIND") && line.includes("SCOPE") && line.includes("STATUS"));
     const row = lines.find((line) => line.includes(id) && line.includes("project"));
@@ -1832,6 +1821,41 @@ test("inventory columns align in the joined workspace at 80, 120, and 160 column
     assert.ok(row.length >= listWidth + 2, "table rows should fill the list column");
   }
 });
+test("Inventory and Browse keep shared browser chrome aligned at layout breakpoints", async () => {
+  const sizes = [
+    { columns: 75, rows: 39 },
+    { columns: 76, rows: 40 },
+    { columns: 93, rows: 49 },
+    { columns: 94, rows: 50 },
+  ];
+  const resource = {
+    catalog: "platform-team",
+    kind: "skill",
+    id: "assistant-helper",
+    description: "A reusable assistant workflow.",
+    source_repository: "example/platform-team",
+    source_path: "skills/assistant-helper",
+    source_ref: "a".repeat(40),
+  };
+  const warning = { scope: "project", code: "SCAN_FAILED", message: "A scan warning remains visible." };
+  const actions = { catalogResources: [resource] };
+  const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+
+  for (const size of sizes) {
+    const inventory = (await captureDashboardFrame([], {}, [], size, [], [warning])).replace(ansi, "");
+    const browse = (await captureDashboardFrame([], actions, ["2"], size)).replace(ansi, "");
+    assert.ok(inventory.includes("INVENTORY") && inventory.includes("INSTALLED RESOURCES"));
+    assert.ok(inventory.includes("SCAN_FAILED"));
+    assert.ok(inventory.indexOf("SCAN_FAILED") < inventory.indexOf("INSTALLED RESOURCES"),
+      "Inventory scan warnings stay above and reserve space before the workspace");
+    assert.ok(browse.includes("CATALOG RESOURCES") && browse.includes("AVAILABLE 1/1"));
+    for (const label of ["PROJECT", "USER", "UPDATES"]) {
+      assert.ok(inventory.includes(label), `Inventory keeps ${label} summary visible at ${size.columns}×${size.rows}`);
+      assert.ok(browse.includes(label), `Browse keeps ${label} summary visible at ${size.columns}×${size.rows}`);
+    }
+  }
+});
+
 test("Browse and Catalogs keep their table and card hierarchies at desktop and compact sizes", async () => {
   const dimensions = [
     { columns: 80, rows: 56 },

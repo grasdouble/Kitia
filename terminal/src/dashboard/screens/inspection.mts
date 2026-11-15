@@ -5,10 +5,12 @@ import { Box, Text } from "ink";
 import type { CatalogResource } from "../../catalog/entries.js";
 import { DASHBOARD_THEME } from "../colors.js";
 import { fitText, wrapText } from "../helpers.mjs";
-import {
-  categorizedShortcutLines, DASHBOARD_HEADER_ROWS, DashboardHeader, Panel, PanelHeader, ShortcutsPanel,
-  wrappedShortcutLines,
-} from "./shared.mjs";
+import { categorizedShortcutLines, wrappedShortcutLines } from "../components/shortcuts/shortcut-lines.mjs";
+import { DASHBOARD_HEADER_ROWS } from "../components/dashboard-header.mjs";
+import { DashboardHeader } from "../components/dashboard-header.mjs";
+import { Panel } from "../components/panel.mjs";
+import { PanelHeader } from "../components/panel-header.mjs";
+import { ShortcutsPanel } from "../components/shortcuts/shortcuts-panel.mjs";
 import { highlightSource, type SyntaxLine } from "../source-highlighting.mjs";
 
 const h = React.createElement;

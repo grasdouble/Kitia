@@ -8,7 +8,9 @@ import type { ScanError } from "../catalog/lifecycle.js";
 import { adaptiveColumnWidths } from "../table-layout.js";
 import { fitColumn, fitText, wrapText } from "./helpers.mjs";
 import { DASHBOARD_THEME } from "./colors.js";
-import { Panel, ShortcutsPanel, categorizedShortcutLines, wrappedShortcutLines } from "./screens/shared.mjs";
+import { categorizedShortcutLines, wrappedShortcutLines } from "./components/shortcuts/shortcut-lines.mjs";
+import { Panel } from "./components/panel.mjs";
+import { ShortcutsPanel } from "./components/shortcuts/shortcuts-panel.mjs";
 import { DashboardMouseRegions, type DashboardMouseRegion } from "./input-transport.mjs";
 
 export interface PendingDashboardAction {

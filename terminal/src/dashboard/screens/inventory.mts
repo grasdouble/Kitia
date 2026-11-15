@@ -10,12 +10,18 @@ import type { InventoryCatalogConfiguration } from "../helpers.mjs";
 import {
   colorForStatus, dashboardStatus, filterInventory, inventoryCatalogLabels, issueLine, tableLine, fitText, wrapText,
 } from "../helpers.mjs";
-import {
-  categorizedShortcutLines, DashboardHeader, DASHBOARD_HEADER_ROWS, InventorySummaryCards, JoinedWorkspace, ShortcutFooter,
-  detailLocations, joinedWorkspaceLayout, shortcutFooterLines, useDashboardDetailPaging,
-} from "./shared.mjs";
-import { DashboardActionButtons, dashboardActionButtonRows, DashboardControls, dashboardControlsLayout,
-  type DashboardControlsProps } from "../controls.mjs";
+import { detailField, detailLocations } from "../components/detail-fields.mjs";
+import { DASHBOARD_HEADER_ROWS } from "../components/dashboard-header.mjs";
+import { categorizedShortcutLines, shortcutFooterLines } from "../components/shortcuts/shortcut-lines.mjs";
+import { DashboardHeader } from "../components/dashboard-header.mjs";
+import { JoinedWorkspace } from "../components/joined-workspace.mjs";
+import { ResourceBrowserChrome, resourceBrowserPlan } from "../components/resource-browser.mjs";
+import { resourceTableRows, resourceTableWindow } from "../components/resource-table.mjs";
+import { SelectionDetails, useDashboardDetailPaging } from "../components/selection-details.mjs";
+import { ShortcutFooter } from "../components/shortcuts/shortcut-footer.mjs";
+import { Controls } from "../controls.mjs";
+import type { ControlsProps } from "../components/controls/control-layout-plan.mjs";
+import { ActionButtons } from "../components/controls/action-rows.mjs";
 const h = React.createElement;
 export function InventoryScreen({
   resources,
@@ -54,7 +60,7 @@ export function InventoryScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
-  controls: DashboardControlsProps;
+  controls: ControlsProps;
   modalActive?: boolean;
   userCatalogs?: InventoryCatalogConfiguration[];
   inventoryLabels?: Map<CatalogResource, string>;
@@ -64,20 +70,6 @@ export function InventoryScreen({
   const visible = filterInventory(resources, query, catalogFilter, kindFilter, userCatalogs, inventoryLabels, licenseFilter);
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
-  const tabsProps = { ...controlsState, part: "tabs" as const, showSearch: false };
-  const tabsLayout = dashboardControlsLayout(tabsProps);
-  const ultraCompactSummary = rows < 40;
-  const compactSummary = rows < 50 || columns < 76;
-  const summaryBlockRows = ultraCompactSummary ? 1 : 1 + (compactSummary ? 3 : 4);
-  const filterRowOffset = tabsLayout.height + summaryBlockRows;
-  const filterProps = {
-    ...controlsState,
-    part: "filters" as const,
-    layout: "toolbar" as const,
-    rowOffset: filterRowOffset,
-  };
-  const filterLayout = dashboardControlsLayout(filterProps);
   const detailPagingFocus = !modalActive && !filterMode && !controls.menuFilter &&
     (controls.focus === "list" || controls.focus === "actions");
   const shortcutLines = modalActive ? [] : filterMode
@@ -108,27 +100,13 @@ export function InventoryScreen({
     Math.max(1, columns - 2),
   ));
   const warningBlockRows = warningLines.length ? warningLines.length + 1 : 0;
-  const workspaceGap = columns >= 45 && columns < 76 ? 0 : 1;
-  const workspaceHeight = Math.max(1, rows - (
-    DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height + warningBlockRows +
-    workspaceGap + footerRows
-  ));
-  const stackedWorkspace = columns < 94;
-  const outerWorkspaceWidth = columns - 2;
-  const initialWorkspaceLayout = joinedWorkspaceLayout(
-    outerWorkspaceWidth, workspaceHeight, stackedWorkspace, showDetails, 0, 0.76,
-  );
-  const initialDetailsWidth = initialWorkspaceLayout.detailsWidth
-    ? initialWorkspaceLayout.detailsWidth - 1
-    : initialWorkspaceLayout.innerWidth - 1;
-  const actionRows = dashboardActionButtonRows(controlsState, Math.max(1, initialDetailsWidth));
-  const workspaceLayout = joinedWorkspaceLayout(
-    outerWorkspaceWidth, workspaceHeight, stackedWorkspace, showDetails, actionRows, 0.76,
-  );
-  const listContentWidth = workspaceLayout.listWidth;
-  const detailsContentWidth = Math.max(1, workspaceLayout.detailsWidth
-    ? workspaceLayout.detailsWidth - 1
-    : workspaceLayout.innerWidth - 1);
+  const browserPlan = resourceBrowserPlan({
+    controls, modalActive, columns, rows, warningRows: warningBlockRows, footerRows, showDetails,
+  });
+  const {
+    controlsState, workspaceGap, workspaceHeight, outerWorkspaceWidth, actionRows, workspaceLayout,
+    listContentWidth, detailsContentWidth,
+  } = browserPlan;
   const footer = !modalActive ? h(ShortcutFooter, { lines: shortcutLines, width: columns - 2 }) : null;
   const warnings = warningLines.length
     ? h(Box, { width: columns - 2, marginTop: 1, flexDirection: "column" },
@@ -159,48 +137,36 @@ export function InventoryScreen({
       ["SCOPE", scopeWidth],
       ["STATUS", statusWidth],
     ]);
-  const first = Math.max(0, Math.min(activeIndex - workspaceLayout.listRows + 1, visible.length - workspaceLayout.listRows));
-  const page = visible.slice(first, first + workspaceLayout.listRows);
-  const tableRows = page.map((resource, index) => {
-    const selectedRow = first + index === activeIndex;
-    const status = dashboardStatus(resource);
-    const row = ultraCompactTable
-      ? fitText(`${selectedRow ? "› " : ""}${resource.id}`, listContentWidth)
-      : tableLine([
-        [selectedRow ? "›" : "", markerWidth],
-        [resource.id, resourceWidth],
-        [resource.kind, kindWidth],
-        [resource.scope || "-", scopeWidth],
-        [status ? status === "update" ? "Update available" : `${status[0].toUpperCase()}${status.slice(1)}` : "Current", statusWidth],
-      ]);
-    return h(Text, {
-      key: `${resource.managed === false ? "unmanaged" : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
-      color: selectedRow ? DASHBOARD_THEME.semantic.selectedForeground : resolveRowColor(resource.kind, false, colorForStatus(status)),
-      backgroundColor: selectedRow ? DASHBOARD_THEME.semantic.selected : undefined,
-      bold: selectedRow,
-    }, row);
+  const tableWindow = resourceTableWindow<CatalogResource>(visible, activeIndex, workspaceLayout.listRows);
+  const tableRows = resourceTableRows({
+    window: tableWindow,
+    selectedIndex: activeIndex,
+    emptyMessage: "No matching resources.",
+    renderRow: (resource: CatalogResource, selectedRow: boolean) => {
+      const status = dashboardStatus(resource);
+      const row = ultraCompactTable
+        ? fitText(`${selectedRow ? "› " : ""}${resource.id}`, listContentWidth)
+        : tableLine([
+          [selectedRow ? "›" : "", markerWidth],
+          [resource.id, resourceWidth],
+          [resource.kind, kindWidth],
+          [resource.scope || "-", scopeWidth],
+          [status ? status === "update" ? "Update available" : `${status[0].toUpperCase()}${status.slice(1)}` : "Current", statusWidth],
+        ]);
+      return {
+        key: `${resource.managed === false ? "unmanaged" : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
+        color: resolveRowColor(resource.kind, false, colorForStatus(status)),
+        text: row,
+      };
+    },
   });
-  if (!tableRows.length) tableRows.push(h(Text, { key: "inventory-empty", dimColor: true }, "No matching resources."));
-
-  const detailFieldLines = (key: string, label: string, value: unknown, maxLines = 1,
-    color: string = DASHBOARD_THEME.semantic.accents.muted) => [
-    h(Text, {
-      key: `${key}-label`,
-      color: DASHBOARD_THEME.semantic.accents.label,
-      bold: true,
-    }, fitText(label, detailsContentWidth)),
-    ...wrapText(value, detailsContentWidth, maxLines).map((line, index) => h(Text, {
-      key: `${key}-${index}`,
-      color,
-    }, fitText(line, detailsContentWidth))),
-  ];
   const hasDetail = (value: unknown) => typeof value === "string"
     ? Boolean(value.trim()) && value !== "-"
     : value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
   const detailFieldRows = (fields: Array<{ key: string; label: string; value: unknown; color?: string }>) =>
     fields.filter(({ value }) => hasDetail(value)).flatMap((field, index) => [
       ...(index ? [h(Text, { key: `${field.key}-gap` }, " ")] : []),
-      ...detailFieldLines(field.key, field.label, field.value, Infinity, field.color),
+      ...detailField(field.key, field.label, field.value, detailsContentWidth, Infinity, field.color),
     ]);
   const description = selected?.description || "No description available.";
   const selectedStatus = selected ? dashboardStatus(selected) || "current" : "";
@@ -223,7 +189,7 @@ export function InventoryScreen({
   ] : []);
   const optionalDetailParts: React.ReactNode[][] = [];
   const addOptionalField = (key: string, label: string, value: unknown, color?: string) => {
-    if (hasDetail(value)) optionalDetailParts.push(detailFieldLines(key, label, value, Infinity, color));
+    if (hasDetail(value)) optionalDetailParts.push(detailField(key, label, value, detailsContentWidth, Infinity, color));
   };
   if (selected) {
     addOptionalField("inventory-issues", "ISSUES", selectedIssues);
@@ -255,27 +221,24 @@ export function InventoryScreen({
     ...part,
   ]);
   const detailRows = selected
-    ? [
-      h(Text, {
-        key: "inventory-resource-kind",
-        color: resolveRowColor(selected.kind, false, colorForStatus(selectedStatus)),
-      }, fitText(selected.kind, detailsContentWidth)),
-      h(Text, { key: "inventory-kind-gap" }, " "),
-      h(Text, { key: "inventory-resource-title", bold: true }, fitText(selected.id, detailsContentWidth)),
-      h(Text, { key: "inventory-title-gap" }, " "),
-      ...wrapText(description, detailsContentWidth, Infinity).map((line, index) => h(Text, {
-        key: `inventory-description-${index}`,
-        color: DASHBOARD_THEME.semantic.accents.muted,
-      }, fitText(line, detailsContentWidth))),
-      ...(coreDetails.length ? [h(Text, { key: "inventory-description-gap" }, " "), ...coreDetails] : []),
-      ...(optionalDetails.length ? [h(Text, { key: "inventory-core-gap" }, " "), ...optionalDetails] : []),
-    ]
+    ? SelectionDetails({
+      kind: selected.kind,
+      id: selected.id,
+      description,
+      width: detailsContentWidth,
+      kindColor: resolveRowColor(selected.kind, false, colorForStatus(selectedStatus)),
+      metadata: [...coreDetails, ...(optionalDetails.length ? [
+        ...(coreDetails.length ? [h(Text, { key: "inventory-core-gap" }, " ")] : []),
+        ...optionalDetails,
+      ] : [])],
+    })
     : [h(Text, {
       key: "inventory-empty-detail",
       color: DASHBOARD_THEME.semantic.accents.muted,
     }, errors.length
       ? "No resource selected; see scan warnings above."
       : resources.length ? "No matching resource selected." : "No resources found.")];
+
   const detailPaging = useDashboardDetailPaging({
     lines: detailRows,
     viewport: workspaceLayout.detailsContentRows,
@@ -286,17 +249,17 @@ export function InventoryScreen({
     resetKey: [selected?.id, selected?.kind, selected?.scope, query, catalogFilter, kindFilter, licenseFilter, columns, rows, showDetails],
   });
   const actionButtons = actionRows
-    ? DashboardActionButtons({ controls: controlsState, width: detailsContentWidth })
+    ? ActionButtons({ controls: controlsState, width: detailsContentWidth })
     : null;
-  const workspaceTop = DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height +
-    warningBlockRows + workspaceGap + 1;
+  const workspaceTop = DASHBOARD_HEADER_ROWS + browserPlan.tabsHeight + browserPlan.summaryRows +
+    browserPlan.filterHeight + warningBlockRows + workspaceGap + 1;
   const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
-  controls.mouse?.replace("inventory-rows", modalActive ? [] : page.map((_, index) => ({
+  controls.mouse?.replace("inventory-rows", modalActive ? [] : tableWindow.items.map((_, index) => ({
     left: 3,
     right: workspaceLayout.listWidth + 2,
     top: firstResourceRow + index,
     bottom: firstResourceRow + index,
-    target: { type: "row" as const, screen: "inventory" as const, index: first + index },
+    target: { type: "row" as const, screen: "inventory" as const, index: tableWindow.first + index },
   })));
   return h(Box, { width: columns, height: rows, flexDirection: "column", paddingX: 1, position: "relative" },
     h(DashboardHeader, {
@@ -305,15 +268,7 @@ export function InventoryScreen({
       metadata: `RESOURCES ${visible.length}/${resources.length} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()} · LICENSE ${licenseFilter.toUpperCase()}`,
       columns,
     }),
-    h(DashboardControls, tabsProps),
-    h(InventorySummaryCards, {
-      resources,
-      width: columns - 2,
-      compact: compactSummary,
-      ultraCompact: ultraCompactSummary,
-      marginTop: ultraCompactSummary ? 0 : 1,
-    }),
-    h(DashboardControls, filterProps),
+    h(ResourceBrowserChrome, { plan: browserPlan, resources, columns }),
     warnings,
     h(Box, { width: columns - 2, marginTop: workspaceGap },
       h(JoinedWorkspace, {
@@ -334,6 +289,6 @@ export function InventoryScreen({
           : DASHBOARD_THEME.semantic.accents.detailPanel,
       })),
     footer,
-    controls.menuFilter ? h(DashboardControls, { ...filterProps, menuOverlayOnly: true }) : null,
+    controls.menuFilter ? h(Controls, { ...browserPlan.filterProps, menuOverlayOnly: true }) : null,
   );
 }

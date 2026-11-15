@@ -6,13 +6,19 @@ import type { CatalogResource } from "../../catalog/entries.js";
 import { adaptiveColumnWidths } from "../../table-layout.js";
 import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";
-import { filterCatalogResources, fitText, inventoryCatalogLabels, tableLine, wrapText } from "../helpers.mjs";
-import {
-  categorizedShortcutLines, DashboardHeader, DASHBOARD_HEADER_ROWS, InventorySummaryCards, JoinedWorkspace, ShortcutFooter,
-  joinedWorkspaceLayout, shortcutFooterLines, useDashboardDetailPaging,
-} from "./shared.mjs";
-import { DashboardActionButtons, dashboardActionButtonRows, DashboardControls, dashboardControlsLayout,
-  type DashboardControlsProps } from "../controls.mjs";
+import { filterCatalogResources, fitText, inventoryCatalogLabels, tableLine } from "../helpers.mjs";
+import { detailField } from "../components/detail-fields.mjs";
+import { DASHBOARD_HEADER_ROWS } from "../components/dashboard-header.mjs";
+import { categorizedShortcutLines, shortcutFooterLines } from "../components/shortcuts/shortcut-lines.mjs";
+import { DashboardHeader } from "../components/dashboard-header.mjs";
+import { JoinedWorkspace } from "../components/joined-workspace.mjs";
+import { ResourceBrowserChrome, resourceBrowserPlan } from "../components/resource-browser.mjs";
+import { resourceTableRows, resourceTableWindow } from "../components/resource-table.mjs";
+import { SelectionDetails, useDashboardDetailPaging } from "../components/selection-details.mjs";
+import { ShortcutFooter } from "../components/shortcuts/shortcut-footer.mjs";
+import { Controls } from "../controls.mjs";
+import type { ControlsProps } from "../components/controls/control-layout-plan.mjs";
+import { ActionButtons } from "../components/controls/action-rows.mjs";
 const h = React.createElement;
 export function CatalogScreen({
   candidates,
@@ -47,7 +53,7 @@ export function CatalogScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
-  controls: DashboardControlsProps;
+  controls: ControlsProps;
   modalActive?: boolean;
   tourStep?: number | null;
 }) {
@@ -61,20 +67,6 @@ export function CatalogScreen({
   });
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
-  const tabsProps = { ...controlsState, part: "tabs" as const, showSearch: false };
-  const tabsLayout = dashboardControlsLayout(tabsProps);
-  const ultraCompactSummary = rows < 40;
-  const compactSummary = rows < 50 || columns < 76;
-  const summaryBlockRows = ultraCompactSummary ? 1 : 1 + (compactSummary ? 3 : 4);
-  const filterRowOffset = tabsLayout.height + summaryBlockRows;
-  const filterProps = {
-    ...controlsState,
-    part: "filters" as const,
-    layout: "toolbar" as const,
-    rowOffset: filterRowOffset,
-  };
-  const filterLayout = dashboardControlsLayout(filterProps);
   const detailPagingFocus = !modalActive && !filterMode && !controls.menuFilter &&
     (controls.focus === "list" || controls.focus === "actions");
   const catalogShortcutLines = modalActive || screenName === "INSTALL OPTIONS"
@@ -93,26 +85,13 @@ export function CatalogScreen({
       });
   const footerRows = shortcutFooterLines(catalogShortcutLines, columns - 2).length +
     Number(Boolean(catalogShortcutLines.length));
-  const workspaceGap = columns >= 45 && columns < 76 ? 0 : 1;
-  const workspaceHeight = Math.max(1, rows - (
-    DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height + workspaceGap + footerRows
-  ));
-  const stackedWorkspace = columns < 94;
-  const outerWorkspaceWidth = columns - 2;
-  const initialWorkspaceLayout = joinedWorkspaceLayout(
-    outerWorkspaceWidth, workspaceHeight, stackedWorkspace, showDetails, 0, 0.76,
-  );
-  const initialDetailsWidth = initialWorkspaceLayout.detailsWidth
-    ? initialWorkspaceLayout.detailsWidth - 1
-    : initialWorkspaceLayout.innerWidth - 1;
-  const actionRows = showDetails ? dashboardActionButtonRows(controlsState, Math.max(1, initialDetailsWidth)) : 0;
-  const workspaceLayout = joinedWorkspaceLayout(
-    outerWorkspaceWidth, workspaceHeight, stackedWorkspace, showDetails, actionRows, 0.76,
-  );
-  const listContentWidth = workspaceLayout.listWidth;
-  const detailsContentWidth = Math.max(1, workspaceLayout.detailsWidth
-    ? workspaceLayout.detailsWidth - 1
-    : workspaceLayout.innerWidth - 1);
+  const browserPlan = resourceBrowserPlan({
+    controls, modalActive, columns, rows, warningRows: 0, footerRows, showDetails,
+  });
+  const {
+    controlsState, workspaceGap, workspaceHeight, outerWorkspaceWidth, actionRows, workspaceLayout,
+    listContentWidth, detailsContentWidth,
+  } = browserPlan;
   const footer = catalogShortcutLines.length
     ? h(ShortcutFooter, { lines: catalogShortcutLines, width: columns - 2 })
     : null;
@@ -129,6 +108,7 @@ export function CatalogScreen({
       { contentWidth: Math.max(8, visibleSourceWidth), minWidth: compactTable ? 5 : 8, growWeight: 2 },
       { contentWidth: compactTable ? 8 : 10, minWidth: compactTable ? 4 : 6, growWeight: 1 },
     ]);
+  const tableWindow = resourceTableWindow<CatalogResource>(visible, activeIndex, workspaceLayout.listRows);
   const [markerWidth, resourceWidth, kindWidth, catalogWidth, installedWidth] = widths;
   const tableHeader = ultraCompactTable
     ? fitText("RESOURCE", listContentWidth)
@@ -139,53 +119,37 @@ export function CatalogScreen({
       ["CATALOG", catalogWidth],
       ["INSTALLED", installedWidth],
     ]);
-  const first = Math.max(0, Math.min(activeIndex - workspaceLayout.listRows + 1, visible.length - workspaceLayout.listRows));
-  const page = visible.slice(first, first + workspaceLayout.listRows);
   const installedScopesFor = (resource: CatalogResource) => resources.filter((entry) =>
     entry.catalog === resource.catalog && entry.kind === resource.kind && entry.id === resource.id,
   ).map((entry) => entry.scope);
-  const tableRows = page.map((resource, index) => {
-    const selectedRow = first + index === activeIndex;
-    const scopes = installedScopesFor(resource);
-    const installed = scopes.includes("project") && scopes.includes("user")
-      ? "both"
-      : scopes[0] || "no";
-    const row = ultraCompactTable
-      ? fitText(`${selectedRow ? "› " : ""}${resource.id}`, listContentWidth)
-      : tableLine([
-        [selectedRow ? "›" : "", markerWidth],
-        [resource.id, resourceWidth],
-        [resource.kind, kindWidth],
-        [candidateLabel(resource), catalogWidth],
-        [installed, installedWidth],
-      ]);
-    return h(Text, {
-      key: `${resource.catalog}:${resource.kind}:${resource.id}`,
-      color: selectedRow ? DASHBOARD_THEME.semantic.selectedForeground : resolveRowColor(
-        resource.kind, false, resource.license_status === "Proprietary" ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined,
-      ),
-      backgroundColor: selectedRow ? DASHBOARD_THEME.semantic.selected : undefined,
-      bold: selectedRow,
-    }, row);
+  const tableRows = resourceTableRows({
+    window: tableWindow,
+    selectedIndex: activeIndex,
+    emptyMessage: "No matching catalog resources.",
+    renderRow: (resource: CatalogResource, selectedRow: boolean) => {
+      const scopes = installedScopesFor(resource);
+      const installed = scopes.includes("project") && scopes.includes("user")
+        ? "both"
+        : scopes[0] || "no";
+      const row = ultraCompactTable
+        ? fitText(`${selectedRow ? "› " : ""}${resource.id}`, listContentWidth)
+        : tableLine([
+          [selectedRow ? "›" : "", markerWidth],
+          [resource.id, resourceWidth],
+          [resource.kind, kindWidth],
+          [candidateLabel(resource), catalogWidth],
+          [installed, installedWidth],
+        ]);
+      return {
+        key: `${resource.catalog}:${resource.kind}:${resource.id}`,
+        color: resolveRowColor(
+          resource.kind, false, resource.license_status === "Proprietary"
+            ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined,
+        ),
+        text: row,
+      };
+    },
   });
-  if (!tableRows.length) tableRows.push(h(Text, { key: "catalog-empty", dimColor: true }, "No matching catalog resources."));
-
-  const detailFieldLines = (key: string, label: string, value: unknown, maxLines = 1) => [
-    h(Text, {
-      key: `${key}-label`,
-      color: DASHBOARD_THEME.semantic.accents.label,
-      bold: true,
-    }, fitText(label, detailsContentWidth)),
-    ...wrapText(value, detailsContentWidth, maxLines).map((line, index) => h(Text, {
-      key: `${key}-${index}`,
-      color: DASHBOARD_THEME.semantic.accents.muted,
-    }, fitText(line, detailsContentWidth))),
-  ];
-  const detailFieldRows = (fields: Array<{ key: string; label: string; value: unknown }>) =>
-    fields.flatMap((field, index) => [
-      ...(index ? [h(Text, { key: `${field.key}-gap` }, " ")] : []),
-      ...detailFieldLines(field.key, field.label, field.value, Infinity),
-    ]);
   const installedScopes = selected ? installedScopesFor(selected) : [];
   const installedIn = installedScopes.includes("project") && installedScopes.includes("user")
     ? "both"
@@ -195,27 +159,25 @@ export function CatalogScreen({
     ? `${selected.source_repository}/${selected.source_path || "unknown"}@${selected.source_ref || "unknown"}`
     : undefined;
   const entryContent = selected
-    ? [
-      h(Text, {
-        key: "catalog-entry-kind",
-        color: resolveRowColor(selected.kind, false, selected.license_status === "Proprietary"
-          ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined),
-      }, fitText(selected.kind, detailsContentWidth)),
-      h(Text, { key: "catalog-entry-kind-gap" }, " "),
-      h(Text, { key: "catalog-entry-title", bold: true }, fitText(selected.id, detailsContentWidth)),
-      h(Text, { key: "catalog-entry-title-gap" }, " "),
-      ...wrapText(description, detailsContentWidth, Infinity).map((line, index) => h(Text, {
-        key: `catalog-entry-description-${index}`,
-        color: DASHBOARD_THEME.semantic.accents.muted,
-      }, fitText(line, detailsContentWidth))),
-      h(Text, { key: "catalog-entry-description-gap" }, " "),
-      ...detailFieldRows([
-        { key: "catalog-entry-catalog", label: "CATALOG", value: candidateLabel(selected) },
-        { key: "catalog-entry-license", label: "LICENSE", value: selected.license_status || "not declared" },
-        { key: "catalog-entry-installed", label: "INSTALLED IN", value: installedIn },
-        ...(source ? [{ key: "catalog-entry-source", label: "PINNED SOURCE", value: source }] : []),
-      ]),
-    ]
+    ? SelectionDetails({
+      kind: selected.kind,
+      id: selected.id,
+      description,
+      width: detailsContentWidth,
+      kindColor: resolveRowColor(selected.kind, false, selected.license_status === "Proprietary"
+        ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined),
+      metadata: [
+        ...detailField("catalog-entry-catalog", "CATALOG", candidateLabel(selected), detailsContentWidth, Infinity),
+        h(Text, { key: "catalog-entry-license-gap" }, " "),
+        ...detailField("catalog-entry-license", "LICENSE", selected.license_status || "not declared", detailsContentWidth, Infinity),
+        h(Text, { key: "catalog-entry-installed-gap" }, " "),
+        ...detailField("catalog-entry-installed", "INSTALLED IN", installedIn, detailsContentWidth, Infinity),
+        ...(source ? [
+          h(Text, { key: "catalog-entry-source-gap" }, " "),
+          ...detailField("catalog-entry-source", "PINNED SOURCE", source, detailsContentWidth, Infinity),
+        ] : []),
+      ],
+    })
     : [h(Text, {
       key: "catalog-entry-empty",
       color: DASHBOARD_THEME.semantic.accents.muted,
@@ -230,16 +192,17 @@ export function CatalogScreen({
     resetKey: [selected?.id, selected?.kind, query, catalogFilter, kindFilter, licenseFilter, columns, rows, showDetails],
   });
   const actionButtons = actionRows
-    ? DashboardActionButtons({ controls: controlsState, width: detailsContentWidth })
+    ? ActionButtons({ controls: controlsState, width: detailsContentWidth })
     : null;
-  const workspaceTop = DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryBlockRows + filterLayout.height + workspaceGap + 1;
+  const workspaceTop = DASHBOARD_HEADER_ROWS + browserPlan.tabsHeight + browserPlan.summaryRows +
+    browserPlan.filterHeight + workspaceGap + 1;
   const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
-  controls.mouse?.replace("browse-rows", modalActive ? [] : page.map((_, index) => ({
+  controls.mouse?.replace("browse-rows", modalActive ? [] : tableWindow.items.map((_, index) => ({
     left: 3,
     right: workspaceLayout.listWidth + 2,
     top: firstResourceRow + index,
     bottom: firstResourceRow + index,
-    target: { type: "row" as const, screen: "browse" as const, index: first + index },
+    target: { type: "row" as const, screen: "browse" as const, index: tableWindow.first + index },
   })));
   return h(Box, { width: columns, height: rows, flexDirection: "column", paddingX: 1, position: "relative" },
     h(DashboardHeader, {
@@ -248,15 +211,7 @@ export function CatalogScreen({
       metadata: `AVAILABLE ${visible.length}/${candidates.length} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()} · LICENSE ${licenseFilter.toUpperCase()}`,
       columns,
     }),
-    h(DashboardControls, tabsProps),
-    h(InventorySummaryCards, {
-      resources,
-      width: columns - 2,
-      compact: compactSummary,
-      ultraCompact: ultraCompactSummary,
-      marginTop: ultraCompactSummary ? 0 : 1,
-    }),
-    h(DashboardControls, filterProps),
+    h(ResourceBrowserChrome, { plan: browserPlan, resources, columns }),
     h(Box, { width: columns - 2, marginTop: workspaceGap },
       h(JoinedWorkspace, {
         width: outerWorkspaceWidth,
@@ -276,6 +231,6 @@ export function CatalogScreen({
           : DASHBOARD_THEME.semantic.accents.detailPanel,
       })),
     footer,
-    controls.menuFilter ? h(DashboardControls, { ...filterProps, menuOverlayOnly: true }) : null,
+    controls.menuFilter ? h(Controls, { ...browserPlan.filterProps, menuOverlayOnly: true }) : null,
   );
 }

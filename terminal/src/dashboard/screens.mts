@@ -1,6 +1,6 @@
 "use strict";
 
-export { ScreenFrame } from "./screens/shared.mjs";
+export { ScreenFrame } from "./components/screen-frame.mjs";
 export { InspectionScreen, inspectionPageCount, inspectionPageView } from "./screens/inspection.mjs";
 export { InventoryScreen } from "./screens/inventory.mjs";
 export { CatalogScreen } from "./screens/catalog.mjs";

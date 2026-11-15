@@ -9,10 +9,9 @@ import type { ScanError } from "../catalog/lifecycle.js";
 import { catalogFilterOptions, cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, dashboardStatus, filterCatalogResources, filterInventory, inventoryCatalogLabels, inventoryFilterOptions,
   mergeRefreshedCatalogResources,
 } from "./helpers.mjs";
-import { type DashboardControlButton, type DashboardControlFilter } from "./controls.mjs";
+import type { DashboardControlButton, DashboardControlFilter, ControlsProps } from "./components/controls/control-layout-plan.mjs";
 import { DashboardMouseRegions, type DashboardControlFocus, type DashboardFilter, type DashboardMouseTarget, type DashboardSection } from "./input-transport.mjs";
 import { createDashboardInputTransport } from "./input-transport.mjs";
-import type { DashboardControlsProps } from "./controls.mjs";
 import {
   CatalogManagementScreen, CatalogScreen, InspectionScreen, InventoryScreen, ScreenFrame,
   inspectionPageCount,
@@ -314,7 +313,7 @@ export function Dashboard({
         ...(userCatalogs.length && actions.removeCatalog ? [{ id: "remove-catalog", label: "Remove" }] : []),
         ...(actions.transferCatalogs ? [{ id: "import-catalogs", label: "Import" }, { id: "export-catalogs", label: "Export" }] : []),
       ];
-  const controlsBase: Omit<DashboardControlsProps, "modalActive"> = {
+  const controlsBase: Omit<ControlsProps, "modalActive"> = {
     columns,
     rows,
     section: controlSection,

@@ -6,13 +6,17 @@ import type { CatalogResource } from "../../catalog/entries.js";
 import { DASHBOARD_THEME } from "../colors.js";
 import type { CatalogFreshnessStatus } from "../catalog-freshness.mjs";
 import { fitText } from "../helpers.mjs";
+import { DASHBOARD_HEADER_ROWS } from "../components/dashboard-header.mjs";
+import { shortcutFooterLines } from "../components/shortcuts/shortcut-lines.mjs";
+import { DashboardHeader } from "../components/dashboard-header.mjs";
+import { InventorySummaryCards } from "../components/inventory-summary-cards.mjs";
+import { Panel } from "../components/panel.mjs";
+import { ShortcutFooter } from "../components/shortcuts/shortcut-footer.mjs";
+import { Controls } from "../controls.mjs";
 import {
-  DashboardHeader, DASHBOARD_HEADER_ROWS, InventorySummaryCards, Panel, ShortcutFooter, shortcutFooterLines,
-} from "./shared.mjs";
-import {
-  DashboardActionButtons, dashboardActionButtonRows, DashboardControls, dashboardControlsLayout,
-  type DashboardControlsProps,
-} from "../controls.mjs";
+  dashboardActionButtonRows, dashboardControlsLayout, type ControlsProps,
+} from "../components/controls/control-layout-plan.mjs";
+import { ActionButtons } from "../components/controls/action-rows.mjs";
 
 
 const h = React.createElement;
@@ -50,11 +54,11 @@ export function CatalogManagementScreen({
   showDetails: boolean;
   columns: number;
   rows: number;
-  controls: DashboardControlsProps;
+  controls: ControlsProps;
   modalActive?: boolean;
   tourStep?: number | null;
 }) {
-  const tabControls: DashboardControlsProps = {
+  const tabControls: ControlsProps = {
     ...controls, part: "tabs", actions: [], actionsInToolbar: false,
   };
   const controlsLayout = dashboardControlsLayout(tabControls);
@@ -77,13 +81,13 @@ export function CatalogManagementScreen({
       fitText("Refresh updates metadata only; installed content stays unchanged.", contentWidth))] : []),
   ] : [];
 
-  const makeActionControls = (group: string, ids: string[]): DashboardControlsProps => {
+  const makeActionControls = (group: string, ids: string[]): ControlsProps => {
     const actions = (controls.actions || []).filter(({ id }) => ids.includes(id));
     const focusedId = controls.actions?.[controls.actionIndex || 0]?.id;
     const mouse = controls.mouse ? {
-      replace: (owner: string, regions: Parameters<NonNullable<DashboardControlsProps["mouse"]>["replace"]>[1]) =>
+      replace: (owner: string, regions: Parameters<NonNullable<ControlsProps["mouse"]>["replace"]>[1]) =>
         controls.mouse?.replace(`catalog-${group}-${owner}`, regions),
-    } as unknown as DashboardControlsProps["mouse"] : undefined;
+    } as unknown as ControlsProps["mouse"] : undefined;
     return {
       ...controls, actions, actionsInToolbar: false, actionIndex: actions.findIndex(({ id }) => id === focusedId), mouse,
       selectedSurface: group === "card",
@@ -112,7 +116,7 @@ export function CatalogManagementScreen({
   const viewport = Math.max(1, Math.floor(availableCardRows / (cardBaseRows + 1)));
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
   const page = catalogs.slice(first, first + viewport);
-  const rowRegions: NonNullable<Parameters<NonNullable<DashboardControlsProps["mouse"]>["replace"]>[1]> = [];
+  const rowRegions: NonNullable<Parameters<NonNullable<ControlsProps["mouse"]>["replace"]>[1]> = [];
   let cardTop = DASHBOARD_HEADER_ROWS + controlsLayout.height + summaryRows + 2 + headingActionRows + 1;
   const cardNodes = page.map((catalog, index) => {
     const absoluteIndex = first + index;
@@ -144,7 +148,7 @@ export function CatalogManagementScreen({
       backgroundColor: isSelected ? selectedBackground : undefined, bold: isSelected,
     }, fitText(`RESOURCES ${counts.resources} · INSTALLED ${counts.installed} · ${freshnessLabels[status]}`, contentWidth)),
     ...selectedDetails,
-    ...(isSelected ? [DashboardActionButtons({ controls: cardActions, width: contentWidth })] : []));
+    ...(isSelected ? [ActionButtons({ controls: cardActions, width: contentWidth })] : []));
     cardTop += cardHeight + 1;
     return card;
   });
@@ -180,12 +184,12 @@ export function CatalogManagementScreen({
     h(Box, { flexDirection: "row", justifyContent: "space-between" },
       h(Text, { bold: true, color: DASHBOARD_THEME.semantic.accents.primary }, `CONNECTED CATALOGS ${catalogs.length}`),
       h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, catalogs.length ? "" : "Connect a source to browse resources")),
-    DashboardActionButtons({ controls: headingActions, width: contentWidth }));
+    ActionButtons({ controls: headingActions, width: contentWidth }));
   const empty = catalogs.length ? null : h(Text, { dimColor: true }, "No user catalogs connected.");
   const footer = shortcutLine ? h(ShortcutFooter, { lines: [shortcutLine], width: columns - 2 }) : null;
   return h(Box, { width: columns, height: rows, flexDirection: "column", paddingX: 1, position: "relative", flexShrink: 0 },
     h(DashboardHeader, { versionLabel, screenName: "CATALOG MANAGEMENT", metadata: `USER CATALOGS ${catalogs.length}`, columns }),
-    h(DashboardControls, { ...tabControls, modalActive }),
+    h(Controls, { ...tabControls, modalActive }),
     h(InventorySummaryCards, {
       resources: installedResources,
       width: columns - 2,

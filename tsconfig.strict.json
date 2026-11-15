@@ -13,6 +13,6 @@
     "terminal/src/dashboard/catalog-freshness.mts",
     "terminal/src/dashboard/action-retry.mts",
     "terminal/src/dashboard/version-check.mts",
-    "terminal/src/dashboard/screens/shared.mts"
+    "terminal/src/dashboard/components/detail-fields.mts"
   ]
 }
