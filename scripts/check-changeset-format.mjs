@@ -1,13 +1,13 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export function validateChangesetContent(content, filename = "<changeset>") {
+export function validateChangesetContent(content, filename = '<changeset>') {
   const match = content.match(/^---\r?\n((?:[\s\S]*?\r?\n)?)---[ \t]*(?:\r?\n|$)([\s\S]*)$/);
   if (!match) return [`${filename}: expected YAML frontmatter delimited by --- lines`];
   if (!match[1].trim()) return [];
 
-  const body = match[2].replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+  const body = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
   if (!body.trim()) {
     return [`${filename}: add a short description and grouped details to this package Changeset`];
   }
@@ -34,7 +34,7 @@ export function validateChangesetContent(content, filename = "<changeset>") {
       if (groups.includes(label)) {
         errors.push(`${filename}:${index + 1}: ${label} group must appear only once`);
       }
-      if (label === "User-Facing" && groups.includes("Technical")) {
+      if (label === 'User-Facing' && groups.includes('Technical')) {
         errors.push(`${filename}:${index + 1}: User-Facing group must come before Technical`);
       }
       groups.push(label);
@@ -65,20 +65,22 @@ export function validateChangesetContent(content, filename = "<changeset>") {
 }
 
 export function validateChangesetDirectory(directory) {
-  const files = fs.readdirSync(directory)
-    .filter((filename) => filename.endsWith(".md") && filename !== "README.md")
+  const files = fs
+    .readdirSync(directory)
+    .filter((filename) => filename.endsWith('.md') && filename !== 'README.md')
     .sort();
   return files.flatMap((filename) =>
-    validateChangesetContent(fs.readFileSync(path.join(directory, filename), "utf8"), filename));
+    validateChangesetContent(fs.readFileSync(path.join(directory, filename), 'utf8'), filename),
+  );
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const changesetDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.changeset");
+  const changesetDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.changeset');
   const errors = validateChangesetDirectory(changesetDirectory);
   if (errors.length) {
-    console.error(errors.join("\n"));
+    console.error(errors.join('\n'));
     process.exitCode = 1;
   } else {
-    console.log("Changeset descriptions follow the repository format.");
+    console.log('Changeset descriptions follow the repository format.');
   }
 }

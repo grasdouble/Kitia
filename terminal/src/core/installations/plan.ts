@@ -1,7 +1,7 @@
-"use strict";
+'use strict';
 
-const { CatalogError } = require("../resources/model.js");
-import type { FileFingerprint } from "../inventory/model.js";
+const { CatalogError } = require('../resources/model.js');
+import type { FileFingerprint } from '../inventory/model.js';
 
 export interface InstallPlanEntry {
   content: Buffer;

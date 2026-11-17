@@ -1,4 +1,4 @@
-"use strict";
+'use strict';
 
 const CLI_DISCOVERY_SCHEMA_VERSION = 1;
 const CLI_REPORT_SCHEMA_VERSION = 1;

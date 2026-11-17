@@ -1,25 +1,26 @@
-"use strict";
+'use strict';
 
-import { DASHBOARD_THEME } from "./colors.js";
-import { createRequire } from "node:module";
-import { adaptiveColumnWidths } from "../table-layout.js";
-import type { CatalogResource } from "../core/resources/model.js";
+import { createRequire } from 'node:module';
+
+import type { CatalogResource } from '../core/resources/model.js';
+import { adaptiveColumnWidths } from '../table-layout.js';
+import { DASHBOARD_THEME } from './colors.js';
 
 const require = createRequire(import.meta.url);
-const { matchesSearchText, searchRelevance } = require("../core/resources/search.js");
-const { matchesLicense } = require("../core/resources/license.js");
+const { matchesSearchText, searchRelevance } = require('../core/resources/search.js');
+const { matchesLicense } = require('../core/resources/license.js');
 
 export interface InventoryCatalogConfiguration {
   name: string;
-  mode?: "basic" | "custom";
+  mode?: 'basic' | 'custom';
   entries?: Array<{ kind: string; id?: string; path: string }>;
 }
 
 type MatchedCatalogMapping = { folderPath: string };
 
 function normalizedMappingPath(mapping: { kind: string; path: string }): string {
-  const configuredPath = mapping.path.replace(/\/+$/, "");
-  return mapping.kind === "skill" && configuredPath.endsWith("/SKILL.md")
+  const configuredPath = mapping.path.replace(/\/+$/, '');
+  return mapping.kind === 'skill' && configuredPath.endsWith('/SKILL.md')
     ? configuredPath.slice(0, -9)
     : configuredPath;
 }
@@ -28,39 +29,38 @@ function matchCatalogMapping(
   resource: CatalogResource,
   mapping: { kind: string; id?: string; path: string },
 ): MatchedCatalogMapping | undefined {
-  if (resource.kind !== mapping.kind || !resource.source_path ||
-      mapping.id && mapping.id !== resource.id) return undefined;
+  if (resource.kind !== mapping.kind || !resource.source_path || (mapping.id && mapping.id !== resource.id))
+    return undefined;
   const configuredPath = normalizedMappingPath(mapping);
   const exact = resource.source_path === configuredPath;
   const descendant = resource.source_path.startsWith(`${configuredPath}/`);
   if (!exact && !descendant) return undefined;
 
   let folderPath = configuredPath;
-  if (mapping.kind === "skill") {
-    if (mapping.path.replace(/\/+$/, "").endsWith("/SKILL.md") && exact) {
-      const skillDirectoryParent = configuredPath.slice(0, configuredPath.lastIndexOf("/"));
-      folderPath = skillDirectoryParent.includes("/")
-        ? skillDirectoryParent
-        : configuredPath;
+  if (mapping.kind === 'skill') {
+    if (mapping.path.replace(/\/+$/, '').endsWith('/SKILL.md') && exact) {
+      const skillDirectoryParent = configuredPath.slice(0, configuredPath.lastIndexOf('/'));
+      folderPath = skillDirectoryParent.includes('/') ? skillDirectoryParent : configuredPath;
     } else if (descendant) {
       const childPath = resource.source_path.slice(configuredPath.length + 1);
-      const childParts = childPath.split("/");
+      const childParts = childPath.split('/');
       if (childParts.length > 1) folderPath = `${configuredPath}/${childParts[0]}`;
     }
   } else if (exact) {
-    folderPath = configuredPath.slice(0, configuredPath.lastIndexOf("/")) || ".";
+    folderPath = configuredPath.slice(0, configuredPath.lastIndexOf('/')) || '.';
   }
   return { folderPath };
 }
 
 function folderLabel(folderPath: string, folderPaths: Set<string>): string {
-  const segments = folderPath.split("/");
-  const basename = segments.at(-1) || ".";
-  const colliding = [...folderPaths].filter((candidate) =>
-    candidate !== folderPath && (candidate.split("/").at(-1) || ".") === basename);
+  const segments = folderPath.split('/');
+  const basename = segments.at(-1) || '.';
+  const colliding = [...folderPaths].filter(
+    (candidate) => candidate !== folderPath && (candidate.split('/').at(-1) || '.') === basename,
+  );
   if (!colliding.length) return basename;
   for (let length = 2; length <= segments.length; length += 1) {
-    const suffix = segments.slice(-length).join("/");
+    const suffix = segments.slice(-length).join('/');
     if (colliding.every((candidate) => candidate !== suffix && !candidate.endsWith(`/${suffix}`))) {
       return suffix;
     }
@@ -69,27 +69,25 @@ function folderLabel(folderPath: string, folderPaths: Set<string>): string {
 }
 
 export function dashboardStatus(resource: CatalogResource): string | undefined {
-  return resource.status === "attention" && resource.issues?.length &&
-    resource.issues.every((issue) => issue.code === "UPDATE_AVAILABLE")
-    ? "update"
+  return resource.status === 'attention' &&
+    resource.issues?.length &&
+    resource.issues.every((issue) => issue.code === 'UPDATE_AVAILABLE')
+    ? 'update'
     : resource.status;
 }
 
 export function issueLine(issue: { code: string; paths?: string[] }): string {
-  const label = issue.code === "UPDATE_AVAILABLE" ? "Update available" : issue.code;
-  return `${label}${issue.paths?.length ? `: ${issue.paths.join(", ")}` : ""}`;
+  const label = issue.code === 'UPDATE_AVAILABLE' ? 'Update available' : issue.code;
+  return `${label}${issue.paths?.length ? `: ${issue.paths.join(', ')}` : ''}`;
 }
 
 export function catalogLabel(resource: CatalogResource): string {
-  return resource.managed === false || !resource.source_repository ? "-" : resource.catalog || "-";
+  return resource.managed === false || !resource.source_repository ? '-' : resource.catalog || '-';
 }
 
-function catalogCandidateLabel(
-  resource: CatalogResource,
-  labels: Map<CatalogResource, string>,
-): string {
+function catalogCandidateLabel(resource: CatalogResource, labels: Map<CatalogResource, string>): string {
   return resource.managed === false || !resource.source_repository
-    ? resource.catalog || "-"
+    ? resource.catalog || '-'
     : labels.get(resource) || catalogLabel(resource);
 }
 
@@ -104,22 +102,29 @@ export function filterCatalogResources(
   const labels = inventoryCatalogLabels(resources, catalogs);
   const visible = resources.filter((resource) => {
     const catalog = catalogCandidateLabel(resource, labels);
-    if (catalogFilter !== "all" && catalog !== catalogFilter) return false;
-    if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
+    if (catalogFilter !== 'all' && catalog !== catalogFilter) return false;
+    if (kindFilter !== 'all' && resource.kind !== kindFilter) return false;
     if (filters.license && !matchesLicense(resource, filters.license)) return false;
     return matchesSearchText(query, [
-      catalog, resource.kind, resource.id, resource.description,
-      resource.license_status || "", resource.license_spdx || "",
-      resource.category || "", resource.owner || "",
-      ...(resource.tags || []), resource.status || "",
-      resource.use_when || "", resource.example || "",
-      resource.expected_output || "", resource.source_repository || "",
-      resource.source_path || "",
+      catalog,
+      resource.kind,
+      resource.id,
+      resource.description,
+      resource.license_status || '',
+      resource.license_spdx || '',
+      resource.category || '',
+      resource.owner || '',
+      ...(resource.tags || []),
+      resource.status || '',
+      resource.use_when || '',
+      resource.example || '',
+      resource.expected_output || '',
+      resource.source_repository || '',
+      resource.source_path || '',
     ]);
   });
   if (query.trim()) {
-    visible.sort((left, right) =>
-      searchRelevance(right, query) - searchRelevance(left, query));
+    visible.sort((left, right) => searchRelevance(right, query) - searchRelevance(left, query));
   }
   return visible;
 }
@@ -155,17 +160,17 @@ export function mergeRefreshedCatalogResources(
   }
   return merged;
 }
-type CatalogFilterProperty = "catalog" | "kind" | "license";
+type CatalogFilterProperty = 'catalog' | 'kind' | 'license';
 
 function catalogFilterValues(
   resource: CatalogResource,
   property: CatalogFilterProperty,
   labels?: Map<CatalogResource, string>,
 ): string[] {
-  if (property === "catalog") {
+  if (property === 'catalog') {
     return [labels ? catalogCandidateLabel(resource, labels) : catalogLabel(resource)];
   }
-  if (property === "kind") return [resource.kind];
+  if (property === 'kind') return [resource.kind];
   return [resource.license_status, resource.license_spdx].filter((value): value is string => Boolean(value));
 }
 
@@ -175,7 +180,7 @@ function matchesCatalogFilter(
   filter: string,
   labels?: Map<CatalogResource, string>,
 ): boolean {
-  if (property === "license") return matchesLicense(resource, filter);
+  if (property === 'license') return matchesLicense(resource, filter);
   return catalogFilterValues(resource, property, labels).includes(filter);
 }
 
@@ -184,8 +189,9 @@ function uniqueFilterChoices(
   property: CatalogFilterProperty,
   labels?: Map<CatalogResource, string>,
 ) {
-  return [...new Set(resources.flatMap((resource) => catalogFilterValues(resource, property, labels)).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right));
+  return [
+    ...new Set(resources.flatMap((resource) => catalogFilterValues(resource, property, labels)).filter(Boolean)),
+  ].sort((left, right) => left.localeCompare(right));
 }
 
 export function inventoryFilterOptions(
@@ -197,11 +203,17 @@ export function inventoryFilterOptions(
   catalogs: InventoryCatalogConfiguration[] = [],
 ): string[] {
   const labels = inventoryCatalogLabels(resources, catalogs);
-  const eligible = resources.filter((resource) =>
-    (property === "catalog" || catalogFilter === "all" || matchesCatalogFilter(resource, "catalog", catalogFilter, labels)) &&
-    (property === "kind" || kindFilter === "all" || matchesCatalogFilter(resource, "kind", kindFilter, labels)) &&
-    (property === "license" || licenseFilter === "all" || matchesCatalogFilter(resource, "license", licenseFilter, labels)));
-  return ["all", ...uniqueFilterChoices(eligible, property, labels)];
+  const eligible = resources.filter(
+    (resource) =>
+      (property === 'catalog' ||
+        catalogFilter === 'all' ||
+        matchesCatalogFilter(resource, 'catalog', catalogFilter, labels)) &&
+      (property === 'kind' || kindFilter === 'all' || matchesCatalogFilter(resource, 'kind', kindFilter, labels)) &&
+      (property === 'license' ||
+        licenseFilter === 'all' ||
+        matchesCatalogFilter(resource, 'license', licenseFilter, labels)),
+  );
+  return ['all', ...uniqueFilterChoices(eligible, property, labels)];
 }
 
 export function catalogFilterOptions(
@@ -211,14 +223,21 @@ export function catalogFilterOptions(
   catalogs: InventoryCatalogConfiguration[] = [],
 ): string[] {
   const labels = inventoryCatalogLabels(resources, catalogs);
-  const eligible = property === "catalog"
-    ? resources.filter((resource) => filters.kind === "all" || matchesCatalogFilter(resource, "kind", filters.kind, labels))
-    : property === "kind"
-      ? resources.filter((resource) => filters.catalog === "all" || matchesCatalogFilter(resource, "catalog", filters.catalog, labels))
-      : filterCatalogResources(resources, "", filters.catalog, filters.kind, catalogs);
-  const values = uniqueFilterChoices(eligible, property, labels)
-    .filter((value) => property !== "license" || eligible.some((resource) => matchesLicense(resource, value)));
-  return ["all", ...values];
+  const eligible =
+    property === 'catalog'
+      ? resources.filter(
+          (resource) => filters.kind === 'all' || matchesCatalogFilter(resource, 'kind', filters.kind, labels),
+        )
+      : property === 'kind'
+        ? resources.filter(
+            (resource) =>
+              filters.catalog === 'all' || matchesCatalogFilter(resource, 'catalog', filters.catalog, labels),
+          )
+        : filterCatalogResources(resources, '', filters.catalog, filters.kind, catalogs);
+  const values = uniqueFilterChoices(eligible, property, labels).filter(
+    (value) => property !== 'license' || eligible.some((resource) => matchesLicense(resource, value)),
+  );
+  return ['all', ...values];
 }
 
 export function cycleFilter(
@@ -230,39 +249,43 @@ export function cycleFilter(
   inventoryCatalogs?: InventoryCatalogConfiguration[],
 ): string {
   const labels = inventoryCatalogs ? inventoryCatalogLabels(resources, inventoryCatalogs) : undefined;
-  const values = [...new Set(resources
-    .filter((resource) => otherFilter === "all" ||
-      matchesCatalogFilter(resource, otherProperty, otherFilter, labels))
-    .flatMap((resource) => catalogFilterValues(resource, property, labels))
-    .filter(Boolean))].sort((left, right) => left.localeCompare(right));
-  const choices = ["all", ...values];
+  const values = [
+    ...new Set(
+      resources
+        .filter(
+          (resource) => otherFilter === 'all' || matchesCatalogFilter(resource, otherProperty, otherFilter, labels),
+        )
+        .flatMap((resource) => catalogFilterValues(resource, property, labels))
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+  const choices = ['all', ...values];
   const index = choices.indexOf(current);
-  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || 'all';
 }
 
 export function cycleCatalogFilter(
   current: string,
   resources: CatalogResource[],
-  property: "catalog" | "kind" | "license",
+  property: 'catalog' | 'kind' | 'license',
   filters: { catalog: string; kind: string; license: string },
   catalogs: InventoryCatalogConfiguration[] = [],
 ): string {
-  if (property === "catalog" || property === "kind") {
-    const otherProperty = property === "catalog" ? "kind" : "catalog";
+  if (property === 'catalog' || property === 'kind') {
+    const otherProperty = property === 'catalog' ? 'kind' : 'catalog';
     return cycleFilter(current, resources, property, otherProperty, filters[otherProperty], catalogs);
   }
 
-  const scopedResources = filterCatalogResources(resources, "", filters.catalog, filters.kind, catalogs);
-  const values = [...new Set(scopedResources
-    .flatMap((resource) => catalogFilterValues(resource, "license"))
-    .filter(Boolean))]
+  const scopedResources = filterCatalogResources(resources, '', filters.catalog, filters.kind, catalogs);
+  const values = [
+    ...new Set(scopedResources.flatMap((resource) => catalogFilterValues(resource, 'license')).filter(Boolean)),
+  ]
     .filter((value) => scopedResources.some((resource) => matchesLicense(resource, value)))
     .sort((left, right) => left.localeCompare(right));
-  const choices = ["all", ...values];
+  const choices = ['all', ...values];
   const index = choices.indexOf(current);
-  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || 'all';
 }
-
 
 export function cycleIndex(length: number, index: number, offset: number): number {
   return length ? (index + offset + length) % length : 0;
@@ -274,17 +297,23 @@ export function inventoryCatalogLabels(
 ): Map<CatalogResource, string> {
   const labels = new Map(resources.map((resource) => [resource, catalogLabel(resource)]));
   for (const configuration of catalogs) {
-    if (configuration.mode !== "custom") continue;
-    const catalogResources = resources.filter((resource) =>
-      resource.catalog === configuration.name && resource.managed !== false &&
-      resource.source_repository && resource.source_path);
+    if (configuration.mode !== 'custom') continue;
+    const catalogResources = resources.filter(
+      (resource) =>
+        resource.catalog === configuration.name &&
+        resource.managed !== false &&
+        resource.source_repository &&
+        resource.source_path,
+    );
     const mappings = configuration.entries || [];
     const matches = catalogResources.map((resource) => ({
       resource,
-      mappings: mappings.map((mapping) => ({
-        mapping,
-        match: matchCatalogMapping(resource, mapping),
-      })).filter((candidate) => candidate.match !== undefined),
+      mappings: mappings
+        .map((mapping) => ({
+          mapping,
+          match: matchCatalogMapping(resource, mapping),
+        }))
+        .filter((candidate) => candidate.match !== undefined),
     }));
     const folderPathsByKind = new Map<string, Set<string>>();
     for (const { resource, mappings: resourceMappings } of matches) {
@@ -296,8 +325,9 @@ export function inventoryCatalogLabels(
       for (const { match } of resourceMappings) folderPaths.add(match!.folderPath);
     }
     for (const { resource, mappings: resourceMappings } of matches) {
-      resourceMappings.sort((left, right) =>
-        normalizedMappingPath(right.mapping).length - normalizedMappingPath(left.mapping).length);
+      resourceMappings.sort(
+        (left, right) => normalizedMappingPath(right.mapping).length - normalizedMappingPath(left.mapping).length,
+      );
       const selected = resourceMappings[0]?.match;
       if (selected) {
         const folderPaths = folderPathsByKind.get(resource.kind)!;
@@ -323,17 +353,21 @@ export function filterInventory(
   kindFilter: string,
   catalogs: InventoryCatalogConfiguration[] = [],
   precomputedLabels?: Map<CatalogResource, string>,
-  licenseFilter = "all",
+  licenseFilter = 'all',
 ): CatalogResource[] {
   const labels = precomputedLabels || inventoryCatalogLabels(resources, catalogs);
   return resources.filter((resource) => {
     const resourceCatalog = labels.get(resource) || catalogLabel(resource);
-    if (catalogFilter !== "all" && resourceCatalog !== catalogFilter) return false;
-    if (kindFilter !== "all" && resource.kind !== kindFilter) return false;
-    if (licenseFilter !== "all" && !matchesLicense(resource, licenseFilter)) return false;
+    if (catalogFilter !== 'all' && resourceCatalog !== catalogFilter) return false;
+    if (kindFilter !== 'all' && resource.kind !== kindFilter) return false;
+    if (licenseFilter !== 'all' && !matchesLicense(resource, licenseFilter)) return false;
     return matchesSearchText(query, [
-      resource.scope, resourceCatalog, resource.kind, resource.id,
-      resource.status, resource.description,
+      resource.scope,
+      resourceCatalog,
+      resource.kind,
+      resource.id,
+      resource.status,
+      resource.description,
       ...(resource.issues || []).flatMap((issue) => [issue.code, ...(issue.paths || [])]),
     ]);
   });
@@ -347,28 +381,28 @@ export function cycleInventoryLicense(
   catalogs: InventoryCatalogConfiguration[] = [],
 ): string {
   const labels = inventoryCatalogLabels(resources, catalogs);
-  const eligible = filterInventory(resources, "", catalogFilter, kindFilter, catalogs, labels);
-  const values = [...new Set(eligible
-    .flatMap((resource) => catalogFilterValues(resource, "license"))
-    .filter(Boolean))]
+  const eligible = filterInventory(resources, '', catalogFilter, kindFilter, catalogs, labels);
+  const values = [...new Set(eligible.flatMap((resource) => catalogFilterValues(resource, 'license')).filter(Boolean))]
     .filter((value) => eligible.some((resource) => matchesLicense(resource, value)))
     .sort((left, right) => left.localeCompare(right));
-  const choices = ["all", ...values];
+  const choices = ['all', ...values];
   const index = choices.indexOf(current);
-  return choices[index < 0 ? 1 : (index + 1) % choices.length] || "all";
+  return choices[index < 0 ? 1 : (index + 1) % choices.length] || 'all';
 }
 export function colorForStatus(status?: string) {
-  if (status === "unmanaged") return DASHBOARD_THEME.semantic.inventoryStatus.unmanaged;
-  if (status === "attention") return DASHBOARD_THEME.semantic.inventoryStatus.attention;
-  if (status === "update") return DASHBOARD_THEME.semantic.inventoryStatus.update;
+  if (status === 'unmanaged') return DASHBOARD_THEME.semantic.inventoryStatus.unmanaged;
+  if (status === 'attention') return DASHBOARD_THEME.semantic.inventoryStatus.attention;
+  if (status === 'update') return DASHBOARD_THEME.semantic.inventoryStatus.update;
   return DASHBOARD_THEME.semantic.inventoryStatus.current;
 }
 
 export function fitText(value: unknown, width: number): string {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   const characters = Array.from(text);
   if (characters.length <= width) return text;
-  return `${characters.slice(0, Math.max(0, width - 3)).join("")}...`;
+  return `${characters.slice(0, Math.max(0, width - 3)).join('')}...`;
 }
 
 export function fitColumn(value: unknown, width: number): string {
@@ -377,38 +411,36 @@ export function fitColumn(value: unknown, width: number): string {
 
 export function wrapText(value: unknown, width: number, maxLines = Infinity): string[] {
   const lines = [];
-  let line = "";
-  for (const originalWord of String(value || "").split(/\s+/).filter(Boolean)) {
+  let line = '';
+  for (const originalWord of String(value || '')
+    .split(/\s+/)
+    .filter(Boolean)) {
     let word = originalWord;
     while (word.length > width) {
       if (line) {
         lines.push(line);
-        line = "";
+        line = '';
       }
-      const slash = word.lastIndexOf("/", width - 1);
+      const slash = word.lastIndexOf('/', width - 1);
       const splitAt = slash > 0 ? slash + 1 : width;
       lines.push(word.slice(0, splitAt));
       word = word.slice(splitAt);
     }
     if (line && line.length + word.length + 1 > width) {
       lines.push(line);
-      line = "";
+      line = '';
     }
     line = line ? `${line} ${word}` : word;
   }
   if (line) lines.push(line);
-  if (!lines.length) return [""];
+  if (!lines.length) return [''];
   if (lines.length <= maxLines) return lines;
   const limited = lines.slice(0, maxLines);
   limited[maxLines - 1] = fitText(`${limited[maxLines - 1].slice(0, -3)}...`, width);
   return limited;
 }
 
-export function tableColumns(
-  width: number,
-  idContentWidth = 12,
-  catalogContentWidth = 9,
-) {
+export function tableColumns(width: number, idContentWidth = 12, catalogContentWidth = 9) {
   const compact = width < 58;
   const marker = 2;
   const scope = compact ? 5 : 7;
@@ -426,11 +458,15 @@ export function tableColumns(
       minWidth: 8,
       growWeight: 2,
     },
-    ...(!compact ? [{
-      contentWidth: catalogContent,
-      minWidth: 9,
-      growWeight: 2,
-    }] : []),
+    ...(!compact
+      ? [
+          {
+            contentWidth: catalogContent,
+            minWidth: 9,
+            growWeight: 2,
+          },
+        ]
+      : []),
   ]);
   return {
     marker: fields[0],
@@ -454,12 +490,7 @@ export function detailPanelLayout(width: number, listRatio = 0.68) {
   };
 }
 
-export function catalogTableColumns(
-  width: number,
-  sourceContentWidth = 12,
-  idContentWidth = 12,
-  kindContentWidth = 4,
-) {
+export function catalogTableColumns(width: number, sourceContentWidth = 12, idContentWidth = 12, kindContentWidth = 4) {
   const compact = width < 58;
   const marker = 2;
   const installed = compact ? 4 : 9;
@@ -496,6 +527,8 @@ export function catalogTableColumns(
 }
 
 export function tableLine(fields: Array<[string, number]>): string {
-  return fields.filter(([, width]) => width > 0)
-    .map(([value, width]) => fitColumn(value, width)).join(" ");
+  return fields
+    .filter(([, width]) => width > 0)
+    .map(([value, width]) => fitColumn(value, width))
+    .join(' ');
 }

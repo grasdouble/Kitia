@@ -1,20 +1,27 @@
-"use strict";
+'use strict';
 
-import type { CliReport } from "./report.js";
-const { CLI_REPORT_SCHEMA_VERSION } = require("./schema-versions.js");
-const { parseArguments } = require("./arguments.js");
-const { acquireOperationLock } = require("../core/installations/lock.js");
-const { readInstallState } = require("../core/inventory/inventory.js");
-const { executeCommand } = require("./commands.js");
+import type { CliReport } from './report.js';
+const { CLI_REPORT_SCHEMA_VERSION } = require('./schema-versions.js');
+const { parseArguments } = require('./arguments.js');
+const { acquireOperationLock } = require('../core/installations/lock.js');
+const { readInstallState } = require('../core/inventory/inventory.js');
+const { executeCommand } = require('./commands.js');
 
-const fs = require("node:fs");
-const path = require("node:path");
-const commandApi = require("./commands.js");
+const fs = require('node:fs');
+const path = require('node:path');
+const commandApi = require('./commands.js');
 
 function createReport(command: string, dryRun = false): CliReport {
   return {
-    schema_version: CLI_REPORT_SCHEMA_VERSION, command, dry_run: dryRun, status: "ok",
-    resources: [], actions: [], warnings: [], messages: [], errors: [],
+    schema_version: CLI_REPORT_SCHEMA_VERSION,
+    command,
+    dry_run: dryRun,
+    status: 'ok',
+    resources: [],
+    actions: [],
+    warnings: [],
+    messages: [],
+    errors: [],
   };
 }
 
@@ -24,7 +31,7 @@ async function main(args: string[] = process.argv.slice(2)): Promise<number> {
   try {
     const options = parseArguments(args);
     const action = options.action || options.command;
-    if (options.json && ["check", "doctor", "install", "update", "uninstall"].includes(action)) {
+    if (options.json && ['check', 'doctor', 'install', 'update', 'uninstall'].includes(action)) {
       report = createReport(action, Boolean(options.dryRun));
       if (options.scope) {
         report.scope = options.scope;
@@ -33,21 +40,27 @@ async function main(args: string[] = process.argv.slice(2)): Promise<number> {
       options.nonInteractive = true;
       options.onResource = (resource) => {
         const { source: _source, ...entry } = resource;
-        if (!report.resources.some((existing) => existing.catalog === entry.catalog &&
-            existing.kind === entry.kind && existing.id === entry.id)) report.resources.push(entry);
+        if (
+          !report.resources.some(
+            (existing) =>
+              existing.catalog === entry.catalog && existing.kind === entry.kind && existing.id === entry.id,
+          )
+        )
+          report.resources.push(entry);
       };
       options.onAction = (action) => {
         const resource = action.resource;
-        report.actions.push({ ...action, resource: resource
-          ? { catalog: resource.catalog, kind: resource.kind, id: resource.id }
-          : null });
+        report.actions.push({
+          ...action,
+          resource: resource ? { catalog: resource.catalog, kind: resource.kind, id: resource.id } : null,
+        });
       };
       options.output = {
         log: (message) => report.messages.push(message),
-        error: (message) => report.warnings.push({ code: "WARNING", message }),
+        error: (message) => report.warnings.push({ code: 'WARNING', message }),
       };
     }
-    if (["install", "update", "uninstall"].includes(action) && !options.dryRun) {
+    if (['install', 'update', 'uninstall'].includes(action) && !options.dryRun) {
       release = acquireOperationLock(options.target);
       readInstallState(fs.realpathSync(options.target));
     }
@@ -58,17 +71,18 @@ async function main(args: string[] = process.argv.slice(2)): Promise<number> {
       unlock();
     }
     if (report) {
-      report.status = code === 0 ? "ok" : code === 2 ? "attention" : "error";
+      report.status = code === 0 ? 'ok' : code === 2 ? 'attention' : 'error';
       console.log(JSON.stringify(report, null, 2));
     }
     return code;
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     const errorCode = (error as Error & { code?: string }).code;
-    if (args.includes("--json")) {
-      const failure = { code: errorCode || "INTERNAL_ERROR", message: error.message };
-      console.log(JSON.stringify({ ...(report || createReport(args[0] || "help")),
-        status: "error", errors: [failure] }, null, 2));
+    if (args.includes('--json')) {
+      const failure = { code: errorCode || 'INTERNAL_ERROR', message: error.message };
+      console.log(
+        JSON.stringify({ ...(report || createReport(args[0] || 'help')), status: 'error', errors: [failure] }, null, 2),
+      );
     } else console.error(`Error: ${error.message}`);
     return 1;
   } finally {
@@ -77,14 +91,17 @@ async function main(args: string[] = process.argv.slice(2)): Promise<number> {
 }
 
 if (require.main === module) {
-  main().then((exitCode) => {
-    process.exitCode = exitCode;
-  }).catch((error) => {
-    console.error(`Error: ${error.message}`);
-    process.exitCode = 1;
-  });
+  main()
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((error) => {
+      console.error(`Error: ${error.message}`);
+      process.exitCode = 1;
+    });
 }
 
 module.exports = {
-  ...commandApi, main,
+  ...commandApi,
+  main,
 };

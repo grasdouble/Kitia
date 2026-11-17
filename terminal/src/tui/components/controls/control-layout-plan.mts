@@ -1,7 +1,13 @@
-"use strict";
+'use strict';
 
-import { DASHBOARD_HEADER_ROWS } from "../../sections/header.mjs";
-import type { DashboardControlFocus, DashboardFilter, DashboardMouseRegion, DashboardMouseRegions, DashboardSection } from "../../input-transport.mjs";
+import type {
+  DashboardControlFocus,
+  DashboardFilter,
+  DashboardMouseRegion,
+  DashboardMouseRegions,
+  DashboardSection,
+} from '../../input-transport.mjs';
+import { DASHBOARD_HEADER_ROWS } from '../../sections/header.mjs';
 
 export interface DashboardControlButton {
   id: string;
@@ -14,8 +20,8 @@ export interface DashboardControlFilter {
   options: string[];
 }
 
-export type DashboardControlPart = "all" | "tabs" | "filters";
-export type DashboardControlLayoutMode = "stacked" | "toolbar";
+export type DashboardControlPart = 'all' | 'tabs' | 'filters';
+export type DashboardControlLayoutMode = 'stacked' | 'toolbar';
 
 export interface ControlsProps {
   columns: number;
@@ -52,12 +58,12 @@ export interface ControlsProps {
 export interface ControlItem {
   id: string;
   label: string;
-  target: DashboardMouseRegion["target"];
+  target: DashboardMouseRegion['target'];
   text?: string;
 }
 
 export type LayoutItem = ControlItem & { text: string; width: number };
-export type ControlLineKind = "tab-top" | "tabs" | "tab-underline" | "labels" | "fields" | "actions";
+export type ControlLineKind = 'tab-top' | 'tabs' | 'tab-underline' | 'labels' | 'fields' | 'actions';
 export interface ControlMenu {
   left: number;
   top: number;
@@ -82,7 +88,12 @@ export interface ControlsLayout {
 }
 
 function splitControlLines(
-  items: LayoutItem[], maxWidth: number, row: number, kind: ControlLineKind, stride = 1, gap = 1,
+  items: LayoutItem[],
+  maxWidth: number,
+  row: number,
+  kind: ControlLineKind,
+  stride = 1,
+  gap = 1,
 ) {
   const lines: ControlLine[] = [];
   let lineItems: LayoutItem[] = [];
@@ -108,12 +119,12 @@ export function sectionTabMetrics(width: number) {
 }
 
 function filterLabel(filter: DashboardFilter) {
-  return filter === "kind" ? "Kind" : filter === "catalog" ? "Catalog" : "License";
+  return filter === 'kind' ? 'Kind' : filter === 'catalog' ? 'Catalog' : 'License';
 }
 
 function filterValue(filter: DashboardControlFilter) {
-  if (filter.value !== "all") return filter.value;
-  return filter.id === "kind" ? "All kinds" : filter.id === "catalog" ? "All catalogs" : "All licenses";
+  if (filter.value !== 'all') return filter.value;
+  return filter.id === 'kind' ? 'All kinds' : filter.id === 'catalog' ? 'All catalogs' : 'All licenses';
 }
 
 function filterWidth(filter: DashboardControlFilter, width: number) {
@@ -128,19 +139,19 @@ function actionButtonLines(props: ControlsProps, width: number) {
     label: action.label,
     text: action.label,
     width: Math.min(safeWidth, Math.max(1, action.label.length + 4)),
-    target: { type: "action", action: action.id },
+    target: { type: 'action', action: action.id },
   }));
-  if (!props.actionPairs) return splitControlLines(items, safeWidth, 0, "actions", 3);
+  if (!props.actionPairs) return splitControlLines(items, safeWidth, 0, 'actions', 3);
   const lines: ControlLine[] = [];
   for (let index = 0; index < items.length;) {
     const pair = items.slice(index, index + 2);
     if (pair.length === 2 && pair[0].width + 1 + pair[1].width <= safeWidth) {
-      lines.push({ row: lines.length * 3, kind: "actions", items: pair });
+      lines.push({ row: lines.length * 3, kind: 'actions', items: pair });
     } else {
       for (const item of pair) {
         lines.push({
           row: lines.length * 3,
-          kind: "actions",
+          kind: 'actions',
           items: [{ ...item, width: Math.min(item.width, safeWidth) }],
         });
       }
@@ -164,71 +175,87 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
   const fieldRows = props.rows && props.rows < 40 ? 2 : 4;
   const lines: ControlLine[] = [];
   if (props.modalActive) return { width, height: 0, lines, menu: undefined };
-  const part = props.part || "all";
+  const part = props.part || 'all';
   let row = 0;
-  if (part !== "filters") {
+  if (part !== 'filters') {
     const sectionNames: Record<DashboardSection, string> = {
-      inventory: "Inventory",
-      browse: width < 45 ? "Browse" : "Browse resources",
-      catalogs: "Catalogs",
+      inventory: 'Inventory',
+      browse: width < 45 ? 'Browse' : 'Browse resources',
+      catalogs: 'Catalogs',
     };
     const tabMetrics = sectionTabMetrics(width);
-    const tabs: LayoutItem[] = (["inventory", "browse", "catalogs"] as const).map((section) => ({
+    const tabs: LayoutItem[] = (['inventory', 'browse', 'catalogs'] as const).map((section) => ({
       id: section,
       label: sectionNames[section],
       text: `${sectionNames[section]} ${props.sectionCounts?.[section] ?? 0}`,
-      width: sectionNames[section].length + String(props.sectionCounts?.[section] ?? 0).length + 1 +
-        Number(props.focus === "tabs" && props.section === section) * 2 + tabMetrics.itemPadding * 2,
-      target: { type: "section", section },
+      width:
+        sectionNames[section].length +
+        String(props.sectionCounts?.[section] ?? 0).length +
+        1 +
+        Number(props.focus === 'tabs' && props.section === section) * 2 +
+        tabMetrics.itemPadding * 2,
+      target: { type: 'section', section },
     }));
     const tabLines = splitControlLines(
-      tabs, Math.max(1, width - 2 - tabMetrics.inset * 2), row, "tabs", 3, tabMetrics.gap,
+      tabs,
+      Math.max(1, width - 2 - tabMetrics.inset * 2),
+      row,
+      'tabs',
+      3,
+      tabMetrics.gap,
     );
     for (const tabLine of tabLines) {
       lines.push(
-        { ...tabLine, kind: "tab-top" },
+        { ...tabLine, kind: 'tab-top' },
         { ...tabLine, row: tabLine.row + 1 },
-        { ...tabLine, row: tabLine.row + 2, kind: "tab-underline" },
+        { ...tabLine, row: tabLine.row + 2, kind: 'tab-underline' },
       );
     }
     row += tabLines.length * 3;
   }
-  if (part === "tabs") return { width, height: row, lines, menu: undefined };
+  if (part === 'tabs') return { width, height: row, lines, menu: undefined };
 
-  const filters = ["kind", "catalog", "license"].flatMap((id) =>
-    (props.filters || []).filter((filter) => filter.id === id));
+  const filters = ['kind', 'catalog', 'license'].flatMap((id) =>
+    (props.filters || []).filter((filter) => filter.id === id),
+  );
   const showSearch = props.showSearch !== false;
   const searchItem = (fieldWidth: number): LayoutItem => ({
-    id: "search",
-    label: "Search",
-    text: props.query || (props.searchActive ? "" : "Search resources…"),
+    id: 'search',
+    label: 'Search',
+    text: props.query || (props.searchActive ? '' : 'Search resources…'),
     width: fieldWidth,
-    target: { type: "focus", focus: "search" },
+    target: { type: 'focus', focus: 'search' },
   });
   const selectorItems: LayoutItem[] = filters.map((filter) => ({
     id: filter.id,
     label: filterLabel(filter.id),
     text: filterValue(filter),
     width: filterWidth(filter, width),
-    target: { type: "filter-open", filter: filter.id },
+    target: { type: 'filter-open', filter: filter.id },
   }));
   const selectorWidth = selectorItems.reduce((total, item, index) => total + item.width + Number(index > 0), 0);
-  const canUseToolbar = props.layout === "toolbar" && showSearch && selectorItems.length > 0 &&
+  const canUseToolbar =
+    props.layout === 'toolbar' &&
+    showSearch &&
+    selectorItems.length > 0 &&
     selectorWidth + 18 + Number(selectorItems.length) <= width;
   if (canUseToolbar) {
     const searchWidth = width - selectorWidth - selectorItems.length;
     const items = [searchItem(searchWidth), ...selectorItems];
-    lines.push({ row, kind: "labels", items }, { row: row + 1, kind: "fields", items });
+    lines.push({ row, kind: 'labels', items }, { row: row + 1, kind: 'fields', items });
     row += fieldRows;
   } else {
     if (showSearch) {
       const item = searchItem(width);
-      lines.push({ row, kind: "labels", items: [item] }, { row: row + 1, kind: "fields", items: [item] });
+      lines.push({ row, kind: 'labels', items: [item] }, { row: row + 1, kind: 'fields', items: [item] });
       row += fieldRows;
     }
-    const selectorLines = splitControlLines(selectorItems, width, row, "fields", fieldRows);
+    const selectorLines = splitControlLines(selectorItems, width, row, 'fields', fieldRows);
     for (const selectorLine of selectorLines) {
-      lines.push({ row: selectorLine.row, kind: "labels", items: selectorLine.items }, { ...selectorLine, row: selectorLine.row + 1 });
+      lines.push(
+        { row: selectorLine.row, kind: 'labels', items: selectorLine.items },
+        { ...selectorLine, row: selectorLine.row + 1 },
+      );
       row += fieldRows;
     }
   }
@@ -236,14 +263,14 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
   let menu: ControlMenu | undefined;
   const options = props.menuFilter ? props.menuOptions || [] : [];
   if (props.menuFilter && options.length) {
-    const filterLine = lines.find((line) => line.kind === "fields" &&
-      line.items.some((item) => item.id === props.menuFilter));
+    const filterLine = lines.find(
+      (line) => line.kind === 'fields' && line.items.some((item) => item.id === props.menuFilter),
+    );
     const filterIndex = filterLine?.items.findIndex((item) => item.id === props.menuFilter) ?? -1;
     const anchor = filterLine?.items[filterIndex];
     const filter = filters.find(({ id }) => id === props.menuFilter);
     if (filterLine && anchor && filter) {
-      const left = 2 + filterLine.items.slice(0, filterIndex)
-        .reduce((used, item) => used + item.width + 1, 0);
+      const left = 2 + filterLine.items.slice(0, filterIndex).reduce((used, item) => used + item.width + 1, 0);
       const localLeft = left - 2;
       const fieldBottom = filterLine.row + (fieldRows === 2 ? 0 : 2);
       let top = fieldBottom;
@@ -255,13 +282,20 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
       const panelHeight = count + 2;
       if (availableRows < panelHeight) top = Math.max(0, terminalBottom - panelHeight);
       const availableWidth = Math.max(1, width - localLeft);
-      const allLabel = filterValue({ ...filter, value: "all" });
-      const longestOption = Math.max(...options.map((value) =>
-        Array.from(value === "all" ? allLabel : value).length));
+      const allLabel = filterValue({ ...filter, value: 'all' });
+      const longestOption = Math.max(...options.map((value) => Array.from(value === 'all' ? allLabel : value).length));
       const desiredWidth = Math.max(anchor.width, Math.min(32, longestOption + 7));
       const menuWidth = Math.min(availableWidth, desiredWidth);
       const first = Math.max(0, Math.min((props.menuIndex || 0) - count + 1, options.length - count));
-      menu = { left: localLeft, top, width: menuWidth, first, count, selectedValue: filter.value, allLabel };
+      menu = {
+        left: localLeft,
+        top,
+        width: menuWidth,
+        first,
+        count,
+        selectedValue: filter.value,
+        allLabel,
+      };
     }
   }
 
@@ -271,9 +305,9 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
       label: action.label,
       text: action.label,
       width: Math.min(width, action.label.length + 4),
-      target: { type: "action", action: action.id },
+      target: { type: 'action', action: action.id },
     }));
-    const actionLines = splitControlLines(actionItems, width, row, "actions", 3);
+    const actionLines = splitControlLines(actionItems, width, row, 'actions', 3);
     for (const actionLine of actionLines) {
       lines.push(actionLine);
       row += 3;

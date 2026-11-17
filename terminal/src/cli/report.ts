@@ -1,6 +1,6 @@
-"use strict";
+'use strict';
 
-import type { ResourceIssue } from "../core/resources/model.js";
+import type { ResourceIssue } from '../core/resources/model.js';
 export interface CliReportIdentity {
   catalog?: string;
   kind: string;
@@ -27,7 +27,7 @@ export interface CliReportDiagnostic {
 
 export interface CliReportCheck {
   id: string;
-  status: "ok" | "warning" | "error" | "skipped";
+  status: 'ok' | 'warning' | 'error' | 'skipped';
   message: string;
 }
 
@@ -37,7 +37,7 @@ export interface CliReport {
   dry_run: boolean;
   scope?: string;
   target?: string;
-  status: "ok" | "attention" | "error";
+  status: 'ok' | 'attention' | 'error';
   resources: CliReportResource[];
   actions: CliReportAction[];
   warnings: CliReportDiagnostic[];

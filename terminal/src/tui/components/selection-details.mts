@@ -1,15 +1,24 @@
-"use strict";
+'use strict';
 
-import React, { type ReactNode, useEffect, useState } from "react";
-import { Text, useInput } from "ink";
-import { DASHBOARD_THEME } from "../colors.js";
-import type { DashboardControlFocus, DashboardFilter } from "../input-transport.mjs";
-import { fitText, wrapText } from "../helpers.mjs";
+import { Text, useInput } from 'ink';
+import React, { type ReactNode, useEffect, useState } from 'react';
+
+import { DASHBOARD_THEME } from '../colors.js';
+import { fitText, wrapText } from '../helpers.mjs';
+import type { DashboardControlFocus, DashboardFilter } from '../input-transport.mjs';
 
 const h = React.createElement;
 
 // SelectionDetails: kind + bold id → wrapped description → optional metadata block.
-export function SelectionDetails({ kind, id, description, width, kindColor, leadingMetadata = [], metadata = [] }: {
+export function SelectionDetails({
+  kind,
+  id,
+  description,
+  width,
+  kindColor,
+  leadingMetadata = [],
+  metadata = [],
+}: {
   kind: string;
   id: string;
   description: string;
@@ -19,23 +28,34 @@ export function SelectionDetails({ kind, id, description, width, kindColor, lead
   metadata?: ReactNode[];
 }): ReactNode[] {
   return [
-    h(Text, { key: "selection-details-kind", color: kindColor }, fitText(kind, width)),
-    h(Text, { key: "selection-details-kind-gap" }, " "),
-    h(Text, { key: "selection-details-id", bold: true }, fitText(id, width)),
-    h(Text, { key: "selection-details-id-gap" }, " "),
+    h(Text, { key: 'selection-details-kind', color: kindColor }, fitText(kind, width)),
+    h(Text, { key: 'selection-details-kind-gap' }, ' '),
+    h(Text, { key: 'selection-details-id', bold: true }, fitText(id, width)),
+    h(Text, { key: 'selection-details-id-gap' }, ' '),
     ...leadingMetadata,
-    ...wrapText(description, width, Infinity).map((line, index) => h(Text, {
-      key: `selection-details-description-${index}`,
-      color: DASHBOARD_THEME.semantic.accents.muted,
-    }, fitText(line, width))),
-    ...(metadata.length ? [
-      h(Text, { key: "selection-details-description-gap" }, " "),
-      ...metadata,
-    ] : []),
+    ...wrapText(description, width, Infinity).map((line, index) =>
+      h(
+        Text,
+        {
+          key: `selection-details-description-${index}`,
+          color: DASHBOARD_THEME.semantic.accents.muted,
+        },
+        fitText(line, width),
+      ),
+    ),
+    ...(metadata.length ? [h(Text, { key: 'selection-details-description-gap' }, ' '), ...metadata] : []),
   ];
 }
 
-export function useDashboardDetailPaging({ lines, viewport, enabled, filterMode, focus, menuFilter, resetKey }: {
+export function useDashboardDetailPaging({
+  lines,
+  viewport,
+  enabled,
+  filterMode,
+  focus,
+  menuFilter,
+  resetKey,
+}: {
   lines: ReactNode[];
   viewport: number;
   enabled: boolean;
@@ -51,15 +71,18 @@ export function useDashboardDetailPaging({ lines, viewport, enabled, filterMode,
   useEffect(() => {
     if (offset !== visibleOffset) setOffset(visibleOffset);
   }, [offset, visibleOffset]);
-  const canPage = enabled && !filterMode && !menuFilter && (focus === "list" || focus === "actions") && maxOffset > 0;
-  useInput((input, key) => {
-    const step = Math.max(1, viewport - 1);
-    if (key.pageUp || input === "\u001b[5~") {
-      setOffset((current) => Math.max(0, Math.min(current, maxOffset) - step));
-    } else if (key.pageDown || input === "\u001b[6~") {
-      setOffset((current) => Math.min(maxOffset, Math.min(current, maxOffset) + step));
-    }
-  }, { isActive: canPage });
+  const canPage = enabled && !filterMode && !menuFilter && (focus === 'list' || focus === 'actions') && maxOffset > 0;
+  useInput(
+    (input, key) => {
+      const step = Math.max(1, viewport - 1);
+      if (key.pageUp || input === '\u001b[5~') {
+        setOffset((current) => Math.max(0, Math.min(current, maxOffset) - step));
+      } else if (key.pageDown || input === '\u001b[6~') {
+        setOffset((current) => Math.min(maxOffset, Math.min(current, maxOffset) + step));
+      }
+    },
+    { isActive: canPage },
+  );
   return {
     visibleLines: lines.slice(visibleOffset, visibleOffset + Math.max(0, viewport)),
     isClipped: maxOffset > 0,

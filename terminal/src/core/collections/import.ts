@@ -1,20 +1,26 @@
-"use strict";
+'use strict';
 
-const { CatalogError } = require("../resources/model.js");
-const { verifyCollectionSignature } = require("./signatures.js");
-const { validateCollectionManifest } = require("./manifest.js");
-const { loadUserSourceConfiguration, userCatalogDirectory, userCatalogIndexDirectory } = require("../catalogs/config.js");
-const { catalogNameKey, repositoryId, validateSourceConfiguration } = require("../catalogs/model.js");
-const fs = require("node:fs");
-const path = require("node:path");
-const crypto = require("node:crypto");
+const { CatalogError } = require('../resources/model.js');
+const { verifyCollectionSignature } = require('./signatures.js');
+const { validateCollectionManifest } = require('./manifest.js');
+const {
+  loadUserSourceConfiguration,
+  userCatalogDirectory,
+  userCatalogIndexDirectory,
+} = require('../catalogs/config.js');
+const { catalogNameKey, repositoryId, validateSourceConfiguration } = require('../catalogs/model.js');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
 function publishCollectionFiles(files, io) {
   const staged = [];
   const cleanup = () => {
     for (const entry of staged) {
       for (const temporary of [entry.stagePath, entry.backupPath]) {
         if (!temporary) continue;
-        try { if (io.existsSync(temporary)) io.unlinkSync(temporary); } catch {}
+        try {
+          if (io.existsSync(temporary)) io.unlinkSync(temporary);
+        } catch {}
       }
     }
   };
@@ -36,9 +42,12 @@ function publishCollectionFiles(files, io) {
         }
         entry.mode = stat.mode & 0o777;
         entry.backupPath = `${file.target}.${suffix}.backup`;
-        io.writeFileSync(entry.backupPath, io.readFileSync(file.target), { flag: "wx", mode: entry.mode });
+        io.writeFileSync(entry.backupPath, io.readFileSync(file.target), {
+          flag: 'wx',
+          mode: entry.mode,
+        });
       }
-      io.writeFileSync(entry.stagePath, file.contents, { flag: "wx", mode: entry.mode });
+      io.writeFileSync(entry.stagePath, file.contents, { flag: 'wx', mode: entry.mode });
     }
   } catch (error) {
     cleanup();
@@ -57,18 +66,22 @@ function publishCollectionFiles(files, io) {
       }
     }
     cleanup();
-    const rollback = rollbackErrors.length ? ` Rollback failed: ${rollbackErrors.join("; ")}` : "";
+    const rollback = rollbackErrors.length ? ` Rollback failed: ${rollbackErrors.join('; ')}` : '';
     throw new CatalogError(`Cannot publish resource collection: ${error.message}.${rollback}`);
   }
   cleanup();
 }
 
 function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: unknown } = {}) {
-  if (typeof contents !== "string" || Buffer.byteLength(contents, "utf8") > 2 * 1024 * 1024) {
-    throw new CatalogError("Resource collection must be a JSON file no larger than 2 MiB");
+  if (typeof contents !== 'string' || Buffer.byteLength(contents, 'utf8') > 2 * 1024 * 1024) {
+    throw new CatalogError('Resource collection must be a JSON file no larger than 2 MiB');
   }
   let manifest;
-  try { manifest = JSON.parse(contents); } catch { throw new CatalogError("Resource collection is not valid JSON"); }
+  try {
+    manifest = JSON.parse(contents);
+  } catch {
+    throw new CatalogError('Resource collection is not valid JSON');
+  }
   verifyCollectionSignature(manifest, trustedKey);
   const incoming = validateCollectionManifest(manifest);
   const current = loadUserSourceConfiguration();
@@ -76,19 +89,28 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
   const existingRepositories = new Set(current.map(({ repositoryId: id }) => id));
   for (const { source } of incoming) {
     if (existingNames.has(catalogNameKey(source.name)) || existingRepositories.has(repositoryId(source.repository))) {
-      throw new CatalogError(`Cannot import collection: catalog name or repository is already configured (${source.name})`);
+      throw new CatalogError(
+        `Cannot import collection: catalog name or repository is already configured (${source.name})`,
+      );
     }
   }
   // All untrusted manifest data and configuration conflicts are checked before persistent changes.
   const directory = userCatalogDirectory();
   const indexDirectory = userCatalogIndexDirectory();
-  const combined = [...current.map(({ name, repository, mode, entries }) => ({
-    name, repository, ...(mode === "custom" ? { mode, entries } : {}),
-  })), ...incoming.map(({ source }) => source)];
+  const combined = [
+    ...current.map(({ name, repository, mode, entries }) => ({
+      name,
+      repository,
+      ...(mode === 'custom' ? { mode, entries } : {}),
+    })),
+    ...incoming.map(({ source }) => source),
+  ];
   validateSourceConfiguration({ catalog_version: 1, sources: combined });
   for (const { source } of incoming) {
     if (io.existsSync(path.join(indexDirectory, `${source.name}.json`))) {
-      throw new CatalogError(`Cannot import collection: an unregistered catalog index already exists for ${source.name}`);
+      throw new CatalogError(
+        `Cannot import collection: an unregistered catalog index already exists for ${source.name}`,
+      );
     }
   }
   io.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -99,8 +121,8 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
     contents: `${JSON.stringify(index, null, 2)}\n`,
   }));
   files.push(
-    { target: path.join(indexDirectory, "catalogSources.json"), contents: registry },
-    { target: path.join(directory, "catalogSources.json"), contents: registry },
+    { target: path.join(indexDirectory, 'catalogSources.json'), contents: registry },
+    { target: path.join(directory, 'catalogSources.json'), contents: registry },
   );
   publishCollectionFiles(files, io);
   return incoming.map(({ source }) => source.name);

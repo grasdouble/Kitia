@@ -1,16 +1,16 @@
-"use strict";
+'use strict';
 
-const React = require("react");
-const { PassThrough } = require("node:stream");
+const React = require('react');
+const { PassThrough } = require('node:stream');
 
 async function renderTerminal(node, { columns = 80, rows = 24 } = {}) {
-  const { render } = await import("ink");
+  const { render } = await import('ink');
   const output = new PassThrough();
   const input = new PassThrough();
   output.isTTY = true;
   output.columns = columns;
   output.rows = rows;
-  let frame = "";
+  let frame = '';
   const write = output.write.bind(output);
   output.write = (chunk, ...args) => {
     frame += chunk.toString();
@@ -29,7 +29,7 @@ async function renderTerminal(node, { columns = 80, rows = 24 } = {}) {
   instance.unmount();
   input.destroy();
   output.destroy();
-  return frame.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r/g, "");
+  return frame.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '');
 }
 
 module.exports = { renderTerminal };

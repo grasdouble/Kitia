@@ -1,26 +1,31 @@
-"use strict";
+'use strict';
 
-const { exportCatalogConfiguration } = require("../core/catalogs/manage.js");
-const { addCatalog, importCatalogConfigurationText, refreshCatalogs, removeCatalog } = require("../core/catalogs/manage.js");
-const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
-const { repositoryId } = require("../core/catalogs/model.js");
-const { CatalogError } = require("../core/resources/model.js");
-const fs = require("node:fs");
-const path = require("node:path");
+const { exportCatalogConfiguration } = require('../core/catalogs/manage.js');
+const {
+  addCatalog,
+  importCatalogConfigurationText,
+  refreshCatalogs,
+  removeCatalog,
+} = require('../core/catalogs/manage.js');
+const { loadUserSourceConfiguration } = require('../core/catalogs/config.js');
+const { repositoryId } = require('../core/catalogs/model.js');
+const { CatalogError } = require('../core/resources/model.js');
+const fs = require('node:fs');
+const path = require('node:path');
 function manageCatalogCommand(options) {
   const output = options.output || console;
-  if (options.action === "add") {
+  if (options.action === 'add') {
     addCatalog(options.name, options.repository);
     output.log(`Added catalog ${options.name} (${repositoryId(options.repository)}).`);
     return 0;
   }
-  if (options.action === "export") {
+  if (options.action === 'export') {
     exportCatalogConfiguration(options.file);
     output.log(`Exported catalog configuration to ${options.file}.`);
     return 0;
   }
-  if (options.action === "import") {
-    const summary = importCatalogConfigurationText(fs.readFileSync(path.resolve(options.file), "utf8"));
+  if (options.action === 'import') {
+    const summary = importCatalogConfigurationText(fs.readFileSync(path.resolve(options.file), 'utf8'));
     output.log(
       `Catalog import: ${summary.added.length} added, ${summary.ignored.length} ignored, ${summary.refreshed.length} refreshed, ${summary.refreshFailures.length} refresh failed.`,
     );
@@ -34,28 +39,32 @@ function manageCatalogCommand(options) {
     }
     return summary.refreshFailures.length ? 1 : 0;
   }
-  if (options.action === "refresh") {
+  if (options.action === 'refresh') {
     const result = refreshCatalogs(options.allCatalogs ? undefined : [options.name]);
     for (const catalog of result.refreshed) {
-      output.log(`Refreshed catalog ${catalog.name} · ${catalog.count} resource${catalog.count === 1 ? "" : "s"} indexed.`);
+      output.log(
+        `Refreshed catalog ${catalog.name} · ${catalog.count} resource${catalog.count === 1 ? '' : 's'} indexed.`,
+      );
     }
     for (const failure of result.failures) {
       output.error(`Catalog refresh failed for ${failure.name}: ${failure.message}`);
     }
     return result.failures.length ? 1 : 0;
   }
-  if (options.action === "remove") {
+  if (options.action === 'remove') {
     removeCatalog(options.name);
     output.log(`Removed user catalog ${options.name}.`);
     return 0;
   }
-  if (options.action === "list") {
+  if (options.action === 'list') {
     for (const source of loadUserSourceConfiguration()) {
       output.log(`${source.name}\t${source.repository}`);
     }
     return 0;
   }
-  throw new CatalogError("Usage: kitia catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>");
+  throw new CatalogError(
+    'Usage: kitia catalog <add <name> <github-repository> | refresh <name> | refresh --all | remove <name> | list>',
+  );
 }
 
 module.exports = { manageCatalogCommand };

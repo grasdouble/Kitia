@@ -1,5 +1,7 @@
-import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath } from 'node:url';
+
+import { defineConfig, type Plugin } from 'vite';
+
 import { browserInkPlugins } from './browserInkPlugin';
 
 const root = fileURLToPath(new URL('.', import.meta.url));

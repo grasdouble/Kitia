@@ -1,5 +1,5 @@
-import type { CatalogResource } from "../core/resources/model.js";
-import type { ScanError } from "../core/inventory/checks.js";
+import type { ScanError } from '../core/inventory/checks.js';
+import type { CatalogResource } from '../core/resources/model.js';
 export interface DashboardActionFailure {
   code: string;
   category?: string;

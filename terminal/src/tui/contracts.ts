@@ -1,7 +1,7 @@
-import type { AddCatalogRequest, UserCatalog } from "../core/catalogs/model.js";
-import type { CatalogResource } from "../core/resources/model.js";
-import type { DashboardActionResult } from "./action-result.js";
-import type { CatalogFreshnessStatus } from "./catalog-freshness.mjs";
+import type { AddCatalogRequest, UserCatalog } from '../core/catalogs/model.js';
+import type { CatalogResource } from '../core/resources/model.js';
+import type { DashboardActionResult } from './action-result.js';
+import type { CatalogFreshnessStatus } from './catalog-freshness.mjs';
 export type CatalogFreshnessResult = { name: string; status: CatalogFreshnessStatus };
 export type CatalogActionResult = {
   catalogs?: UserCatalog[];
@@ -45,7 +45,7 @@ export interface DashboardActions {
   userCatalogs?: UserCatalog[];
   removeCatalog?: (name: string) => Promise<CatalogActionResult>;
   refreshCatalog?: (name?: string) => Promise<CatalogActionResult>;
-  transferCatalogs?: (action: "import" | "export", content: string) => Promise<CatalogActionResult>;
+  transferCatalogs?: (action: 'import' | 'export', content: string) => Promise<CatalogActionResult>;
   checkCatalogFreshness?: (names?: string[]) => Promise<CatalogFreshnessResult[]>;
   showOnboarding?: boolean;
 }

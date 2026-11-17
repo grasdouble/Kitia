@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useState } from 'react';
 
 export function useDashboardActivity() {
   const [actionPending, setActionPending] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
+  const [actionMessage, setActionMessage] = useState('');
   const [lastActionFailed, setLastActionFailed] = useState(false);
-  return { actionPending, setActionPending, actionMessage, setActionMessage, lastActionFailed, setLastActionFailed };
+  return {
+    actionPending,
+    setActionPending,
+    actionMessage,
+    setActionMessage,
+    lastActionFailed,
+    setLastActionFailed,
+  };
 }
 export type DashboardActivity = ReturnType<typeof useDashboardActivity>;
 

@@ -1,4 +1,4 @@
-import type { AuditResult } from "./audit.js";
+import type { AuditResult } from './audit.js';
 
 export interface PreviewFile {
   path: string;
@@ -7,7 +7,7 @@ export interface PreviewFile {
 
 export interface PreviewTreeEntry {
   path: string;
-  type: "file" | "directory";
+  type: 'file' | 'directory';
 }
 
 export interface ResourceInspection {

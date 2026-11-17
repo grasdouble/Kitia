@@ -1,4 +1,6 @@
-const unavailable = () => { throw new Error('Filesystem access is unavailable in the browser demo'); };
+const unavailable = () => {
+  throw new Error('Filesystem access is unavailable in the browser demo');
+};
 export const readFileSync = unavailable;
 export const existsSync = unavailable;
 export const statSync = unavailable;

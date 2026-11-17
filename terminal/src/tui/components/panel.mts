@@ -1,9 +1,10 @@
-"use strict";
+'use strict';
 
-import React, { type ReactNode } from "react";
-import { Box, Text } from "ink";
-import { DASHBOARD_THEME } from "../colors.js";
-import { PanelHeader } from "./panel-header.mjs";
+import { Box, Text } from 'ink';
+import React, { type ReactNode } from 'react';
+
+import { DASHBOARD_THEME } from '../colors.js';
+import { PanelHeader } from './panel-header.mjs';
 
 const h = React.createElement;
 
@@ -43,18 +44,21 @@ export function Panel({
   bordered = true,
   backgroundColor,
 }: PanelProps) {
-  return h(Box, {
-    flexDirection: "column",
-    flexShrink,
-    flexGrow,
-    borderStyle: bordered ? "single" : undefined,
-    borderColor: color,
-    backgroundColor,
-    paddingX: bordered ? 1 : 2,
-    marginTop,
-    marginLeft,
-    width,
-  }, separateHeader
-    ? h(PanelHeader, { title, color }, headerContent)
-    : h(Text, { bold: true, color }, title), children);
+  return h(
+    Box,
+    {
+      flexDirection: 'column',
+      flexShrink,
+      flexGrow,
+      borderStyle: bordered ? 'single' : undefined,
+      borderColor: color,
+      backgroundColor,
+      paddingX: bordered ? 1 : 2,
+      marginTop,
+      marginLeft,
+      width,
+    },
+    separateHeader ? h(PanelHeader, { title, color }, headerContent) : h(Text, { bold: true, color }, title),
+    children,
+  );
 }

@@ -1,47 +1,57 @@
-"use strict";
+'use strict';
 
-const { parseFrontmatter } = require("../resources/frontmatter.js");
-const { CatalogError } = require("../resources/model.js");
-const { repositoryId } = require("./model.js");
-const { spdxExpression } = require("../resources/license.js");
-const { validateSourceCatalog } = require("../resources/manifest.js");
-const fs = require("node:fs");
-const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { parseFrontmatter } = require('../resources/frontmatter.js');
+const { CatalogError } = require('../resources/model.js');
+const { repositoryId } = require('./model.js');
+const { spdxExpression } = require('../resources/license.js');
+const { validateSourceCatalog } = require('../resources/manifest.js');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 function sourceMetadata(file) {
   try {
-    return parseFrontmatter(fs.readFileSync(file, "utf8"), file);
+    return parseFrontmatter(fs.readFileSync(file, 'utf8'), file);
   } catch (error) {
-    const text = fs.readFileSync(file, "utf8");
+    const text = fs.readFileSync(file, 'utf8');
     const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
     if (!frontmatter) throw error;
     const metadata = new Map();
-    for (const key of ["name", "description", "license"]) {
-      const match = frontmatter[1].match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
-      if (match) metadata.set(key, match[1].trim().replace(/^(['"])(.*)\1$/, "$2"));
+    for (const key of ['name', 'description', 'license']) {
+      const match = frontmatter[1].match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
+      if (match) metadata.set(key, match[1].trim().replace(/^(['"])(.*)\1$/, '$2'));
     }
-    if (!metadata.has("name") || !metadata.has("description")) throw error;
+    if (!metadata.has('name') || !metadata.has('description')) throw error;
     return metadata;
   }
 }
 
 function normalizeResourceId(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 function safeRepositoryPath(checkout, sourcePath) {
-  if (typeof sourcePath !== "string" || !sourcePath || sourcePath.startsWith("/") ||
-      sourcePath.includes("\\") || sourcePath.split("/").some((part) => !part || part === "." || part === "..")) {
+  if (
+    typeof sourcePath !== 'string' ||
+    !sourcePath ||
+    sourcePath.startsWith('/') ||
+    sourcePath.includes('\\') ||
+    sourcePath.split('/').some((part) => !part || part === '.' || part === '..')
+  ) {
     throw new CatalogError(`Unsafe source resource path: ${sourcePath}`);
   }
   const root = fs.realpathSync(checkout);
-  const file = path.resolve(root, ...sourcePath.split("/"));
-  if (!file.startsWith(`${root}${path.sep}`)) throw new CatalogError(`Source resource escapes repository: ${sourcePath}`);
+  const file = path.resolve(root, ...sourcePath.split('/'));
+  if (!file.startsWith(`${root}${path.sep}`))
+    throw new CatalogError(`Source resource escapes repository: ${sourcePath}`);
   let current = root;
-  for (const part of sourcePath.split("/")) {
+  for (const part of sourcePath.split('/')) {
     current = path.join(current, part);
     if (!fs.existsSync(current)) throw new CatalogError(`Source resource does not exist: ${sourcePath}`);
-    if (fs.lstatSync(current).isSymbolicLink()) throw new CatalogError(`Symbolic links are not allowed in source resources: ${sourcePath}`);
+    if (fs.lstatSync(current).isSymbolicLink())
+      throw new CatalogError(`Symbolic links are not allowed in source resources: ${sourcePath}`);
   }
   return file;
 }
@@ -49,12 +59,13 @@ function safeRepositoryPath(checkout, sourcePath) {
 function discoverBasicMarkdownResources(checkout, kind, roots, suffix) {
   const resources = [];
   for (const sourceRoot of roots) {
-    const rootPath = path.join(checkout, ...sourceRoot.split("/"));
+    const rootPath = path.join(checkout, ...sourceRoot.split('/'));
     if (!fs.existsSync(rootPath)) continue;
     const root = safeRepositoryPath(checkout, sourceRoot);
     if (!fs.statSync(root).isDirectory()) throw new CatalogError(`${sourceRoot} must be a directory`);
     function visit(directory, segments) {
-      for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+      for (const entry of fs
+        .readdirSync(directory, { withFileTypes: true })
         .sort((a, b) => a.name.localeCompare(b.name))) {
         if (entry.isSymbolicLink()) {
           throw new CatalogError(`Symbolic links are not allowed in source resources: ${entry.name}`);
@@ -62,9 +73,15 @@ function discoverBasicMarkdownResources(checkout, kind, roots, suffix) {
         if (entry.isDirectory()) {
           visit(path.join(directory, entry.name), [...segments, entry.name]);
         } else if (entry.isFile() && /\.md$/i.test(entry.name) && !/^readme\.md$/i.test(entry.name)) {
-          const id = entry.name.replace(suffix, "").replace(/\.md$/i, "");
+          const id = entry.name.replace(suffix, '').replace(/\.md$/i, '');
           const sourcePath = path.posix.join(sourceRoot, ...segments, entry.name);
-          resources.push({ id, kind, sourcePath, file: path.join(directory, entry.name), directory });
+          resources.push({
+            id,
+            kind,
+            sourcePath,
+            file: path.join(directory, entry.name),
+            directory,
+          });
         }
       }
     }
@@ -77,20 +94,21 @@ function discoverCustomSkills(checkout, sourceRoot) {
   const root = safeRepositoryPath(checkout, sourceRoot);
   const resources = [];
   function visit(directory, segments) {
-    const skillFile = path.join(directory, "SKILL.md");
+    const skillFile = path.join(directory, 'SKILL.md');
     if (fs.existsSync(skillFile)) {
       const sourcePath = path.posix.join(sourceRoot, ...segments);
-      safeRepositoryPath(checkout, path.posix.join(sourcePath, "SKILL.md"));
+      safeRepositoryPath(checkout, path.posix.join(sourcePath, 'SKILL.md'));
       resources.push({
         id: segments.at(-1) || path.posix.basename(sourceRoot),
-        kind: "skill",
+        kind: 'skill',
         sourcePath,
         file: skillFile,
         directory,
       });
       return;
     }
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+    for (const entry of fs
+      .readdirSync(directory, { withFileTypes: true })
       .sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.isSymbolicLink()) {
         throw new CatalogError(`Symbolic links are not allowed in source resources: ${entry.name}`);
@@ -102,58 +120,60 @@ function discoverCustomSkills(checkout, sourceRoot) {
   return resources;
 }
 
-const BASIC_AGENT_DIRECTORIES = [
-  "agents", ".agents/agents", ".claude/agents", ".github/agents", ".copilot/agents",
-];
+const BASIC_AGENT_DIRECTORIES = ['agents', '.agents/agents', '.claude/agents', '.github/agents', '.copilot/agents'];
 
-const BASIC_INSTRUCTION_DIRECTORIES = [
-  "instructions", ".agents/instructions", ".claude/rules", ".github/instructions",
-];
+const BASIC_INSTRUCTION_DIRECTORIES = ['instructions', '.agents/instructions', '.claude/rules', '.github/instructions'];
 
-function createSourceIndex(repository, name, checkout, configuration = { mode: "basic", entries: [] }) {
+function createSourceIndex(repository, name, checkout, configuration = { mode: 'basic', entries: [] }) {
   const sourceRepository = repositoryId(repository);
-  const sourceRef = execFileSync("git", ["-C", checkout, "rev-parse", "HEAD"], {
-    encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
+  const sourceRef = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
-  const mappings = configuration.mode === "custom" ? configuration.entries : null;
+  const mappings = configuration.mode === 'custom' ? configuration.entries : null;
   const resourceDirectories = [];
   if (mappings) {
     for (const mapping of mappings) {
       let sourcePath = mapping.path;
-      if (mapping.kind === "skill" && sourcePath.endsWith("/SKILL.md")) sourcePath = sourcePath.slice(0, -9);
+      if (mapping.kind === 'skill' && sourcePath.endsWith('/SKILL.md')) sourcePath = sourcePath.slice(0, -9);
       const target = safeRepositoryPath(checkout, sourcePath);
       const stat = fs.lstatSync(target);
       if (stat.isDirectory()) {
         let discovered;
-        if (mapping.kind === "skill") {
-          const skillFile = path.join(target, "SKILL.md");
+        if (mapping.kind === 'skill') {
+          const skillFile = path.join(target, 'SKILL.md');
           if (fs.existsSync(skillFile)) {
-            safeRepositoryPath(checkout, path.posix.join(sourcePath, "SKILL.md"));
-            discovered = [{
-              id: mapping.id || path.posix.basename(sourcePath),
-              kind: "skill",
-              sourcePath,
-              file: skillFile,
-              directory: target,
-            }];
+            safeRepositoryPath(checkout, path.posix.join(sourcePath, 'SKILL.md'));
+            discovered = [
+              {
+                id: mapping.id || path.posix.basename(sourcePath),
+                kind: 'skill',
+                sourcePath,
+                file: skillFile,
+                directory: target,
+              },
+            ];
           } else {
             discovered = discoverCustomSkills(checkout, sourcePath);
           }
         } else {
           discovered = discoverBasicMarkdownResources(
-            checkout, mapping.kind, [sourcePath],
-            mapping.kind === "agent" ? /\.agent\.md$/i : /\.instructions\.md$/i,
+            checkout,
+            mapping.kind,
+            [sourcePath],
+            mapping.kind === 'agent' ? /\.agent\.md$/i : /\.instructions\.md$/i,
           );
         }
         if (!discovered.length) {
           throw new CatalogError(`No ${mapping.kind} resources found in source directory: ${sourcePath}`);
         }
         resourceDirectories.push(...discovered);
-      } else if (stat.isFile() && mapping.kind !== "skill" && /\.md$/i.test(sourcePath)) {
+      } else if (stat.isFile() && mapping.kind !== 'skill' && /\.md$/i.test(sourcePath)) {
         const filename = path.posix.basename(sourcePath);
-        const suffix = mapping.kind === "agent" ? /\.agent\.md$/i : /\.instructions\.md$/i;
+        const suffix = mapping.kind === 'agent' ? /\.agent\.md$/i : /\.instructions\.md$/i;
         resourceDirectories.push({
-          id: mapping.id || filename.replace(suffix, "").replace(/\.md$/i, ""),
+          id: mapping.id || filename.replace(suffix, '').replace(/\.md$/i, ''),
           kind: mapping.kind,
           sourcePath,
           file: target,
@@ -164,30 +184,36 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: "
       }
     }
   } else {
-    const skillsRootPath = path.join(checkout, "skills");
+    const skillsRootPath = path.join(checkout, 'skills');
     if (fs.existsSync(skillsRootPath)) {
-      const skillsRoot = safeRepositoryPath(checkout, "skills");
-      if (!fs.statSync(skillsRoot).isDirectory()) throw new CatalogError("skills must be a directory");
+      const skillsRoot = safeRepositoryPath(checkout, 'skills');
+      if (!fs.statSync(skillsRoot).isDirectory()) throw new CatalogError('skills must be a directory');
       function visit(directory, segments) {
-        const skill = path.join(directory, "SKILL.md");
+        const skill = path.join(directory, 'SKILL.md');
         if (fs.existsSync(skill)) {
-          safeRepositoryPath(checkout, path.posix.join("skills", ...segments, "SKILL.md"));
+          safeRepositoryPath(checkout, path.posix.join('skills', ...segments, 'SKILL.md'));
           resourceDirectories.push({
-            id: segments.at(-1), kind: "skill", sourcePath: path.posix.join("skills", ...segments),
-            file: skill, directory,
+            id: segments.at(-1),
+            kind: 'skill',
+            sourcePath: path.posix.join('skills', ...segments),
+            file: skill,
+            directory,
           });
           return;
         }
-        for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-          if (entry.isSymbolicLink()) throw new CatalogError(`Symbolic links are not allowed in source resources: ${entry.name}`);
+        for (const entry of fs
+          .readdirSync(directory, { withFileTypes: true })
+          .sort((a, b) => a.name.localeCompare(b.name))) {
+          if (entry.isSymbolicLink())
+            throw new CatalogError(`Symbolic links are not allowed in source resources: ${entry.name}`);
           if (entry.isDirectory()) visit(path.join(directory, entry.name), [...segments, entry.name]);
         }
       }
       visit(skillsRoot, []);
     }
     resourceDirectories.push(
-      ...discoverBasicMarkdownResources(checkout, "agent", BASIC_AGENT_DIRECTORIES, /\.agent\.md$/i),
-      ...discoverBasicMarkdownResources(checkout, "instruction", BASIC_INSTRUCTION_DIRECTORIES, /\.instructions\.md$/i),
+      ...discoverBasicMarkdownResources(checkout, 'agent', BASIC_AGENT_DIRECTORIES, /\.agent\.md$/i),
+      ...discoverBasicMarkdownResources(checkout, 'instruction', BASIC_INSTRUCTION_DIRECTORIES, /\.instructions\.md$/i),
     );
     if (!resourceDirectories.length) {
       throw new CatalogError(`${sourceRepository} contains no supported skills, agents, or instructions`);
@@ -196,50 +222,77 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: "
   const resources = [];
   for (const resource of resourceDirectories) {
     const { kind, sourcePath, file } = resource;
-    const id = kind === "skill" ? resource.id : normalizeResourceId(resource.id);
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || id.length > 64 || id.includes("--")) {
+    const id = kind === 'skill' ? resource.id : normalizeResourceId(resource.id);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || id.length > 64 || id.includes('--')) {
       throw new CatalogError(`Invalid resource id in ${name}: ${id}`);
     }
     let metadata;
     try {
       metadata = sourceMetadata(file);
     } catch (error) {
-      if (kind !== "instruction") throw error;
+      if (kind !== 'instruction') throw error;
       metadata = new Map();
     }
-    if (kind !== "instruction" && (
-      typeof metadata.get("name") !== "string" || !metadata.get("name").trim() ||
-      (kind === "skill" && (
-        normalizeResourceId(metadata.get("name")) !== id ||
-        typeof metadata.get("description") !== "string" || !metadata.get("description").trim()
-      ))
-    )) {
-      throw new CatalogError(`${file} must define a non-empty name${kind === "skill" ? " matching its id and a non-empty description" : ""}`);
+    if (
+      kind !== 'instruction' &&
+      (typeof metadata.get('name') !== 'string' ||
+        !metadata.get('name').trim() ||
+        (kind === 'skill' &&
+          (normalizeResourceId(metadata.get('name')) !== id ||
+            typeof metadata.get('description') !== 'string' ||
+            !metadata.get('description').trim())))
+    ) {
+      throw new CatalogError(
+        `${file} must define a non-empty name${kind === 'skill' ? ' matching its id and a non-empty description' : ''}`,
+      );
     }
-    const instructionKey = ["apply_to", "applyTo", "paths"].find((key) => metadata.has(key));
+    const instructionKey = ['apply_to', 'applyTo', 'paths'].find((key) => metadata.has(key));
     const instructionMetadata = instructionKey === undefined ? undefined : metadata.get(instructionKey);
-    const applyTo = instructionKey === undefined
-      ? ["**"]
-      : typeof instructionMetadata === "string" ? [instructionMetadata] : instructionMetadata;
-    if (kind === "instruction" &&
-        (!Array.isArray(applyTo) || !applyTo.length ||
-          applyTo.some((pattern) => typeof pattern !== "string" || !pattern.trim()))) {
-      throw new CatalogError(`${sourceRepository}:${sourcePath} must define a non-empty apply_to, applyTo, or paths frontmatter value`);
+    const applyTo =
+      instructionKey === undefined
+        ? ['**']
+        : typeof instructionMetadata === 'string'
+          ? [instructionMetadata]
+          : instructionMetadata;
+    if (
+      kind === 'instruction' &&
+      (!Array.isArray(applyTo) ||
+        !applyTo.length ||
+        applyTo.some((pattern) => typeof pattern !== 'string' || !pattern.trim()))
+    ) {
+      throw new CatalogError(
+        `${sourceRepository}:${sourcePath} must define a non-empty apply_to, applyTo, or paths frontmatter value`,
+      );
     }
-    const description = typeof metadata.get("description") === "string" && metadata.get("description").trim()
-      ? metadata.get("description").trim().replace(/\s+/g, " ")
-      : fs.readFileSync(file, "utf8").replace(/^---[\s\S]*?---\s*/, "").trim().split("\n")[0].replace(/^#\s*/, "").trim() || id;
-    const rawLicense = metadata.get("license");
-    const licenseStatus = typeof rawLicense === "string" && rawLicense.trim()
-      ? rawLicense : "not-declared";
+    const description =
+      typeof metadata.get('description') === 'string' && metadata.get('description').trim()
+        ? metadata.get('description').trim().replace(/\s+/g, ' ')
+        : fs
+            .readFileSync(file, 'utf8')
+            .replace(/^---[\s\S]*?---\s*/, '')
+            .trim()
+            .split('\n')[0]
+            .replace(/^#\s*/, '')
+            .trim() || id;
+    const rawLicense = metadata.get('license');
+    const licenseStatus = typeof rawLicense === 'string' && rawLicense.trim() ? rawLicense : 'not-declared';
     resources.push({
-      id, kind, description, source_path: sourcePath,
-      ...(kind === "instruction" ? { apply_to: applyTo } : {}),
+      id,
+      kind,
+      description,
+      source_path: sourcePath,
+      ...(kind === 'instruction' ? { apply_to: applyTo } : {}),
       license_status: licenseStatus,
       license_spdx: spdxExpression(licenseStatus),
     });
   }
-  const catalog = { catalog_version: 1, catalog_name: name, source_repository: sourceRepository, source_ref: sourceRef, resources };
+  const catalog = {
+    catalog_version: 1,
+    catalog_name: name,
+    source_repository: sourceRepository,
+    source_ref: sourceRef,
+    resources,
+  };
   validateSourceCatalog(catalog, { name, repositoryId: sourceRepository });
   return catalog;
 }

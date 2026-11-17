@@ -1,13 +1,13 @@
-"use strict";
+'use strict';
 
-import { renderInputField } from "./input-field.mjs";
+import { renderInputField } from './input-field.mjs';
 
 export interface SelectInputProps {
   value: string;
   width: number;
   focused: boolean;
   compact: boolean;
-  side?: "top" | "middle" | "bottom";
+  side?: 'top' | 'middle' | 'bottom';
   focusedColor: string;
   unfocusedColor: string;
   labelColor: string;
@@ -15,10 +15,20 @@ export interface SelectInputProps {
 
 // SelectInput: one input-field row; focus switches its border color.
 export function SelectInput({
-  value, width, focused, compact, side, focusedColor, unfocusedColor, labelColor,
+  value,
+  width,
+  focused,
+  compact,
+  side,
+  focusedColor,
+  unfocusedColor,
+  labelColor,
 }: SelectInputProps) {
   return renderInputField({
-    value, width, side, compact,
+    value,
+    width,
+    side,
+    compact,
     color: focused ? focusedColor : unfocusedColor,
     labelColor,
   });

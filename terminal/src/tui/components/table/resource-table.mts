@@ -1,8 +1,9 @@
-"use strict";
+'use strict';
 
-import React, { type ReactNode } from "react";
-import { Text } from "ink";
-import { DASHBOARD_THEME } from "../../colors.js";
+import { Text } from 'ink';
+import React, { type ReactNode } from 'react';
+
+import { DASHBOARD_THEME } from '../../colors.js';
 
 const h = React.createElement;
 
@@ -17,15 +18,22 @@ export function resourceTableWindow<T>(items: T[], selectedIndex: number, viewpo
 }
 
 // ResourceTableRow: one text row; selected rows use the selected foreground/surface.
-export function ResourceTableRow({ row, selected }: {
+export function ResourceTableRow({
+  row,
+  selected,
+}: {
   row: { key: string; color: string; text: string };
   selected: boolean;
 }) {
-  return h(Text, {
-    color: selected ? DASHBOARD_THEME.semantic.selectedForeground : row.color,
-    backgroundColor: selected ? DASHBOARD_THEME.semantic.selected : undefined,
-    bold: selected,
-  }, row.text);
+  return h(
+    Text,
+    {
+      color: selected ? DASHBOARD_THEME.semantic.selectedForeground : row.color,
+      backgroundColor: selected ? DASHBOARD_THEME.semantic.selected : undefined,
+      bold: selected,
+    },
+    row.text,
+  );
 }
 
 export function resourceTableRows<T>({
@@ -37,13 +45,17 @@ export function resourceTableRows<T>({
   window: ResourceTableWindow<T>;
   selectedIndex: number;
   emptyMessage: string;
-  renderRow: (item: T, selected: boolean, absoluteIndex: number) => {
+  renderRow: (
+    item: T,
+    selected: boolean,
+    absoluteIndex: number,
+  ) => {
     key: string;
     color: string;
     text: string;
   };
 }): ReactNode[] {
-  if (!window.items.length) return [h(Text, { key: "resource-table-empty", dimColor: true }, emptyMessage)];
+  if (!window.items.length) return [h(Text, { key: 'resource-table-empty', dimColor: true }, emptyMessage)];
   return window.items.map((item, index) => {
     const absoluteIndex = window.first + index;
     const selected = absoluteIndex === selectedIndex;

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
 import { JSDOM } from 'jsdom';
 import { createServer } from 'vite';
+
 import { createComponentRouter } from '../test/router-fixture.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -16,9 +18,25 @@ const vite = await createServer({
 after(() => vite.close());
 
 test('the final section activates at the reachable scroll limit and updates after scrolling or resizing', async () => {
-  const dom = new JSDOM('<!doctype html><header></header><div id="root"></div>', { url: 'https://kitia.test/' });
-  const names = ['window', 'document', 'navigator', 'HTMLElement', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT',
-    'self', 'history', 'sessionStorage', 'addEventListener', 'removeEventListener', 'scrollTo', 'scrollX', 'scrollY'];
+  const dom = new JSDOM('<!doctype html><header></header><div id="root"></div>', {
+    url: 'https://kitia.test/',
+  });
+  const names = [
+    'window',
+    'document',
+    'navigator',
+    'HTMLElement',
+    'ResizeObserver',
+    'IS_REACT_ACT_ENVIRONMENT',
+    'self',
+    'history',
+    'sessionStorage',
+    'addEventListener',
+    'removeEventListener',
+    'scrollTo',
+    'scrollX',
+    'scrollY',
+  ];
   const previous = new Map(names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
   let scrollY = 0;
   let viewportHeight = 1100;
@@ -27,9 +45,15 @@ test('the final section activates at the reachable scroll limit and updates afte
   let notifyResize;
   const observed = new Set();
   class GeometryObserver {
-    constructor(callback) { notifyResize = callback; }
-    observe(target) { observed.add(target); }
-    disconnect() { observed.clear(); }
+    constructor(callback) {
+      notifyResize = callback;
+    }
+    observe(target) {
+      observed.add(target);
+    }
+    disconnect() {
+      observed.clear();
+    }
   }
   dom.window.scrollTo = () => {};
   dom.window.HTMLElement.prototype.scrollIntoView = () => {};
@@ -48,13 +72,19 @@ test('the final section activates at the reachable scroll limit and updates afte
     scrollTo: dom.window.scrollTo,
     scrollX: 0,
     scrollY: 0,
-  })) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }))
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   Object.defineProperty(window, 'scrollY', { get: () => scrollY });
   Object.defineProperty(window, 'innerHeight', { get: () => viewportHeight });
   Object.defineProperty(document.documentElement, 'scrollHeight', { get: () => pageHeight });
   window.matchMedia = () => ({ matches: true });
-  window.requestAnimationFrame = (callback) => { pendingFrame = callback; return 1; };
-  window.cancelAnimationFrame = () => { pendingFrame = undefined; };
+  window.requestAnimationFrame = (callback) => {
+    pendingFrame = callback;
+    return 1;
+  };
+  window.cancelAnimationFrame = () => {
+    pendingFrame = undefined;
+  };
 
   let root;
   let React;
@@ -81,7 +111,8 @@ test('the final section activates at the reachable scroll limit and updates afte
       window.dispatchEvent(new dom.window.Event('scroll'));
       await flush();
     };
-    const active = () => document.querySelector('nav[aria-label="On this page"] a[aria-current="location"]')?.getAttribute('href');
+    const active = () =>
+      document.querySelector('nav[aria-label="On this page"] a[aria-current="location"]')?.getAttribute('href');
 
     await flush();
     assert.equal(active(), undefined);
@@ -94,7 +125,11 @@ test('the final section activates at the reachable scroll limit and updates afte
     await move(2899.5);
     assert.equal(active(), '#commands', 'fractional scroll rounding must not make the final section unreachable');
     await move(2900);
-    assert.equal(active(), '#commands', 'Automation is active even though its heading remains 300px below the viewport top');
+    assert.equal(
+      active(),
+      '#commands',
+      'Automation is active even though its heading remains 300px below the viewport top',
+    );
     assert.equal(document.querySelectorAll('nav[aria-label="On this page"] a[aria-current]').length, 1);
     await move(2800);
     assert.equal(active(), '#workflow', 'scrolling back up must clear the end-of-page selection');

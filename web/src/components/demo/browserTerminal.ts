@@ -1,5 +1,6 @@
-import type { ReactElement } from 'react';
 import type { Instance } from 'ink';
+import type { ReactElement } from 'react';
+
 import {
   createDashboardInputTransport,
   type DashboardInputTransport,
@@ -68,20 +69,23 @@ export async function mountDashboardTerminal(
       return input;
     },
   });
-  const output = Object.assign(new Writable({
-    write(chunk, _encoding, callback) {
-      if (disposed) {
-        callback();
-        return;
-      }
-      terminal.write(typeof chunk === 'string' ? chunk : new Uint8Array(chunk), callback);
+  const output = Object.assign(
+    new Writable({
+      write(chunk, _encoding, callback) {
+        if (disposed) {
+          callback();
+          return;
+        }
+        terminal.write(typeof chunk === 'string' ? chunk : new Uint8Array(chunk), callback);
+      },
+    }),
+    {
+      isTTY: true,
+      columns: terminal.cols,
+      rows: terminal.rows,
+      getWindowSize: () => [terminal.cols, terminal.rows] as [number, number],
     },
-  }), {
-    isTTY: true,
-    columns: terminal.cols,
-    rows: terminal.rows,
-    getWindowSize: () => [terminal.cols, terminal.rows] as [number, number],
-  });
+  );
 
   const dispose = () => {
     if (disposed) return;
@@ -158,20 +162,25 @@ export async function mountDashboardTerminal(
     // terminal behind an apparently successful session.
     const initialRender = Promise.race([
       app.waitUntilRenderFlush(),
-      app.waitUntilExit().then(() => { exited = true; }),
+      app.waitUntilExit().then(() => {
+        exited = true;
+      }),
     ]);
     if (abort) await Promise.race([initialRender, abort.promise]);
     else await initialRender;
-    void app.waitUntilExit().then(() => {
-      exited = true;
-      if (!disposed) options.onExit?.();
-    }, (error: unknown) => {
-      exited = true;
-      if (!disposed) {
-        terminal.writeln(`\r\nTerminal error: ${error instanceof Error ? error.message : String(error)}`);
-        options.onExit?.();
-      }
-    });
+    void app.waitUntilExit().then(
+      () => {
+        exited = true;
+        if (!disposed) options.onExit?.();
+      },
+      (error: unknown) => {
+        exited = true;
+        if (!disposed) {
+          terminal.writeln(`\r\nTerminal error: ${error instanceof Error ? error.message : String(error)}`);
+          options.onExit?.();
+        }
+      },
+    );
   } catch (error) {
     dispose();
     throw error;

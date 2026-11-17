@@ -1,25 +1,22 @@
-"use strict";
+'use strict';
 
-import type { InstallState } from "../inventory/model.js";
-const { trackedPaths } = require("./files.js");
-import type { CatalogResource } from "../resources/model.js";
-const { findUnmanagedArtifacts } = require("../inventory/discovery.js");
+import type { InstallState } from '../inventory/model.js';
+const { trackedPaths } = require('./files.js');
+import type { CatalogResource } from '../resources/model.js';
+const { findUnmanagedArtifacts } = require('../inventory/discovery.js');
 
-const fs = require("node:fs");
-const path = require("node:path");
+const fs = require('node:fs');
+const path = require('node:path');
 // Native-only operations; the caller holds the target's operation lock.
-function removeUnmanagedResource(
-  targetRoot: string,
-  state: InstallState,
-  resource: CatalogResource,
-): string[] {
+function removeUnmanagedResource(targetRoot: string, state: InstallState, resource: CatalogResource): string[] {
   const scope = resource.scope;
   const messages: string[] = [];
-  if (scope !== "project" && scope !== "user") {
+  if (scope !== 'project' && scope !== 'user') {
     throw new Error(`Cannot remove an unmanaged artifact from scope '${scope}'.`);
   }
-  const current = findUnmanagedArtifacts(targetRoot, trackedPaths(state)).find((entry) =>
-    entry.kind === resource.kind && entry.id === resource.id);
+  const current = findUnmanagedArtifacts(targetRoot, trackedPaths(state)).find(
+    (entry) => entry.kind === resource.kind && entry.id === resource.id,
+  );
   if (!current?.paths?.length) {
     throw new Error(`${resource.kind}:${resource.id} is no longer detected as unmanaged; nothing was removed.`);
   }
@@ -36,18 +33,20 @@ function removeUnmanagedResource(
       throw new Error(`Refusing to remove an unexpected artifact path: ${absolutePath}`);
     }
   };
-  const targets: Array<{ absolutePath: string; relativePath: string }> =
-    current.paths.map((relativePath) => {
-    if (relativePath.startsWith("/") || relativePath.includes("\\") ||
-        relativePath.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+  const targets: Array<{ absolutePath: string; relativePath: string }> = current.paths.map((relativePath) => {
+    if (
+      relativePath.startsWith('/') ||
+      relativePath.includes('\\') ||
+      relativePath.split('/').some((segment) => !segment || segment === '.' || segment === '..')
+    ) {
       throw new Error(`Refusing to remove an unsafe artifact path: ${relativePath}`);
     }
-    const entryPath = path.resolve(targetRoot, ...relativePath.split("/"));
+    const entryPath = path.resolve(targetRoot, ...relativePath.split('/'));
     const relative = path.relative(targetRoot, entryPath);
-    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
       throw new Error(`Refusing to remove an unsafe artifact path: ${relativePath}`);
     }
-    if (resource.kind !== "skill") {
+    if (resource.kind !== 'skill') {
       assertSafePath(entryPath, false);
       return { absolutePath: entryPath, relativePath };
     }
@@ -55,23 +54,24 @@ function removeUnmanagedResource(
       throw new Error(`Refusing to remove an unexpected skill entry file: ${relativePath}`);
     }
     const skillDirectory = path.posix.dirname(relativePath);
-    if (![".agents/skills/", ".claude/skills/"]
-      .some((prefix) => skillDirectory.startsWith(prefix))) {
+    if (!['.agents/skills/', '.claude/skills/'].some((prefix) => skillDirectory.startsWith(prefix))) {
       throw new Error(`Refusing to remove a skill outside a supported skills directory: ${relativePath}`);
     }
-    if ([...protectedPaths].some((trackedPath) =>
-      trackedPath === skillDirectory || trackedPath.startsWith(`${skillDirectory}/`))) {
+    if (
+      [...protectedPaths].some(
+        (trackedPath) => trackedPath === skillDirectory || trackedPath.startsWith(`${skillDirectory}/`),
+      )
+    ) {
       throw new Error(`Refusing to remove ${skillDirectory}; it contains files managed by Kitia.`);
     }
-    const directoryPath = path.resolve(targetRoot, ...skillDirectory.split("/"));
+    const directoryPath = path.resolve(targetRoot, ...skillDirectory.split('/'));
     assertSafePath(entryPath, false);
     assertSafePath(directoryPath, true);
     return { absolutePath: directoryPath, relativePath: skillDirectory };
   });
-  const uniqueTargets = [...new Map(targets.map((target) =>
-    [target.absolutePath, target])).values()];
+  const uniqueTargets = [...new Map(targets.map((target) => [target.absolutePath, target])).values()];
   for (const { absolutePath, relativePath } of uniqueTargets) {
-    if (resource.kind === "skill") fs.rmSync(absolutePath, { recursive: true });
+    if (resource.kind === 'skill') fs.rmSync(absolutePath, { recursive: true });
     else fs.unlinkSync(absolutePath);
     messages.push(`Removed unmanaged ${resource.kind}:${resource.id} (${relativePath}).`);
   }

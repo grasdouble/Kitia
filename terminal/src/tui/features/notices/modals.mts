@@ -1,60 +1,77 @@
-import { modalFrame } from "../../modals.mjs";
-import { DASHBOARD_THEME } from "../../colors.js";
+import { DASHBOARD_THEME } from '../../colors.js';
+import { modalFrame } from '../../modals.mjs';
 const { semantic } = DASHBOARD_THEME;
 const MODAL_FOREGROUND = semantic.modal.foreground;
 
 export function inventoryMigrationModal({ scopes, columns }: { scopes: string[]; columns: number }) {
-  const affectedScopes = [...new Set(scopes.filter((scope) => ["project", "user"].includes(scope)))];
-  const scopeLabel = affectedScopes.length === 2
-    ? "project and user inventories"
-    : `${affectedScopes[0]} inventory`;
-  return modalFrame("INVENTORY MIGRATION REQUIRED", [
-    { text: `Migration is required for the ${scopeLabel}.`, color: semantic.accents.warning, bold: true },
-    ...affectedScopes.map((scope) => ({
-      text: `${scope.toUpperCase()} inventory needs migration.`,
-      color: scope === "user" ? semantic.selected : MODAL_FOREGROUND,
-      bold: true,
-    })),
-    "",
-    "Run this from the current project directory:",
-    {
-      text: "npx --yes @grasdouble/kitia migrate --apply",
-      color: semantic.selected,
-      bold: true,
-    },
-    "It checks project and home inventories, skipping ones already current.",
-    "Restart the dashboard after migration.",
-    "",
-    { text: "[ EXIT DASHBOARD ]", color: semantic.selected, bold: true },
-    "ENTER / ESC TO EXIT",
-  ], columns, semantic.accents.warning, 96);
+  const affectedScopes = [...new Set(scopes.filter((scope) => ['project', 'user'].includes(scope)))];
+  const scopeLabel = affectedScopes.length === 2 ? 'project and user inventories' : `${affectedScopes[0]} inventory`;
+  return modalFrame(
+    'INVENTORY MIGRATION REQUIRED',
+    [
+      {
+        text: `Migration is required for the ${scopeLabel}.`,
+        color: semantic.accents.warning,
+        bold: true,
+      },
+      ...affectedScopes.map((scope) => ({
+        text: `${scope.toUpperCase()} inventory needs migration.`,
+        color: scope === 'user' ? semantic.selected : MODAL_FOREGROUND,
+        bold: true,
+      })),
+      '',
+      'Run this from the current project directory:',
+      {
+        text: 'npx --yes @grasdouble/kitia migrate --apply',
+        color: semantic.selected,
+        bold: true,
+      },
+      'It checks project and home inventories, skipping ones already current.',
+      'Restart the dashboard after migration.',
+      '',
+      { text: '[ EXIT DASHBOARD ]', color: semantic.selected, bold: true },
+      'ENTER / ESC TO EXIT',
+    ],
+    columns,
+    semantic.accents.warning,
+    96,
+  );
 }
 
 export function onboardingModal(step: number) {
   const tour = [
     {
-      title: "1/3 · INVENTORY",
-      description: "Your installed resources live here. The highlighted list shows status, scope, kind, and catalog; move the selection to inspect an item.",
-      shortcut: "1 / 2 / 3 sections · ↑ / ↓ move · F filter · D details",
+      title: '1/3 · INVENTORY',
+      description:
+        'Your installed resources live here. The highlighted list shows status, scope, kind, and catalog; move the selection to inspect an item.',
+      shortcut: '1 / 2 / 3 sections · ↑ / ↓ move · F filter · D details',
     },
     {
-      title: "2/3 · CATALOG",
-      description: "Browse resources available to install. Select a resource with Enter to choose its scope and runtime before installing.",
-      shortcut: "1 / 2 / 3 sections · F filter · C catalog · K kind · Enter select",
+      title: '2/3 · CATALOG',
+      description:
+        'Browse resources available to install. Select a resource with Enter to choose its scope and runtime before installing.',
+      shortcut: '1 / 2 / 3 sections · F filter · C catalog · K kind · Enter select',
     },
     {
-      title: "3/3 · CATALOG MANAGEMENT",
-      description: "Manage the GitHub catalogs that supply resources. Refreshing updates the catalog index; it does not change installed resources.",
-      shortcut: "1 / 2 / 3 sections · A add · E edit · R refresh · Delete remove",
+      title: '3/3 · CATALOG MANAGEMENT',
+      description:
+        'Manage the GitHub catalogs that supply resources. Refreshing updates the catalog index; it does not change installed resources.',
+      shortcut: '1 / 2 / 3 sections · A add · E edit · R refresh · Delete remove',
     },
   ][step];
-  return modalFrame(tour.title, [
-    tour.description,
-    "",
-    tour.shortcut,
-    "",
-    step < 2 ? "ENTER / SPACE / → NEXT · ← BACK · ESC FINISH" : "ENTER / SPACE / ← BACK · ESC FINISH",
-  ], 76, semantic.accents.warning, 76);
+  return modalFrame(
+    tour.title,
+    [
+      tour.description,
+      '',
+      tour.shortcut,
+      '',
+      step < 2 ? 'ENTER / SPACE / → NEXT · ← BACK · ESC FINISH' : 'ENTER / SPACE / ← BACK · ESC FINISH',
+    ],
+    76,
+    semantic.accents.warning,
+    76,
+  );
 }
 
 export function versionAvailableModal(
@@ -63,15 +80,21 @@ export function versionAvailableModal(
   changelogUrl: string,
   columns: number,
 ) {
-  return modalFrame("NEW VERSION AVAILABLE", [
-    "A newer version of Kitia is available.",
-    "",
-    `Installed: ${installedVersion}`,
-    `Available: ${availableVersion}`,
-    "",
-    "Changelog for this version:",
-    changelogUrl,
-    "",
-    "ENTER / ESC CLOSE",
-  ], columns, semantic.accents.success, 76);
+  return modalFrame(
+    'NEW VERSION AVAILABLE',
+    [
+      'A newer version of Kitia is available.',
+      '',
+      `Installed: ${installedVersion}`,
+      `Available: ${availableVersion}`,
+      '',
+      'Changelog for this version:',
+      changelogUrl,
+      '',
+      'ENTER / ESC CLOSE',
+    ],
+    columns,
+    semantic.accents.success,
+    76,
+  );
 }

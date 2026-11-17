@@ -1,26 +1,23 @@
-"use strict";
+'use strict';
 
-import type { ResourceInspection } from "./model.js";
-import type { InstallState } from "../inventory/model.js";
-const { targetPath } = require("../installations/files.js");
-import type { CatalogResource } from "../resources/model.js";
-const { auditTextResources } = require("./audit.js");
+import type { InstallState } from '../inventory/model.js';
+import type { ResourceInspection } from './model.js';
+const { targetPath } = require('../installations/files.js');
+import type { CatalogResource } from '../resources/model.js';
+const { auditTextResources } = require('./audit.js');
 
-const fs = require("node:fs");
-const path = require("node:path");
+const fs = require('node:fs');
+const path = require('node:path');
 // Native filesystem inspection; browser fixtures provide their own in-memory inspection facts.
-function localPreviewFiles(
-  targetRoot: string,
-  state: InstallState,
-  resource: CatalogResource,
-): ResourceInspection {
-  const record = resource.managed === false
-    ? undefined
-    : state.sources?.[resource.catalog || "source"]?.[`${resource.kind}s`]?.[resource.id];
-  if (resource.managed !== false && (
-    !record || record.source_repository !== resource.source_repository ||
-    record.source_path !== resource.source_path
-  )) {
+function localPreviewFiles(targetRoot: string, state: InstallState, resource: CatalogResource): ResourceInspection {
+  const record =
+    resource.managed === false
+      ? undefined
+      : state.sources?.[resource.catalog || 'source']?.[`${resource.kind}s`]?.[resource.id];
+  if (
+    resource.managed !== false &&
+    (!record || record.source_repository !== resource.source_repository || record.source_path !== resource.source_path)
+  ) {
     throw new Error(`No matching installed source record exists for ${resource.kind}:${resource.id}.`);
   }
   const tracked = record ? Object.keys(record.files || {}) : [];
@@ -30,7 +27,7 @@ function localPreviewFiles(
   }
   const regularFilePath = (relativePath: string) => {
     const absolutePath = targetPath(targetRoot, relativePath);
-    const segments = relativePath.split("/");
+    const segments = relativePath.split('/');
     let current = targetRoot;
     for (const [index, segment] of segments.entries()) {
       current = path.join(current, segment);
@@ -38,7 +35,7 @@ function localPreviewFiles(
       try {
         stat = fs.lstatSync(current);
       } catch (error) {
-        if (error.code === "ENOENT") throw new Error(`Local preview file is missing: ${relativePath}.`);
+        if (error.code === 'ENOENT') throw new Error(`Local preview file is missing: ${relativePath}.`);
         throw error;
       }
       if (stat.isSymbolicLink()) throw new Error(`Refusing symbolic link in local preview path: ${relativePath}.`);
@@ -56,7 +53,7 @@ function localPreviewFiles(
     try {
       bytes = fs.readFileSync(regularFilePath(relativePath));
     } catch (error) {
-      if (["EACCES", "EPERM", "EIO"].includes(error.code)) {
+      if (['EACCES', 'EPERM', 'EIO'].includes(error.code)) {
         return {
           path: relativePath,
           content: `[Unreadable file: ${error.code}.]`,
@@ -67,19 +64,19 @@ function localPreviewFiles(
     }
     let content: string;
     try {
-      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
       return {
         path: relativePath,
-        content: "[Non-text/unsupported file: binary or unsupported bytes are not displayed.]",
+        content: '[Non-text/unsupported file: binary or unsupported bytes are not displayed.]',
         auditBytes: bytes,
       };
     }
     if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(content)) {
       return {
         path: relativePath,
-        content: "[Unsupported text: terminal control characters are not displayed.]",
-        auditSkipReason: "contains terminal control characters",
+        content: '[Unsupported text: terminal control characters are not displayed.]',
+        auditSkipReason: 'contains terminal control characters',
       };
     }
     return { path: relativePath, content, auditBytes: bytes };
@@ -87,13 +84,13 @@ function localPreviewFiles(
   const ensureDirectory = (relativePath: string) => {
     targetPath(targetRoot, relativePath);
     let current = targetRoot;
-    for (const segment of relativePath.split("/")) {
+    for (const segment of relativePath.split('/')) {
       current = path.join(current, segment);
       let stat;
       try {
         stat = fs.lstatSync(current);
       } catch (error) {
-        if (error.code === "ENOENT") throw new Error(`Local preview directory is missing: ${relativePath}.`);
+        if (error.code === 'ENOENT') throw new Error(`Local preview directory is missing: ${relativePath}.`);
         throw error;
       }
       if (stat.isSymbolicLink()) throw new Error(`Refusing symbolic link in local preview path: ${relativePath}.`);
@@ -112,10 +109,11 @@ function localPreviewFiles(
     }
   };
   let paths: string[];
-  if (resource.kind === "skill") {
-    const entrypoints = resource.managed === false
-      ? suppliedPaths.filter((relativePath: string) => /\/SKILL\.md$/i.test(relativePath))
-      : tracked.filter((relativePath: string) => /\/SKILL\.md$/i.test(relativePath));
+  if (resource.kind === 'skill') {
+    const entrypoints =
+      resource.managed === false
+        ? suppliedPaths.filter((relativePath: string) => /\/SKILL\.md$/i.test(relativePath))
+        : tracked.filter((relativePath: string) => /\/SKILL\.md$/i.test(relativePath));
     if (!entrypoints.length) {
       throw new Error(`No installed SKILL.md entrypoint is recorded for ${resource.kind}:${resource.id}.`);
     }
@@ -128,11 +126,11 @@ function localPreviewFiles(
   }
   if (!paths.length) throw new Error(`No readable local files were found for ${resource.kind}:${resource.id}.`);
   const files = paths.map(readLocalFile);
-  const auditFiles: Array<{ path: string; kind: CatalogResource["kind"]; content: Buffer }> = [];
+  const auditFiles: Array<{ path: string; kind: CatalogResource['kind']; content: Buffer }> = [];
   const additionalSkipped: Array<{ path: string; reason: string }> = [];
   for (const [index, file] of files.entries()) {
     if (index >= 500) {
-      additionalSkipped.push({ path: file.path, reason: "exceeds the 500 file audit limit" });
+      additionalSkipped.push({ path: file.path, reason: 'exceeds the 500 file audit limit' });
     } else if (file.auditSkipReason) {
       additionalSkipped.push({ path: file.path, reason: file.auditSkipReason });
     } else if (file.auditBytes) {
@@ -144,7 +142,7 @@ function localPreviewFiles(
 
   return {
     files: files.map(({ path: relativePath, content }) => ({ path: relativePath, content })),
-    treeEntries: files.map(({ path }) => ({ path, type: "file" as const })),
+    treeEntries: files.map(({ path }) => ({ path, type: 'file' as const })),
     audit: {
       findings: auditResult.findings,
       coverage: {

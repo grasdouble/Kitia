@@ -1,9 +1,10 @@
-"use strict";
+'use strict';
 
-import { CATALOG_PRESETS } from "../core/catalogs/presets.js";
-import type { CatalogResource, ResourceKind } from "../core/resources/model.js";
-import type { PlanAction, InstallationTool, InstallationScope } from "../core/installations/model.js";
-import type { spawn } from "node:child_process";
+import type { spawn } from 'node:child_process';
+
+import { CATALOG_PRESETS } from '../core/catalogs/presets.js';
+import type { PlanAction, InstallationTool, InstallationScope } from '../core/installations/model.js';
+import type { CatalogResource, ResourceKind } from '../core/resources/model.js';
 export interface CliOptions {
   command?: string;
   action?: string;
@@ -42,18 +43,18 @@ export interface CliOptions {
   onProgress?: (message: string) => void;
   spawnProcess?: typeof spawn;
 }
-const os = require("node:os");
-const path = require("node:path");
-const { CatalogError, RESOURCE_ID, USER_INSTALLABLE_KINDS } = require("../core/resources/model.js");
-const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
-const { catalogNameKey } = require("../core/catalogs/model.js");
+const os = require('node:os');
+const path = require('node:path');
+const { CatalogError, RESOURCE_ID, USER_INSTALLABLE_KINDS } = require('../core/resources/model.js');
+const { loadUserSourceConfiguration } = require('../core/catalogs/config.js');
+const { catalogNameKey } = require('../core/catalogs/model.js');
 function isResourceKind(value: unknown): value is ResourceKind {
-  return value === "skill" || value === "agent" || value === "instruction";
+  return value === 'skill' || value === 'agent' || value === 'instruction';
 }
 const catalogPresetCommands = CATALOG_PRESETS.map(({ command }) => command);
 
 function isInstallationTool(value: string): value is InstallationTool {
-  return value === "claude" || value === "copilot" || value === "both";
+  return value === 'claude' || value === 'copilot' || value === 'both';
 }
 
 function catalogNames(): string[] {
@@ -65,244 +66,284 @@ function resolveCatalogName(value: string): string | undefined {
 }
 
 function parseArguments(args: string[]): CliOptions {
-  if (args.length === 0) args = ["dashboard"];
+  if (args.length === 0) args = ['dashboard'];
   const extras: CliOptions = {};
   const command = args[0];
-  const discovery = ["list", "search"].includes(command);
+  const discovery = ['list', 'search'].includes(command);
   const remaining = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === "--non-interactive") extras.nonInteractive = true;
-    else if (argument === "--audit") extras.audit = true;
-    else if (argument === "--json" && !discovery) extras.json = true;
-    else if (argument === "--scope") {
-      if (extras.scope) throw new CatalogError("--scope may only be specified once", "INVALID_ARGUMENT");
+    if (argument === '--non-interactive') extras.nonInteractive = true;
+    else if (argument === '--audit') extras.audit = true;
+    else if (argument === '--json' && !discovery) extras.json = true;
+    else if (argument === '--scope') {
+      if (extras.scope) throw new CatalogError('--scope may only be specified once', 'INVALID_ARGUMENT');
       const scope = args[++index];
-      if (scope !== "project" && scope !== "user") {
-        throw new CatalogError("--scope must be project or user", "INVALID_ARGUMENT");
+      if (scope !== 'project' && scope !== 'user') {
+        throw new CatalogError('--scope must be project or user', 'INVALID_ARGUMENT');
       }
       extras.scope = scope;
-    } else if (argument === "--catalog" && !discovery) {
+    } else if (argument === '--catalog' && !discovery) {
       const catalog = args[++index];
       const resolvedCatalog = resolveCatalogName(catalog);
       if (!resolvedCatalog) {
         const configured = catalogNames();
-        const hint = configured.length ? `Choose one of: ${configured.join(", ")}` : "No user catalogs are configured; add one with 'kitia catalog add'.";
-        throw new CatalogError(`Unknown catalog: ${catalog}. ${hint}`, "INVALID_ARGUMENT");
+        const hint = configured.length
+          ? `Choose one of: ${configured.join(', ')}`
+          : "No user catalogs are configured; add one with 'kitia catalog add'.";
+        throw new CatalogError(`Unknown catalog: ${catalog}. ${hint}`, 'INVALID_ARGUMENT');
       }
       extras.catalog = resolvedCatalog;
     } else remaining.push(argument);
   }
   try {
-    const options: CliOptions = command === "doctor"
-      ? { ...parseCommandArguments(["check", ...remaining.slice(1)]), command: "doctor" }
-      : parseCommandArguments(remaining);
+    const options: CliOptions =
+      command === 'doctor'
+        ? { ...parseCommandArguments(['check', ...remaining.slice(1)]), command: 'doctor' }
+        : parseCommandArguments(remaining);
     const action = options.action || options.command;
-    if (extras.audit && !["preview", "install"].includes(action)) {
-      throw new CatalogError("--audit is only supported for source preview and install commands", "INVALID_ARGUMENT");
+    if (extras.audit && !['preview', 'install'].includes(action)) {
+      throw new CatalogError('--audit is only supported for source preview and install commands', 'INVALID_ARGUMENT');
     }
     if (extras.scope) {
-      if (!["install", "update", "uninstall", "check", "doctor"].includes(action)) {
-        throw new CatalogError("--scope is only supported for installation, maintenance and doctor");
+      if (!['install', 'update', 'uninstall', 'check', 'doctor'].includes(action)) {
+        throw new CatalogError('--scope is only supported for installation, maintenance and doctor');
       }
-      if (extras.scope === "user") {
-        if (remaining.includes("--target")) {
-          throw new CatalogError("--scope user cannot be combined with --target");
+      if (extras.scope === 'user') {
+        if (remaining.includes('--target')) {
+          throw new CatalogError('--scope user cannot be combined with --target');
         }
         if (options.kind && !USER_INSTALLABLE_KINDS.has(options.kind)) {
-          throw new CatalogError("--scope user only supports skills and agents");
+          throw new CatalogError('--scope user only supports skills and agents');
         }
         extras.target = os.homedir();
         if (!extras.target || !path.isAbsolute(extras.target)) {
-          throw new CatalogError("Cannot resolve an absolute user home directory");
+          throw new CatalogError('Cannot resolve an absolute user home directory');
         }
       }
     }
-    if (extras.json && !["check", "doctor"].includes(action) &&
-        !( ["install", "update", "uninstall"].includes(action) && options.dryRun)) {
-      throw new CatalogError("--json is supported for discovery, check, doctor and lifecycle --dry-run only");
+    if (
+      extras.json &&
+      !['check', 'doctor'].includes(action) &&
+      !(['install', 'update', 'uninstall'].includes(action) && options.dryRun)
+    ) {
+      throw new CatalogError('--json is supported for discovery, check, doctor and lifecycle --dry-run only');
     }
-    if (extras.catalog && !["show", "preview", "install", "update", "uninstall", "check", "validate", "versions"].includes(command)) {
-      throw new CatalogError("--catalog is not supported for this command");
+    if (
+      extras.catalog &&
+      !['show', 'preview', 'install', 'update', 'uninstall', 'check', 'validate', 'versions'].includes(command)
+    ) {
+      throw new CatalogError('--catalog is not supported for this command');
     }
     return { ...options, ...extras };
   } catch (error) {
-    if (error instanceof CatalogError) error.code = "INVALID_ARGUMENT";
+    if (error instanceof CatalogError) error.code = 'INVALID_ARGUMENT';
     throw error;
   }
 }
 
 function parseCommandArguments(args: string[]): CliOptions {
   const [command, ...remaining] = args;
-  if (command === "collection") {
+  if (command === 'collection') {
     const [action, file, ...arguments_] = remaining;
-    const usage = "Usage: kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>] | import <file> [--trusted-key <public-pem>]";
-    if (action === "import" && file) {
+    const usage =
+      'Usage: kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>] | import <file> [--trusted-key <public-pem>]';
+    if (action === 'import' && file) {
       if (!arguments_.length) return { command, action, file };
-      if (arguments_.length === 2 && arguments_[0] === "--trusted-key" &&
-          arguments_[1] && !arguments_[1].startsWith("--")) {
+      if (
+        arguments_.length === 2 &&
+        arguments_[0] === '--trusted-key' &&
+        arguments_[1] &&
+        !arguments_[1].startsWith('--')
+      ) {
         return { command, action, file, trustedKey: arguments_[1] };
       }
       throw new CatalogError(usage);
     }
-    if (action === "export" && file) {
+    if (action === 'export' && file) {
       const selectors = [];
       let signingKey;
       for (let index = 0; index < arguments_.length; index += 1) {
         const argument = arguments_[index];
-        if (argument === "--signing-key") {
-          if (signingKey) throw new CatalogError("--signing-key may only be specified once");
+        if (argument === '--signing-key') {
+          if (signingKey) throw new CatalogError('--signing-key may only be specified once');
           const value = arguments_[++index];
-          if (!value || value.startsWith("--")) throw new CatalogError("--signing-key requires a PEM file path");
+          if (!value || value.startsWith('--')) throw new CatalogError('--signing-key requires a PEM file path');
           signingKey = value;
-        } else if (argument.startsWith("--")) {
+        } else if (argument.startsWith('--')) {
           throw new CatalogError(`Unknown collection option: ${argument}`);
         } else selectors.push(argument);
       }
       if (!selectors.length) throw new CatalogError(usage);
       for (const selector of selectors) {
-        const [catalog, kind, id, ...extra] = selector.split(":");
-        if (!catalog || !["skill", "agent", "instruction"].includes(kind) ||
-            !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id || "") || extra.length) {
+        const [catalog, kind, id, ...extra] = selector.split(':');
+        if (
+          !catalog ||
+          !['skill', 'agent', 'instruction'].includes(kind) ||
+          !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id || '') ||
+          extra.length
+        ) {
           throw new CatalogError(`Invalid resource selector '${selector}'. Use catalog:kind:id.`);
         }
       }
-      if (new Set(selectors).size !== selectors.length) throw new CatalogError("Collection selectors must be unique");
-      return { command, action, file, resourceSelectors: selectors, ...(signingKey ? { signingKey } : {}) };
+      if (new Set(selectors).size !== selectors.length) throw new CatalogError('Collection selectors must be unique');
+      return {
+        command,
+        action,
+        file,
+        resourceSelectors: selectors,
+        ...(signingKey ? { signingKey } : {}),
+      };
     }
     throw new CatalogError(usage);
   }
-  if (command === "catalog") {
+  if (command === 'catalog') {
     const [action, name, repository, ...extra] = remaining;
-    const usage = `Usage: kitia catalog <add <name> <github-repository> | ${catalogPresetCommands.map((preset) => `add ${preset}`).join(" | ")} | import <file> | export <file> | refresh <name> | refresh --all | remove <name> | list>`;
+    const usage = `Usage: kitia catalog <add <name> <github-repository> | ${catalogPresetCommands.map((preset) => `add ${preset}`).join(' | ')} | import <file> | export <file> | refresh <name> | refresh --all | remove <name> | list>`;
     if (extra.length) throw new CatalogError(usage);
-    if (["import", "export"].includes(action) && name && !repository) return { command, action, file: name };
-    if (action === "list" && name === undefined) return { command, action };
-    if (action === "remove" && name && !repository) return { command, action, name };
-    if (action === "refresh" && name && !repository) {
-      if (name === "--all") return { command, action, allCatalogs: true };
+    if (['import', 'export'].includes(action) && name && !repository) return { command, action, file: name };
+    if (action === 'list' && name === undefined) return { command, action };
+    if (action === 'remove' && name && !repository) return { command, action, name };
+    if (action === 'refresh' && name && !repository) {
+      if (name === '--all') return { command, action, allCatalogs: true };
       return { command, action, name };
     }
-    if (action === "add" && name && repository === undefined) {
+    if (action === 'add' && name && repository === undefined) {
       const preset = CATALOG_PRESETS.find(({ command: presetCommand }) => presetCommand === name);
       if (preset) return { command, action, name: preset.catalogName, repository: preset.repository };
     }
-    if (action === "add" && name && repository) return { command, action, name, repository };
+    if (action === 'add' && name && repository) return { command, action, name, repository };
     throw new CatalogError(usage);
   }
-  if (command === "onboarding") {
-    if (remaining.length) throw new CatalogError("Usage: kitia onboarding");
-    return { command, target: "." };
+  if (command === 'onboarding') {
+    if (remaining.length) throw new CatalogError('Usage: kitia onboarding');
+    return { command, target: '.' };
   }
-  if (command === "validate") {
-    if (remaining.length) throw new CatalogError("validate does not accept arguments");
+  if (command === 'validate') {
+    if (remaining.length) throw new CatalogError('validate does not accept arguments');
     return { command };
   }
-  if (command === "dashboard") {
-    if (remaining.length) throw new CatalogError("Usage: Kitia dashboard [--non-interactive]");
-    return { command, target: "." };
+  if (command === 'dashboard') {
+    if (remaining.length) throw new CatalogError('Usage: Kitia dashboard [--non-interactive]');
+    return { command, target: '.' };
   }
-  if (command === "list" || command === "search") {
-    const options: CliOptions = { command, query: "" };
-    if (command === "search") {
-      if (!remaining[0] || remaining[0].startsWith("--")) {
-        throw new CatalogError(`Usage: Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]`);
+  if (command === 'list' || command === 'search') {
+    const options: CliOptions = { command, query: '' };
+    if (command === 'search') {
+      if (!remaining[0] || remaining[0].startsWith('--')) {
+        throw new CatalogError(
+          `Usage: Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]`,
+        );
       }
       options.query = remaining.shift();
     }
     for (let index = 0; index < remaining.length; index += 1) {
       const option = remaining[index];
-      if (option === "--json") {
+      if (option === '--json') {
         options.json = true;
         continue;
       }
-      if (!["--kind", "--tag", "--status", "--catalog", "--license"].includes(option)) {
+      if (!['--kind', '--tag', '--status', '--catalog', '--license'].includes(option)) {
         throw new CatalogError(`Unknown option: ${option}`);
       }
       const value = remaining[++index];
-      if (!value || value.startsWith("--")) throw new CatalogError(`${option} requires a value`);
-      const resolvedCatalog = option === "--catalog" ? resolveCatalogName(value) : undefined;
-      if (option === "--catalog" && !resolvedCatalog) {
+      if (!value || value.startsWith('--')) throw new CatalogError(`${option} requires a value`);
+      const resolvedCatalog = option === '--catalog' ? resolveCatalogName(value) : undefined;
+      if (option === '--catalog' && !resolvedCatalog) {
         const configured = catalogNames();
-        const hint = configured.length ? `Choose one of: ${configured.join(", ")}` : "No user catalogs are configured; add one with 'kitia catalog add'.";
+        const hint = configured.length
+          ? `Choose one of: ${configured.join(', ')}`
+          : "No user catalogs are configured; add one with 'kitia catalog add'.";
         throw new CatalogError(`Unknown catalog: ${value}. ${hint}`);
       }
-      if (option === "--status" && !["experimental", "stable", "deprecated"].includes(value)) {
+      if (option === '--status' && !['experimental', 'stable', 'deprecated'].includes(value)) {
         throw new CatalogError(`Unknown status: ${value}`);
       }
-      if (option === "--kind") {
+      if (option === '--kind') {
         if (!isResourceKind(value)) throw new CatalogError(`Unknown kind: ${value}`);
         options.kind = value;
-      }
-      else if (option === "--tag") options.tag = value;
-      else if (option === "--status") options.status = value;
-      else if (option === "--license") options.license = value;
+      } else if (option === '--tag') options.tag = value;
+      else if (option === '--status') options.status = value;
+      else if (option === '--license') options.license = value;
       else options.catalog = resolvedCatalog;
     }
     return options;
   }
-  if (command === "versions") {
+  if (command === 'versions') {
     const [kind, id, ...extra] = remaining;
-    if (!isResourceKind(kind) || !RESOURCE_ID.test(id || "") || extra.length) {
-      throw new CatalogError("Usage: Kitia versions <kind> <id>");
+    if (!isResourceKind(kind) || !RESOURCE_ID.test(id || '') || extra.length) {
+      throw new CatalogError('Usage: Kitia versions <kind> <id>');
     }
     return { command, kind, id };
   }
-  if (command === "show" || command === "preview") {
-    const kind = isResourceKind(remaining[0]) && remaining.length >= 2 && RESOURCE_ID.test(remaining[1])
-      ? remaining[0] : undefined;
+  if (command === 'show' || command === 'preview') {
+    const kind =
+      isResourceKind(remaining[0]) && remaining.length >= 2 && RESOURCE_ID.test(remaining[1])
+        ? remaining[0]
+        : undefined;
     const [id, ...extra] = remaining.slice(kind ? 1 : 0);
-    if (typeof id !== "string" || !RESOURCE_ID.test(id) || extra.length) {
+    if (typeof id !== 'string' || !RESOURCE_ID.test(id) || extra.length) {
       throw new CatalogError(`Usage: Kitia ${command} [<kind>] <id>`);
     }
     return { command, kind, id };
   }
-  if (command === "check") {
-    let target = ".";
+  if (command === 'check') {
+    let target = '.';
     for (let index = 0; index < remaining.length; index += 1) {
-      if (remaining[index] !== "--target") throw new CatalogError(`Unknown option: ${remaining[index]}`);
+      if (remaining[index] !== '--target') throw new CatalogError(`Unknown option: ${remaining[index]}`);
       const value = remaining[index + 1];
-      if (!value || value.startsWith("--")) throw new CatalogError("--target requires a value");
+      if (!value || value.startsWith('--')) throw new CatalogError('--target requires a value');
       target = value;
       index += 1;
     }
     return { command, target };
   }
-  if (!["install", "update", "uninstall"].includes(command)) {
+  if (!['install', 'update', 'uninstall'].includes(command)) {
     throw new CatalogError(`Unknown command: ${command}`);
   }
-  const updateAll = command === "update" && (!remaining.length || remaining[0]?.startsWith("--"));
-  const kind = !updateAll && isResourceKind(remaining[0]) && remaining.length >= 2 && RESOURCE_ID.test(remaining[1])
-    ? remaining[0] : undefined;
+  const updateAll = command === 'update' && (!remaining.length || remaining[0]?.startsWith('--'));
+  const kind =
+    !updateAll && isResourceKind(remaining[0]) && remaining.length >= 2 && RESOURCE_ID.test(remaining[1])
+      ? remaining[0]
+      : undefined;
   const id = updateAll ? undefined : remaining[kind ? 1 : 0];
   const options = updateAll ? remaining : remaining.slice(kind ? 2 : 1);
-  if (!updateAll && (typeof id !== "string" || !RESOURCE_ID.test(id))) {
+  if (!updateAll && (typeof id !== 'string' || !RESOURCE_ID.test(id))) {
     throw new CatalogError(`Usage: kitia ${command} [<kind>] <id> [--target <dir>]`);
   }
-  const result: CliOptions = { command, kind, id, tool: command === "install" ? "copilot" : null, target: ".", dryRun: false, force: false };
+  const result: CliOptions = {
+    command,
+    kind,
+    id,
+    tool: command === 'install' ? 'copilot' : null,
+    target: '.',
+    dryRun: false,
+    force: false,
+  };
   for (let index = 0; index < options.length; index += 1) {
     const option = options[index];
-    if (option === "--dry-run") result.dryRun = true;
-    else if (option === "--force") result.force = true;
-    else if (option === "--ref" && ["install", "update"].includes(command)) {
+    if (option === '--dry-run') result.dryRun = true;
+    else if (option === '--force') result.force = true;
+    else if (option === '--ref' && ['install', 'update'].includes(command)) {
       const value = options[index + 1];
-      if (!value || value.startsWith("--")) throw new CatalogError("--ref requires a commit SHA or hexadecimal prefix");
-      if (!/^[a-f0-9]{7,40}$/i.test(value)) throw new CatalogError("--ref must be a 7- to 40-character hexadecimal commit SHA prefix");
+      if (!value || value.startsWith('--')) throw new CatalogError('--ref requires a commit SHA or hexadecimal prefix');
+      if (!/^[a-f0-9]{7,40}$/i.test(value))
+        throw new CatalogError('--ref must be a 7- to 40-character hexadecimal commit SHA prefix');
       result.ref = value.toLowerCase();
       index += 1;
-    } else if (option === "--target" || (option === "--tool" && command === "install")) {
+    } else if (option === '--target' || (option === '--tool' && command === 'install')) {
       const value = options[index + 1];
-      if (!value || value.startsWith("--")) throw new CatalogError(`${option} requires a value`);
-      if (option === "--target") result.target = value;
+      if (!value || value.startsWith('--')) throw new CatalogError(`${option} requires a value`);
+      if (option === '--target') result.target = value;
       else {
-        if (!isInstallationTool(value)) throw new CatalogError("--tool must be one of: claude, copilot or both");
+        if (!isInstallationTool(value)) throw new CatalogError('--tool must be one of: claude, copilot or both');
         result.tool = value;
       }
       index += 1;
     } else throw new CatalogError(`Unknown option: ${option}`);
   }
   if (result.ref && (!result.kind || !result.id)) {
-    throw new CatalogError("--ref requires a specific skill, agent, or instruction install or update");
+    throw new CatalogError('--ref requires a specific skill, agent, or instruction install or update');
   }
   return result;
 }
@@ -323,7 +364,7 @@ function printHelp() {
   Kitia update [<kind> <id>] [--ref <full-sha>] [--target <dir>] [--dry-run] [--force]
   Kitia uninstall [<kind>] <id> [--target <dir>] [--dry-run] [--force]
   Kitia catalog add <name> <https-github-url>
-  ${catalogPresetCommands.map((preset) => `Kitia catalog add ${preset}`).join("\n  ")}
+  ${catalogPresetCommands.map((preset) => `Kitia catalog add ${preset}`).join('\n  ')}
   Kitia catalog import <file>
   Kitia catalog export <file>
   Kitia collection export <file> <catalog:kind:id...> [--signing-key <private-pem>]

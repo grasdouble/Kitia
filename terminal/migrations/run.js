@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-"use strict";
+'use strict';
 
-const fs = require("node:fs");
-const path = require("node:path");
-const os = require("node:os");
-const { randomUUID } = require("node:crypto");
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const { randomUUID } = require('node:crypto');
 
-const { CURRENT_INVENTORY_VERSION } = require("../dist/core/inventory/version.js");
-const { LOCK_PATH: INVENTORY_PATH } = require("../dist/core/inventory/model.js");
-const { OPERATION_LOCK } = require("../dist/core/installations/lock.js");
+const { CURRENT_INVENTORY_VERSION } = require('../dist/core/inventory/version.js');
+const { LOCK_PATH: INVENTORY_PATH } = require('../dist/core/inventory/model.js');
+const { OPERATION_LOCK } = require('../dist/core/installations/lock.js');
 const CURRENT_VERSION = CURRENT_INVENTORY_VERSION;
 const MIGRATIONS = new Map();
 
@@ -38,16 +38,15 @@ function migrateInventory(inventory) {
 }
 
 function validateCurrentInventory(inventory) {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-migration-"));
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-inventory-migration-'));
   try {
-    const metadataDirectory = path.join(temporary, ".agents");
+    const metadataDirectory = path.join(temporary, '.agents');
     fs.mkdirSync(metadataDirectory);
-    fs.writeFileSync(
-      path.join(temporary, INVENTORY_PATH),
-      `${JSON.stringify(inventory)}\n`,
-      { flag: "wx", mode: 0o600 },
-    );
-    const { readInstallState } = require("../dist/core/inventory/inventory.js");
+    fs.writeFileSync(path.join(temporary, INVENTORY_PATH), `${JSON.stringify(inventory)}\n`, {
+      flag: 'wx',
+      mode: 0o600,
+    });
+    const { readInstallState } = require('../dist/core/inventory/inventory.js');
     readInstallState(temporary);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
@@ -59,29 +58,29 @@ function parseArguments(args) {
   let sawDryRun = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === "--apply") {
+    if (argument === '--apply') {
       apply = true;
-    } else if (argument === "--dry-run") {
+    } else if (argument === '--dry-run') {
       sawDryRun = true;
-    } else if (argument === "--help" || argument === "-h") {
+    } else if (argument === '--help' || argument === '-h') {
       return { help: true };
     } else {
       throw new Error(`Unknown option: ${argument}`);
     }
   }
-  if (apply && sawDryRun) throw new Error("--apply and --dry-run cannot be combined.");
+  if (apply && sawDryRun) throw new Error('--apply and --dry-run cannot be combined.');
   return { apply };
 }
 
 function resolveInventoryFile(target) {
   const root = fs.realpathSync(target);
   if (!fs.statSync(root).isDirectory()) throw new Error(`Target must be a directory: ${target}`);
-  const metadataDirectory = path.join(root, ".agents");
+  const metadataDirectory = path.join(root, '.agents');
   let directoryStat;
   try {
     directoryStat = fs.lstatSync(metadataDirectory);
   } catch (error) {
-    if (error.code === "ENOENT") return { root, inventoryFile: null, fileStat: null };
+    if (error.code === 'ENOENT') return { root, inventoryFile: null, fileStat: null };
     throw error;
   }
   if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
@@ -92,20 +91,22 @@ function resolveInventoryFile(target) {
   try {
     fileStat = fs.lstatSync(inventoryFile);
   } catch (error) {
-    if (error.code === "ENOENT") return { root, inventoryFile: null, fileStat: null };
+    if (error.code === 'ENOENT') return { root, inventoryFile: null, fileStat: null };
     throw error;
   }
   if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
     throw new Error(`Inventory must be a regular file: ${inventoryFile}`);
   }
   if (fs.existsSync(path.join(root, OPERATION_LOCK))) {
-    throw new Error(`A catalog operation lock exists in ${root}; wait for active work or recover the lock before migrating.`);
+    throw new Error(
+      `A catalog operation lock exists in ${root}; wait for active work or recover the lock before migrating.`,
+    );
   }
   return { root, inventoryFile, fileStat };
 }
 
 function backupFileName(inventoryFile, now) {
-  const stamp = now.toISOString().replace(/[-:.TZ]/g, "");
+  const stamp = now.toISOString().replace(/[-:.TZ]/g, '');
   const base = `${inventoryFile}.backup-${stamp}`;
   for (let suffix = 0; ; suffix += 1) {
     const candidate = suffix ? `${base}-${suffix}` : base;
@@ -117,7 +118,7 @@ function writeAtomic(inventoryFile, data, mode) {
   const temporary = `${inventoryFile}.${process.pid}.${randomUUID()}.tmp`;
   let descriptor;
   try {
-    descriptor = fs.openSync(temporary, "wx", mode);
+    descriptor = fs.openSync(temporary, 'wx', mode);
     fs.writeFileSync(descriptor, data);
     fs.fsyncSync(descriptor);
     fs.closeSync(descriptor);
@@ -128,7 +129,7 @@ function writeAtomic(inventoryFile, data, mode) {
     try {
       fs.unlinkSync(temporary);
     } catch (cleanupError) {
-      if (cleanupError.code !== "ENOENT") throw cleanupError;
+      if (cleanupError.code !== 'ENOENT') throw cleanupError;
     }
     throw error;
   }
@@ -143,7 +144,7 @@ function migrateTarget(target, { apply = false, now = new Date(), log = console.
   const original = fs.readFileSync(inventoryFile);
   let inventory;
   try {
-    inventory = JSON.parse(original.toString("utf8"));
+    inventory = JSON.parse(original.toString('utf8'));
   } catch (error) {
     throw new Error(`Cannot parse ${INVENTORY_PATH}: ${error.message}`);
   }
@@ -153,13 +154,17 @@ function migrateTarget(target, { apply = false, now = new Date(), log = console.
     return { root, migrated, migrations, backup: null };
   }
   if (!apply) {
-    log(`Would migrate inventory ${migrations.join(" -> ")} to version ${CURRENT_VERSION}. No files were changed; rerun with --apply to create a backup and apply it.`);
+    log(
+      `Would migrate inventory ${migrations.join(' -> ')} to version ${CURRENT_VERSION}. No files were changed; rerun with --apply to create a backup and apply it.`,
+    );
     return { root, migrated, migrations, backup: null };
   }
 
   const latest = fs.readFileSync(inventoryFile);
   if (!latest.equals(original)) {
-    throw new Error("The inventory changed during migration planning; no files were written. Retry after reviewing the current inventory.");
+    throw new Error(
+      'The inventory changed during migration planning; no files were written. Retry after reviewing the current inventory.',
+    );
   }
   const backup = backupFileName(inventoryFile, now);
   fs.copyFileSync(inventoryFile, backup, fs.constants.COPYFILE_EXCL);
@@ -167,24 +172,20 @@ function migrateTarget(target, { apply = false, now = new Date(), log = console.
   try {
     const current = fs.readFileSync(inventoryFile);
     if (!current.equals(original)) {
-      throw new Error("The inventory changed while creating its backup.");
+      throw new Error('The inventory changed while creating its backup.');
     }
-    writeAtomic(
-      inventoryFile,
-      `${JSON.stringify(migrated, null, 2)}\n`,
-      fileStat.mode & 0o777,
-    );
+    writeAtomic(inventoryFile, `${JSON.stringify(migrated, null, 2)}\n`, fileStat.mode & 0o777);
   } catch (error) {
     throw new Error(`Migration did not replace the inventory. The original backup is at ${backup}: ${error.message}`);
   }
-  log(`Migrated inventory ${migrations.join(" -> ")} to version ${CURRENT_VERSION}. Backup: ${backup}`);
+  log(`Migrated inventory ${migrations.join(' -> ')} to version ${CURRENT_VERSION}. Backup: ${backup}`);
   return { root, migrated, migrations, backup };
 }
 
 function installationTargets(workingDirectory = process.cwd(), homeDirectory = os.homedir()) {
   const candidates = [
-    { label: "Project", directory: workingDirectory },
-    { label: "Home", directory: homeDirectory },
+    { label: 'Project', directory: workingDirectory },
+    { label: 'Home', directory: homeDirectory },
   ];
   const targets = new Map();
   for (const candidate of candidates) {
@@ -195,7 +196,7 @@ function installationTargets(workingDirectory = process.cwd(), homeDirectory = o
   }
   return [...targets.values()].map((target) => ({
     ...target,
-    label: target.labels.join(" and ").toLowerCase(),
+    label: target.labels.join(' and ').toLowerCase(),
   }));
 }
 
@@ -214,9 +215,9 @@ function migrateInstallations({
     for (const { label, plan } of plans) {
       if (plan.skipped) log(`${label}: no inventory; skipped.`);
       else if (!plan.migrations.length) log(`${label}: already at version ${CURRENT_VERSION}; skipped.`);
-      else log(`${label}: would migrate ${plan.migrations.join(" -> ")} to version ${CURRENT_VERSION}.`);
+      else log(`${label}: would migrate ${plan.migrations.join(' -> ')} to version ${CURRENT_VERSION}.`);
     }
-    log("No files were changed. Rerun with --apply to create backups and migrate.");
+    log('No files were changed. Rerun with --apply to create backups and migrate.');
     return plans;
   }
 
@@ -262,6 +263,13 @@ if (require.main === module) {
 }
 
 module.exports = {
-  CURRENT_VERSION, applyMigrationChain, migrateInventory, validateCurrentInventory, parseArguments,
-  installationTargets, migrateTarget, migrateInstallations, main,
+  CURRENT_VERSION,
+  applyMigrationChain,
+  migrateInventory,
+  validateCurrentInventory,
+  parseArguments,
+  installationTargets,
+  migrateTarget,
+  migrateInstallations,
+  main,
 };

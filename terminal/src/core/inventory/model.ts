@@ -1,4 +1,4 @@
-const LOCK_PATH = ".agents/kitia-lock.json";
+const LOCK_PATH = '.agents/kitia-lock.json';
 
 export interface FileFingerprint {
   sha256: string;

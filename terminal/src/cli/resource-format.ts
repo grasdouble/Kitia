@@ -1,7 +1,7 @@
-"use strict";
+'use strict';
 
-import type { CatalogResource } from "../core/resources/model.js";
-const { sourceCatalogName } = require("../core/inventory/inventory.js");
+import type { CatalogResource } from '../core/resources/model.js';
+const { sourceCatalogName } = require('../core/inventory/inventory.js');
 
 function formatSourceResource(resource: CatalogResource): string {
   return [
@@ -11,7 +11,7 @@ function formatSourceResource(resource: CatalogResource): string {
     `source: ${resource.source_repository}/${resource.source_path}@${resource.source_ref}`,
     `license: ${resource.license_status}`,
     `upstream: https://github.com/${resource.source_repository}/tree/${resource.source_ref}/${resource.source_path}`,
-  ].join("\n");
+  ].join('\n');
 }
 
 module.exports = { formatSourceResource };
