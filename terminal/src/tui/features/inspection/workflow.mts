@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Key } from "ink";
 import type { CatalogResource } from "../../../catalog/entries.js";
-import type { DashboardActionResult } from "../../contracts.js";
+import type { DashboardActionResult } from "../../../core/action-result.js";
 import { inspectionPageCount } from "../../screens/inspection.mjs";
 
 export function useInspection() {

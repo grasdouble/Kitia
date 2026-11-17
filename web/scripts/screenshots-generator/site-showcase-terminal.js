@@ -6,7 +6,8 @@ const { loadCommandCatalogs } = require("../../../terminal/dist/catalog/loading.
 const { collectInstalledScopes } = require("../../../terminal/dist/catalog/lifecycle.js");
 const { catalogEntries, formatDashboardRows } = require("../../../terminal/dist/cli/catalog.js");
 const { loadUserSourceConfiguration } = require("../../../terminal/dist/catalog/sources/config.js");
-const { executeDashboardAction } = require("../../../terminal/dist/cli/commands.js");
+const { executeCommand } = require("../../../terminal/dist/cli/commands.js");
+const { createDashboardActionHandler } = require("../../../terminal/dist/cli/dashboard.js");
 const { DASHBOARD_THEME } = require("../../../terminal/dist/tui/colors.js");
 const { root, seedShowcase } = require("./site-showcase-fixture.js");
 const { assertTermlessRuntime } = require("./termless-preflight.js");
@@ -165,7 +166,7 @@ async function launchShowcaseDashboard(directory, {
     const [{ createTerminal }, { createXtermBackend }, dashboard] = await Promise.all([
       import("@termless/core"),
       import("@termless/xtermjs"),
-      import(path.join(root, "terminal", "dist", "dashboard", "dashboard.mjs")),
+      import(path.join(root, "terminal", "dist", "tui", "dashboard.mjs")),
     ]);
     terminal = createTerminal({
       backend: createXtermBackend(),
@@ -203,15 +204,16 @@ async function launchShowcaseDashboard(directory, {
     const rows = formatDashboardRows(installed.resources, allResources);
     const catalogResources = catalogResourcesOverride || allResources;
     const dashboardOptions = { target: fixture.project, userTarget: fixture.home };
-    const execute = (operation, resource, installOptions) => executeDashboardAction(
-      operation,
-      resource,
-      dashboardOptions,
-      {
-        sourceResources: loaded.sourceResources,
-      },
-      installOptions,
-    );
+    const execute = (operation, resource, installOptions) => {
+      const { onProgress, ...options } = installOptions;
+      return createDashboardActionHandler(executeCommand, onProgress)(
+        operation,
+        resource,
+        dashboardOptions,
+        { sourceResources: loaded.sourceResources },
+        options,
+      );
+    };
     const runAction = actionHandlerOverride
       ? (operation, resource, installOptions) =>
         actionHandlerOverride(operation, resource, installOptions, { fixture, loaded, dashboardOptions })

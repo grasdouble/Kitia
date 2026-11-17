@@ -1,25 +1,6 @@
 import type { CatalogResource } from "../catalog/entries.js";
-import type { ScanError } from "../catalog/lifecycle.js";
+import type { DashboardActionResult } from "../core/action-result.js";
 import type { CatalogFreshnessStatus } from "./catalog-freshness.mjs";
-
-export interface DashboardActionFailure {
-  code: string;
-  category?: string;
-  paths?: string[];
-  recoverable?: boolean;
-  userMessage: string;
-  agent?: string;
-}
-export interface DashboardActionResult {
-  code: number;
-  messages: string[];
-  resources: CatalogResource[];
-  errors: ScanError[];
-  failure?: DashboardActionFailure;
-  previewFiles?: Array<{ path: string; content: string }>;
-  previewTree?: string[];
-  previewAuditLines?: string[];
-}
 
 export type CatalogEntry = { kind: "skill" | "agent" | "instruction"; id?: string; path: string };
 export type AddCatalogRequest = {

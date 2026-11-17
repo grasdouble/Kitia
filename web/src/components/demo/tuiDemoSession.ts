@@ -1,6 +1,7 @@
 import type { CatalogResource } from '../../../../terminal/src/catalog/entries';
+import type { DashboardActionResult as ActionResult } from '../../../../terminal/src/core/action-result';
 import type {
-  DashboardActions as Actions, DashboardActionResult as ActionResult,
+  DashboardActions as Actions,
   AddCatalogRequest as CatalogRequest, UserCatalog as Catalog, CatalogActionResult as CatalogResult,
 } from '../../../../terminal/src/tui/contracts';
 import {
