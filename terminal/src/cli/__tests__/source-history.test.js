@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { formatSourceVersionTable } = require("../../catalog/sources/history.ts");
+const { formatSourceVersionTable } = require("../history.ts");
 
 test("terminal source-history tables fit 80 and 120 columns while pipes retain full values", () => {
   const versions = [

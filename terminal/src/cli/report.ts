@@ -1,5 +1,6 @@
-import type { ResourceIssue } from "../catalog/entries.js";
+"use strict";
 
+import type { ResourceIssue } from "../core/resources/model.js";
 export interface CliReportIdentity {
   catalog?: string;
   kind: string;

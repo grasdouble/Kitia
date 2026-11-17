@@ -1,11 +1,12 @@
+const { adaptiveColumnWidths } = require("../table-layout.js");
+import type { CatalogResource } from "../core/resources/model.js";
+const { CatalogError } = require("../core/resources/model.js");
+const { matchesSearchText } = require("../core/resources/search.js");
+import type { DashboardActions } from "./contracts.js";
+const { resolveCatalogResource } = require("../core/resources/selection.js");
 "use strict";
 
 const readline = require("node:readline");
-const { CatalogError } = require("../catalog/resources/index.js");
-const { matchesSearchText } = require("../catalog/search.js");
-import type { CatalogResource } from "../catalog/entries.js";
-import type { DashboardActions } from "./contracts.js";
-const { adaptiveColumnWidths } = require("../table-layout.js");
 import { DASHBOARD_THEME } from "./colors.js";
 
 function fitColumn(value, width) {
@@ -77,28 +78,6 @@ function formatCatalogTable(resources, output = process.stdout) {
     formatCatalogHeader(columns, 0, color),
     ...resources.map((resource) => formatCatalogRow(resource, "", color, columns)),
   ].join("\n");
-}
-
-async function resolveCatalogResource(
-  resources: CatalogResource[],
-  id: string,
-  kind: string | null = null,
-  selector: (resources: CatalogResource[]) => Promise<CatalogResource | null> = selectCatalogResource,
-): Promise<CatalogResource | null> {
-  const candidates = resources.filter((resource) =>
-    resource.id === id && (!kind || resource.kind === kind),
-  );
-  if (!candidates.length) {
-    throw new CatalogError(`Resource not found: ${kind ? `${kind} ` : ""}${id}`, "RESOURCE_NOT_FOUND");
-  }
-  if (candidates.length === 1) {
-    return candidates[0];
-  }
-  const selected = await selector(candidates);
-  if (!selected) {
-    return null;
-  }
-  return selected;
 }
 
 function selectCatalogResource(
@@ -332,7 +311,7 @@ function colorize(value, color, enabled = supportsColor()) {
 }
 
 module.exports = {
-  formatCatalogTable, resolveCatalogResource, selectCatalogResource,
+  formatCatalogTable, selectCatalogResource,
   formatInstalledHeader, formatInstalledRow, renderInstalledResources, browseInstalledResources,
   truncateDescription, supportsColor, colorize,
 };

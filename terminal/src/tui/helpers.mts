@@ -3,11 +3,11 @@
 import { DASHBOARD_THEME } from "./colors.js";
 import { createRequire } from "node:module";
 import { adaptiveColumnWidths } from "../table-layout.js";
-import type { CatalogResource } from "../catalog/entries.js";
+import type { CatalogResource } from "../core/resources/model.js";
 
 const require = createRequire(import.meta.url);
-const { matchesSearchText, searchRelevance } = require("../catalog/search.js");
-const { matchesLicense } = require("../catalog/license.js");
+const { matchesSearchText, searchRelevance } = require("../core/resources/search.js");
+const { matchesLicense } = require("../core/resources/license.js");
 
 export interface InventoryCatalogConfiguration {
   name: string;

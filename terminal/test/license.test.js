@@ -6,8 +6,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { after, test } = require("node:test");
-const { createSourceIndex } = require("../dist/catalog/sources/manage.js");
-const { listCatalogResources } = require("../dist/cli/catalog.js");
+const { createSourceIndex } = require("../dist/core/catalogs/discovery.js");
+const { listCatalogResources } = require("../dist/core/resources/queries.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 
 let temporary;

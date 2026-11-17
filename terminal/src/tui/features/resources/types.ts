@@ -1,4 +1,4 @@
-import type { CatalogResource } from "../../../catalog/entries.js";
+import type { CatalogResource } from "../../../core/resources/model.js";
 
 export interface PendingDashboardAction {
   action: "install" | "update" | "uninstall" | "remove-unmanaged" | "preview";

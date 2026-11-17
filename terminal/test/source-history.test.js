@@ -3,9 +3,9 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const {
-  listSourceVersions, listSourceVersionsAsync, uniqueSourceVersionPrefixes,
-  formatSourceVersionTable, resolveSourceVersionPrefix,
-} = require("../dist/catalog/sources/history.js");
+  listSourceVersions, listSourceVersionsAsync, uniqueSourceVersionPrefixes, resolveSourceVersionPrefix,
+} = require("../dist/core/resources/history.js");
+const { formatSourceVersionTable } = require("../dist/cli/history.js");
 
 test("source history displays unique, aligned prefixes when seven-character SHAs collide", () => {
   const versions = [

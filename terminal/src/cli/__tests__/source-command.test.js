@@ -7,15 +7,15 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { test } = require("node:test");
-const { runSourceCommand } = require("../source-command.ts");
-const { readInstallState } = require("../../catalog/inventory/index.ts");
+const { runSourceOperation } = require("../../core/installations/source-operation.ts");
+const { readInstallState } = require("../../core/installations/state.ts");
 
 test("audit rejects resources without pinned source metadata instead of claiming to audit them", () => {
-  assert.throws(() => runSourceCommand({
+  assert.throws(() => runSourceOperation({
     action: "preview",
     audit: true,
     resource: { id: "local-agent", kind: "agent", catalog: "kitia", source_path: "agents/local.md" },
-    output: { log() {}, error() {} },
+    target: process.cwd(),
   }), (error) => error.code === "INVALID_ARGUMENT" &&
     error.message.includes("only supports pinned source-catalog resources"));
 });
@@ -42,20 +42,37 @@ test("audited source install blocks a matching pinned skill before writing files
   process.env.GIT_CONFIG_KEY_0 = `url.${pathToFileURL(fixture).href}.insteadOf`;
   process.env.GIT_CONFIG_VALUE_0 = "https://github.com/test/repository.git";
   try {
-    const messages = [];
-    assert.throws(() => runSourceCommand({
+    const audits = [];
+    const events = [];
+    assert.throws(() => runSourceOperation({
       action: "install",
       audit: true,
       target,
       tool: "copilot",
+      scope: "project",
       resource: {
         id: "demo", kind: "skill", catalog: "test", source_repository: "test/repository",
-        source_path: "skills/demo", source_ref: ref, license_status: "MIT",
+        source_path: "skills/demo", source_ref: ref, license_status: "not-declared",
       },
-      output: { log: (message) => messages.push(message), error: (message) => messages.push(message) },
+      onMessage: (message) => events.push({ type: "message", message }),
+      onAudit: (audit) => {
+        audits.push(audit);
+        events.push({ type: "audit", audit });
+      },
+    }, () => {
+      throw new Error("GH must not run when audit blocks installation");
     }), (error) => error.code === "AUDIT_BLOCKED");
-    assert.ok(messages.some((message) => message.includes("SKILL.md:1 [instruction-override]")));
-    assert.ok(messages.some((message) => message.includes("SKILL.md:1 [prompt-secrecy]")));
+    assert.equal(events.length, 2, "the license warning is delivered once before the blocking audit");
+    assert.equal(events[0].type, "message");
+    assert.equal(events[0].message.level, "error");
+    assert.match(events[0].message.text, /has no declared license/);
+    assert.equal(events[1].type, "audit");
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0].coverage.complete, true);
+    assert.deepEqual(audits[0].findings.map(({ code, path, line }) => ({ code, path, line })), [
+      { code: "instruction-override", path: "skills/demo/SKILL.md", line: 1 },
+      { code: "prompt-secrecy", path: "skills/demo/SKILL.md", line: 1 },
+    ]);
     assert.equal(fs.existsSync(path.join(target, ".agents", "skills", "demo", "SKILL.md")), false);
   } finally {
     for (const [key, value] of Object.entries(previousEnvironment)) {
@@ -79,16 +96,13 @@ test("progress-enabled source install preserves the injected GitHub runner", asy
     source_ref: "b".repeat(40),
     license_status: "MIT",
   };
-  const commandOptions = {
+  const operation = {
     action: "install",
-    kind: "skill",
-    id: resource.id,
     target,
     tool: "copilot",
     scope: "project",
     nonInteractive: true,
     resource,
-    sourceResources: [resource],
     onProgress: () => {},
   };
   const expectedArgs = [
@@ -98,7 +112,7 @@ test("progress-enabled source install preserves the injected GitHub runner", asy
   let invoked;
   try {
     await assert.rejects(
-      runSourceCommand(commandOptions, (args, cwd) => {
+      runSourceOperation(operation, (args, cwd) => {
         invoked = { args, cwd };
         return 1;
       }),
@@ -107,7 +121,7 @@ test("progress-enabled source install preserves the injected GitHub runner", asy
     assert.equal(invoked.cwd, fs.realpathSync(target));
     assert.deepEqual(invoked.args, expectedArgs);
 
-    assert.equal(await runSourceCommand(commandOptions, async (args, cwd) => {
+    const result = await runSourceOperation(operation, async (args, cwd) => {
       invoked = { args, cwd };
       const skillPath = path.join(target, ".agents", "skills", resource.id, "SKILL.md");
       fs.mkdirSync(path.dirname(skillPath), { recursive: true });
@@ -119,13 +133,14 @@ test("progress-enabled source install preserves the injected GitHub runner", asy
         "---", "", "Installed by the injected runner.", "",
       ].join("\n"));
       return 0;
-    }), 0);
+    });
+    assert.equal(result.status, 0);
     assert.deepEqual(invoked, { args: expectedArgs, cwd: fs.realpathSync(target) });
     assert.equal(readInstallState(target).sources.Test.skills["injected-skill"].source_ref, resource.source_ref);
 
     const rejectedRunnerError = new Error("injected runner rejection");
     await assert.rejects(
-      runSourceCommand(commandOptions, () => Promise.reject(rejectedRunnerError)),
+      runSourceOperation(operation, () => Promise.reject(rejectedRunnerError)),
       (error) => error === rejectedRunnerError,
     );
   } finally {

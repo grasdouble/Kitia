@@ -1,8 +1,8 @@
 "use strict";
 
-import { CATALOG_PRESETS } from "../catalog/sources/presets.js";
-import type { CatalogResource } from "../catalog/entries.js";
-import type { PlanAction, InstallationTool, InventoryScope } from "../catalog/inventory/files.js";
+import { CATALOG_PRESETS } from "../core/catalogs/presets.js";
+import type { CatalogResource } from "../core/resources/model.js";
+import type { PlanAction, InstallationTool, InventoryScope } from "../core/installations/model.js";
 import type { spawn } from "node:child_process";
 export interface CliOptions {
   command?: string;
@@ -44,8 +44,9 @@ export interface CliOptions {
 }
 const os = require("node:os");
 const path = require("node:path");
-const { CatalogError, RESOURCE_ID, TOOLS, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
-const { loadUserSourceConfiguration, catalogNameKey } = require("../catalog/sources/config.js");
+const { CatalogError, RESOURCE_ID, USER_INSTALLABLE_KINDS } = require("../core/resources/model.js");
+const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
+const { catalogNameKey } = require("../core/catalogs/model.js");
 const KINDS = new Set(["skill", "agent", "instruction"]);
 const catalogPresetCommands = CATALOG_PRESETS.map(({ command }) => command);
 

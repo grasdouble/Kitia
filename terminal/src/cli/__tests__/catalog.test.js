@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { listCatalogResources } = require("../catalog.ts");
+const { listCatalogResources } = require("../../core/resources/queries.ts");
 
 test("catalog discovery ranks exact identifiers and preserves existing filters", () => {
   const resources = [

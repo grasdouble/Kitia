@@ -874,10 +874,8 @@ test("Termless Inventory previews and audits installed local content", {
 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "kitia-termless-local-preview-"));
   const { DASHBOARD_THEME } = require("../../terminal/dist/tui/colors.js");
-  const { createDashboardActionHandler } = require("../../terminal/dist/cli/dashboard.js");
-  const handler = createDashboardActionHandler(async () => {
-    throw new Error("The local Inventory preview must not execute the remote CLI command.");
-  });
+  const { createDashboardActionHandler } = require("../../terminal/dist/tui/native-actions.js");
+  const handler = createDashboardActionHandler();
   let session;
   try {
     session = await launchShowcaseDashboard(directory, {

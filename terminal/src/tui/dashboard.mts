@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { checkInstalledVersion, type VersionNotice } from "./version-check.mjs";
 import { render, useInput, useWindowSize } from "ink";
-import type { CatalogResource } from "../catalog/entries.js";
-import type { ScanError } from "../catalog/lifecycle.js";
+import type { CatalogResource } from "../core/resources/model.js";
+import type { ScanError } from "../core/installations/checks.js";
 import { catalogFilterOptions, cycleCatalogFilter, cycleFilter, cycleIndex, cycleInventoryLicense, dashboardStatus, filterCatalogResources, filterInventory, inventoryCatalogLabels, inventoryFilterOptions,
 } from "./helpers.mjs";
 import type { DashboardControlButton, DashboardControlFilter, ControlsProps } from "./components/controls/control-layout-plan.mjs";

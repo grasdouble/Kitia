@@ -7,27 +7,27 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { afterEach, test } = require("node:test");
-const {
-  checkCatalogFreshness, createSourceIndex, manageCatalogCommand, updateCatalog, importCatalogConfigurationText,
-} = require("../dist/catalog/sources/manage.js");
-const { writeInstallPlan } = require("../dist/catalog/inventory/files.js");
-const { installSourceFileResource } = require("../dist/catalog/sources/resources.js");
-const { runGhSkill, runGhSkillAsync, buildSourceSkillArgs } = require("../dist/catalog/sources/gh-skill.js");
-const { latestSourceVersionAtRef } = require("../dist/catalog/sources/history.js");
-const { loadUserSourceConfiguration, validateSourceConfiguration } = require("../dist/catalog/sources/config.js");
-const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
-const { recordSourceInstallation } = require("../dist/catalog/sources/installed.js");
-const { loadCommandCatalogs } = require("../dist/catalog/loading.js");
-const { findUnmanagedArtifacts, installedFingerprint, readInstallState } = require("../dist/catalog/inventory/index.js");
-const { collectInstalledScopes } = require("../dist/catalog/lifecycle.js");
-const { formatDashboardRows } = require("../dist/cli/catalog.js");
+const { checkCatalogFreshness, updateCatalog, importCatalogConfigurationText } = require("../dist/core/catalogs/manage.js");
+const { createSourceIndex } = require("../dist/core/catalogs/discovery.js");
+const { manageCatalogCommand } = require("../dist/cli/catalog-command.js");
+const { writeInstallPlan } = require("../dist/core/installations/files.js");
+const { installSourceFileResource, uninstallSourceResource, updateSourceResources } = require("../dist/core/installations/operations.js");
+const { runGhSkill, runGhSkillAsync, buildSourceSkillArgs } = require("../dist/core/installations/gh-skill.js");
+const { latestSourceVersionAtRef } = require("../dist/core/resources/history.js");
+const { loadUserSourceConfiguration } = require("../dist/core/catalogs/config.js");
+const { validateSourceConfiguration } = require("../dist/core/catalogs/model.js");
+const { recordSourceInstallation, readInstalledSourceSkills } = require("../dist/core/installations/inventory.js");
+const { executeInstallationOperation } = require("../dist/core/installations/actions.js");
+const { runSourceOperation } = require("../dist/core/installations/source-operation.js");
+const { loadCommandCatalogs } = require("../dist/cli/loading.js");
+const { findUnmanagedArtifacts } = require("../dist/core/installations/discovery.js");
+const { installedFingerprint } = require("../dist/core/installations/files.js");
+const { readInstallState } = require("../dist/core/installations/state.js");
+const { collectInstalledScopes, checkInstalledResources } = require("../dist/core/installations/checks.js");
+const { catalogEntries, enrichInstalledResources } = require("../dist/core/resources/queries.js");
 const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel, dashboardStatus } =
   require("../dist/tui/helpers.mjs");
 const { renderInstalledResources } = require("../dist/tui/terminal.js");
-const { readInstalledSourceSkills } = require("../dist/catalog/sources/installed.js");
-const { checkInstalledResources } = require("../dist/catalog/lifecycle.js");
-const { runSourceCommand } = require("../dist/cli/source-command.js");
-const { uninstallSourceResource, updateSourceResources } = require("../dist/catalog/sources/resources.js");
 const { main: runCliMain } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 const { executeCommand, runDashboardWorker } = require("../dist/cli/commands.js");
@@ -1257,19 +1257,14 @@ test("identical skill IDs from different sources cannot collide in one installat
     sources: { "team-beta": { skills: { "demo-skill": record } } },
   }));
 
-  assert.throws(() => runSourceCommand({
-    action: "install",
-    catalog: "team-alpha",
-    id: "demo-skill",
-    target,
-    tool: "copilot",
-    scope: "project",
-    sourceResources: [{
-      catalog: "team-alpha", id: "demo-skill", kind: "skill",
-      description: "A source skill.", source_repository: "example/team-alpha",
-      source_path: "skills/demo-skill", source_ref: "a".repeat(40),
-      license_status: "MIT",
-    }],
+  const resource = {
+    catalog: "team-alpha", id: "demo-skill", kind: "skill",
+    description: "A source skill.", source_repository: "example/team-alpha",
+    source_path: "skills/demo-skill", source_ref: "a".repeat(40),
+    license_status: "MIT",
+  };
+  assert.throws(() => runSourceOperation({
+    action: "install", resource, target, tool: "copilot", scope: "project",
   }, () => assert.fail("a colliding install must not invoke gh")), /already tracked from another catalog/);
 });
 
@@ -1582,10 +1577,9 @@ test("configured source skills use the same pinned install, check, update and un
     return 0;
   };
 
-  assert.equal(runSourceCommand({
-    action: "install", id: sourceResource.id, catalog: sourceResource.catalog,
-    resource: sourceResource, target, tool: "copilot",
-  }, invoke), 0);
+  assert.equal(runSourceOperation({
+    action: "install", resource: sourceResource, target, tool: "copilot", scope: "project",
+  }, invoke).status, 0);
   const state = readInstallState(target);
   assert.equal(state.sources["team-alpha"].skills["demo-skill"].source_ref, sourceResource.source_ref);
   assert.equal(state.source_skills, undefined);
@@ -2451,9 +2445,14 @@ test("dashboard refreshes its source catalog set before rebuilding installed ski
       .sourceResources.find(({ id }) => id === "demo-skill");
     assert.ok(resource);
 
-    const execute = createDashboardActionHandler(async (options) => {
-      const relativePath = ".agents/skills/demo-skill/SKILL.md";
-      const skillFile = path.join(options.target, relativePath);
+    const result = runSourceOperation({
+      action: "install",
+      resource,
+      target,
+      scope: "project",
+      tool: "copilot",
+    }, (_args, installTarget) => {
+      const skillFile = path.join(installTarget, ".agents/skills/demo-skill/SKILL.md");
       fs.mkdirSync(path.dirname(skillFile), { recursive: true });
       fs.writeFileSync(skillFile, [
         "---",
@@ -2468,21 +2467,18 @@ test("dashboard refreshes its source catalog set before rebuilding installed ski
         "Installed skill body.",
         "",
       ].join("\n"));
-      recordSourceInstallation(resource, options.target, "github-copilot");
       return 0;
     });
-    const result = await execute(
-      "install",
-      resource,
-      { target, userTarget },
-      { sourceResources: [resource] },
-      { scope: "project", tool: "copilot" },
-    );
 
-    assert.equal(result.code, 0);
-    assert.ok(result.resources.some((entry) =>
+    assert.equal(result.status, 0);
+    const refreshedCatalogs = loadCommandCatalogs({ command: "list" }, () => {});
+    const refreshed = collectInstalledScopes(
+      { project: target, user: userTarget },
+      refreshedCatalogs.sourceResources,
+    );
+    assert.ok(refreshed.resources.some((entry) =>
       entry.catalog === "Test" && entry.kind === "skill" && entry.id === "demo-skill"),
-    JSON.stringify(result));
+    JSON.stringify(refreshed));
   } finally {
     if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
     else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
@@ -2570,7 +2566,7 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
     resource("category/local-skill").description,
     ".claude/skills/category/local-skill/SKILL.md",
   );
-  const rendered = renderInstalledResources(formatDashboardRows(result.resources, []), {
+  const rendered = renderInstalledResources(enrichInstalledResources(result.resources, []), {
     columns: 120, isTTY: false,
   });
   assert.match(rendered, /project\s+-\s+skill\s+demo-skill\s+unmanaged/);
@@ -2617,10 +2613,9 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
     ]);
     return 0;
   };
-  assert.equal(runSourceCommand({
-    action: "install", id: sourceResource.id, catalog: sourceResource.catalog,
-    resource: sourceResource, target, tool: "copilot",
-  }, invokeInstall), 0);
+  assert.equal(runSourceOperation({
+    action: "install", resource: sourceResource, target, tool: "copilot", scope: "user",
+  }, invokeInstall).status, 0);
   writeArtifact(".agents/skills/manual-skill/SKILL.md", [
     "---", "name: manual-skill", "description: Installed outside Kitia.", "metadata:",
     ...sourceMetadata, "---", "", "Untracked source content.", "",
@@ -2646,7 +2641,7 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
   output.rows = 40;
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString(); });
-  const done = runDashboard(formatDashboardRows(result.resources, [sourceResource]), input, output, [], {
+  const done = runDashboard(enrichInstalledResources(result.resources, [sourceResource]), input, output, [], {
     userCatalogs: [{
       name: "MattPucock",
       mode: "custom",
@@ -2826,69 +2821,6 @@ test("removing an unmanaged skill deletes its entire detected folder", async () 
   }
 });
 
-test("dashboard update dispatch reaches the CLI update command for the selected catalog resource", async () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-update-dispatch-"));
-  const configDirectory = path.join(temporary, "config");
-  const sourceIndexDirectory = path.join(configDirectory, "source-catalogs");
-  const target = path.join(temporary, "project");
-  const userTarget = path.join(temporary, "user");
-  const repository = "https://github.com/example/dashboard-update";
-  const previousConfigDirectory = process.env.KITIA_CONFIG_DIR;
-  process.env.KITIA_CONFIG_DIR = configDirectory;
-  fs.mkdirSync(target, { recursive: true });
-  fs.mkdirSync(userTarget, { recursive: true });
-  const source = createSource("dashboard-update-upstream", repository);
-  const configuration = { catalog_version: 1, sources: [{ name: "Test", repository }] };
-  writeJson(path.join(configDirectory, "catalogSources.json"), configuration);
-  writeJson(path.join(sourceIndexDirectory, "catalogSources.json"), configuration);
-  writeJson(
-    path.join(sourceIndexDirectory, "Test.json"),
-    createSourceIndex(repository, "Test", source),
-  );
-  const resource = {
-    ...createSourceIndex(repository, "Test", source).resources[0],
-    catalog: "Test",
-    scope: "project",
-    status: "attention",
-    managed: true,
-  };
-  let dispatched;
-  try {
-    const execute = createDashboardActionHandler(async (options) => {
-      dispatched = options;
-      return 0;
-    });
-    const result = await execute(
-      "update",
-      resource,
-      { target, userTarget },
-      { sourceResources: [resource] },
-    );
-
-    assert.equal(result.code, 0);
-    assert.equal(dispatched.command, "update");
-    assert.equal(dispatched.catalog, "Test");
-    assert.equal(dispatched.kind, "skill");
-    assert.equal(dispatched.id, resource.id);
-    assert.equal(dispatched.target, target);
-    assert.equal(dispatched.nonInteractive, true);
-    assert.deepEqual(dispatched.sourceResources, [resource]);
-    assert.equal(dispatched.ghForce, undefined, "the initial dashboard update must not request GH force");
-    await execute(
-      "update",
-      resource,
-      { target, userTarget },
-      { sourceResources: [resource] },
-      { ghForce: true, ghForceAgent: "github-copilot" },
-    );
-    assert.equal(dispatched.ghForce, true, "the explicit retry carries GH-only force state");
-    assert.equal(dispatched.ghForceAgent, "github-copilot", "the GH retry identifies the failed agent");
-    assert.equal(dispatched.force, false, "a GH retry must not activate Kitia's local-force override");
-  } finally {
-    if (previousConfigDirectory === undefined) delete process.env.KITIA_CONFIG_DIR;
-    else process.env.KITIA_CONFIG_DIR = previousConfigDirectory;
-  }
-});
 test("dashboard update reaches the production CLI and reports a safe local-conflict failure", async () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-update-cli-"));
   const configDirectory = path.join(temporary, "config");
@@ -2932,9 +2864,11 @@ test("dashboard update reaches the production CLI and reports a safe local-confl
   try {
     recordSourceInstallation(resource, target, "github-copilot");
     fs.writeFileSync(skillFile, "Locally modified content that the updater must protect.\n");
-    const execute = createDashboardActionHandler(executeCommand);
     await assert.rejects(
-      execute("update", resource, { target }, { sourceResources: [resource] }),
+      executeInstallationOperation({
+        operation: "update", resource, id: resource.id, kind: resource.kind,
+        target, scope: "project", tool: "copilot",
+      }, [resource]),
       /Refusing to overwrite locally modified .*demo-skill.*SKILL\.md.*--force/,
     );
     const originalLog = console.log;
@@ -3853,10 +3787,9 @@ test("an explicit skill ref is installed and recorded without changing the catal
     ].join("\n"));
     return 0;
   };
-  assert.equal(runSourceCommand({
-    action: "install", id: catalogResource.id, catalog: catalogResource.catalog,
-    resource: { ...catalogResource, source_ref: requestedRef }, target, tool: "copilot",
-  }, invoke), 0);
+  assert.equal(runSourceOperation({
+    action: "install", resource: { ...catalogResource, source_ref: requestedRef }, target, tool: "copilot", scope: "project",
+  }, invoke).status, 0);
   assert.equal(installedRef, requestedRef);
   assert.equal(catalogResource.source_ref, "a".repeat(40));
   assert.equal(readInstallState(target).sources["team-alpha"].skills["demo-skill"].source_ref, requestedRef);

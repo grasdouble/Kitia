@@ -2,8 +2,8 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { CatalogResource } from "../../catalog/entries.js";
-import type { ScanError } from "../../catalog/lifecycle.js";
+import type { CatalogResource } from "../../core/resources/model.js";
+import type { ScanError } from "../../core/installations/checks.js";
 import { adaptiveColumnWidths } from "../../table-layout.js";
 import { DASHBOARD_THEME, resolveRowColor } from "../colors.js";
 import type { InventoryCatalogConfiguration } from "../helpers.mjs";

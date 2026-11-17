@@ -1,20 +1,7 @@
-import type { CatalogResource } from "../catalog/entries.js";
-import type { DashboardActionResult } from "../core/action-result.js";
+import type { AddCatalogRequest, UserCatalog } from "../core/catalogs/model.js";
+import type { CatalogResource } from "../core/resources/model.js";
+import type { DashboardActionResult } from "./action-result.js";
 import type { CatalogFreshnessStatus } from "./catalog-freshness.mjs";
-
-export type CatalogEntry = { kind: "skill" | "agent" | "instruction"; id?: string; path: string };
-export type AddCatalogRequest = {
-  name: string;
-  repository: string;
-  mode: "basic" | "custom";
-  entries: CatalogEntry[];
-};
-export type UserCatalog = {
-  name: string;
-  repository: string;
-  mode?: "basic" | "custom";
-  entries?: CatalogEntry[];
-};
 export type CatalogFreshnessResult = { name: string; status: CatalogFreshnessStatus };
 export type CatalogActionResult = {
   catalogs?: UserCatalog[];

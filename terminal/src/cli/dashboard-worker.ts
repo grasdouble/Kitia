@@ -1,21 +1,12 @@
-import { parentPort, workerData } from "node:worker_threads";
+"use strict";
 
-const {
-  executeCommand,
-  copyTextToClipboard,
-} = require("./commands.js");
-const {
-  addCatalog,
-  updateCatalog,
-  removeCatalog,
-  refreshCatalogs,
-  exportCatalogConfigurationData,
-  importCatalogConfigurationText,
-} = require("../catalog/sources/manage.js");
-const { loadUserSourceConfiguration } = require("../catalog/sources/config.js");
-const { loadCommandCatalogs } = require("../catalog/loading.js");
-const { catalogEntries } = require("./catalog.js");
-const { createDashboardActionHandler } = require("./dashboard.js");
+const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
+const { loadCommandCatalogs } = require("./loading.js");
+const { catalogEntries } = require("../core/resources/queries.js");
+const { createDashboardActionHandler } = require("../tui/native-actions.js");
+const { addCatalog, updateCatalog, removeCatalog, refreshCatalogs, importCatalogConfigurationText, exportCatalogConfigurationData } = require("../core/catalogs/manage.js");
+const { copyTextToClipboard } = require("./commands.js");
+import { parentPort, workerData } from "node:worker_threads";
 
 function catalogState() {
   return loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
@@ -31,7 +22,6 @@ function refreshDashboardCatalogs() {
 async function execute(data) {
   if (data.task === "resource-action") {
     const handler = createDashboardActionHandler(
-      (options, report) => executeCommand(options, report),
       (message) => parentPort?.postMessage({ progress: message }),
     );
     return handler(

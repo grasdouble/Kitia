@@ -1,9 +1,7 @@
-import type { CatalogResource } from '../../../../terminal/src/catalog/entries';
-import type { DashboardActionResult as ActionResult } from '../../../../terminal/src/core/action-result';
-import type {
-  DashboardActions as Actions,
-  AddCatalogRequest as CatalogRequest, UserCatalog as Catalog, CatalogActionResult as CatalogResult,
-} from '../../../../terminal/src/tui/contracts';
+import type { CatalogResource } from '../../../../terminal/src/core/resources/model';
+import type { DashboardActionResult as ActionResult } from '../../../../terminal/src/tui/action-result';
+import type { DashboardActions as Actions, CatalogActionResult as CatalogResult } from "../../../../terminal/src/tui/contracts";
+import type { AddCatalogRequest as CatalogRequest, UserCatalog as Catalog } from "../../../../terminal/src/core/catalogs/model.js";
 import {
   initialCatalogs, initialInstallations, resources as samples, revisions, sourcePath,
   type DemoResource,

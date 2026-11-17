@@ -20,7 +20,7 @@ const npm = (args, cwd) => execFileSync(
 
 try {
   const [archive] = JSON.parse(npm([
-    "pack", "--json", "--pack-destination", temporary,
+    "pack", "--ignore-scripts", "--json", "--pack-destination", temporary,
   ], root));
   const packed = new Set(archive.files.map(({ path: file }) => file));
   for (const file of [
@@ -29,6 +29,11 @@ try {
     "README.md",
     "terminal/bin/kitia.js",
     "terminal/dist/cli/main.js",
+    "terminal/dist/core/resources/model.js",
+    "terminal/dist/core/catalogs/config.js",
+    "terminal/dist/core/installations/inventory.js",
+    "terminal/dist/core/inspection/audit.js",
+    "terminal/dist/core/collections/manifest.js",
     "docs/cli-contract.md",
     "terminal/schemas/catalog-lock-v1.schema.json",
     "terminal/migrations/run.js",
@@ -36,6 +41,7 @@ try {
     assert.ok(packed.has(file), `Missing package file: ${file}`);
   }
   assert.equal([...packed].some((file) => file.startsWith("terminal/test/")), false);
+  assert.equal([...packed].some((file) => file.startsWith("terminal/dist/catalog/")), false);
   assert.equal([...packed].some((file) => file.startsWith("catalogs/")), false);
   assert.deepEqual([...packed].filter((file) => file.startsWith("terminal/bin/")), ["terminal/bin/kitia.js"]);
 
@@ -67,6 +73,12 @@ try {
     env: consumerEnvironment,
   }));
   assert.deepEqual(listed, []);
+  const migrationHelp = execFileSync(
+    process.execPath,
+    [path.join(installedRoot, "terminal/migrations/run.js"), "--help"],
+    { cwd: consumer, encoding: "utf8", env: consumerEnvironment },
+  );
+  assert.match(migrationHelp, /Usage: .* migrate \[--dry-run \| --apply\]/);
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });
 }

@@ -2,7 +2,7 @@
 
 import React, { useMemo } from "react";
 import { Box, Text } from "ink";
-import type { CatalogResource } from "../../catalog/entries.js";
+import type { CatalogResource } from "../../core/resources/model.js";
 import { DASHBOARD_THEME } from "../colors.js";
 import { fitText, wrapText } from "../helpers.mjs";
 import { categorizedShortcutLines, wrappedShortcutLines } from "../components/shortcuts/shortcut-lines.mjs";

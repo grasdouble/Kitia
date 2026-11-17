@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { CatalogResource } from "../../catalog/entries.js";
+import type { CatalogResource } from "../../core/resources/model.js";
 import { DASHBOARD_THEME } from "../colors.js";
 import { dashboardStatus, fitText } from "../helpers.mjs";
 import { Panel } from "./panel.mjs";

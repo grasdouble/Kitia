@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import type { Key } from "ink";
-import { CATALOG_PRESETS } from "../../../catalog/sources/presets.js";
-import type { DashboardActions, CatalogEntry, CatalogMutationResult } from "../../contracts.js";
+import { CATALOG_PRESETS } from "../../../core/catalogs/presets.js";
+import type { DashboardActions, CatalogMutationResult } from "../../contracts.js";
+import type { CatalogEntry } from "../../../core/catalogs/model.js";
 import { updateCatalogFreshness, type CatalogFreshnessStatus } from "../../catalog-freshness.mjs";
 import { cycleIndex, mergeRefreshedCatalogResources } from "../../helpers.mjs";
 import { yieldToRenderer, type DashboardActivity } from "../activity.mjs";

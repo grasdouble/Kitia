@@ -2,12 +2,11 @@
 
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
-const { loadCommandCatalogs } = require("../../../terminal/dist/catalog/loading.js");
-const { collectInstalledScopes } = require("../../../terminal/dist/catalog/lifecycle.js");
-const { catalogEntries, formatDashboardRows } = require("../../../terminal/dist/cli/catalog.js");
-const { loadUserSourceConfiguration } = require("../../../terminal/dist/catalog/sources/config.js");
-const { executeCommand } = require("../../../terminal/dist/cli/commands.js");
-const { createDashboardActionHandler } = require("../../../terminal/dist/cli/dashboard.js");
+const { loadCommandCatalogs } = require("../../../terminal/dist/cli/loading.js");
+const { collectInstalledScopes } = require("../../../terminal/dist/core/installations/checks.js");
+const { catalogEntries, enrichInstalledResources } = require("../../../terminal/dist/core/resources/queries.js");
+const { loadUserSourceConfiguration } = require("../../../terminal/dist/core/catalogs/config.js");
+const { createDashboardActionHandler } = require("../../../terminal/dist/tui/native-actions.js");
 const { DASHBOARD_THEME } = require("../../../terminal/dist/tui/colors.js");
 const { root, seedShowcase } = require("./site-showcase-fixture.js");
 const { assertTermlessRuntime } = require("./termless-preflight.js");
@@ -201,12 +200,12 @@ async function launchShowcaseDashboard(directory, {
       loaded.sourceResources,
     );
     const allResources = catalogEntries(loaded.sourceResources);
-    const rows = formatDashboardRows(installed.resources, allResources);
+    const rows = enrichInstalledResources(installed.resources, allResources);
     const catalogResources = catalogResourcesOverride || allResources;
     const dashboardOptions = { target: fixture.project, userTarget: fixture.home };
     const execute = (operation, resource, installOptions) => {
       const { onProgress, ...options } = installOptions;
-      return createDashboardActionHandler(executeCommand, onProgress)(
+      return createDashboardActionHandler(onProgress)(
         operation,
         resource,
         dashboardOptions,

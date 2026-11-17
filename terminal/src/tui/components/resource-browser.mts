@@ -1,7 +1,7 @@
 "use strict";
 
 import React from "react";
-import type { CatalogResource } from "../../catalog/entries.js";
+import type { CatalogResource } from "../../core/resources/model.js";
 import { Controls } from "../controls.mjs";
 import {
   dashboardActionButtonRows, dashboardControlsLayout, type ControlsProps,

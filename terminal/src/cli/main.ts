@@ -1,12 +1,15 @@
 "use strict";
 
+import type { CliReport } from "./report.js";
+const { CLI_REPORT_SCHEMA_VERSION } = require("./schema-versions.js");
+const { parseArguments } = require("./arguments.js");
+const { acquireOperationLock } = require("../core/installations/lock.js");
+const { readInstallState } = require("../core/installations/state.js");
+const { executeCommand } = require("./commands.js");
+
 const fs = require("node:fs");
 const path = require("node:path");
-const { acquireOperationLock } = require("../catalog/operation.js");
 const commandApi = require("./commands.js");
-const { CLI_REPORT_SCHEMA_VERSION } = require("./schema-versions.js");
-const { readInstallState, parseArguments, executeCommand } = commandApi;
-import type { CliReport } from "./report.js";
 
 function createReport(command: string, dryRun = false): CliReport {
   return {

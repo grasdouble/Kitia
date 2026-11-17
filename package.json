@@ -26,7 +26,6 @@
   },
   "files": [
     "terminal/dist/cli/",
-    "terminal/dist/catalog/",
     "terminal/dist/core/",
     "terminal/dist/tui/",
     "terminal/dist/table-layout.js",

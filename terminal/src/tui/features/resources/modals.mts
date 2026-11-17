@@ -1,5 +1,5 @@
-import type { CatalogResource } from "../../../catalog/entries.js";
-import type { ScanError } from "../../../catalog/lifecycle.js";
+import type { CatalogResource } from "../../../core/resources/model.js";
+import type { ScanError } from "../../../core/installations/checks.js";
 import type { SourceVersionOption } from "../../contracts.js";
 import type { PendingDashboardAction } from "./types.js";
 import { adaptiveColumnWidths } from "../../../table-layout.js";

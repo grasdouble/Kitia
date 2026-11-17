@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { auditTextResources } = require("../../catalog/audit.ts");
+const { auditTextResources } = require("../../core/inspection/audit.ts");
 
 test("audit reports deterministic findings with file and line attribution", () => {
   const result = auditTextResources([

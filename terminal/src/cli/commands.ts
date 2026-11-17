@@ -1,37 +1,34 @@
 "use strict";
 
+const { resolveCatalogResource } = require("../core/resources/selection.js");
+const { CatalogError } = require("../core/resources/model.js");
+const { selectCatalogResource, formatCatalogTable, browseInstalledResources, renderInstalledResources } = require("../tui/terminal.js");
+const { userCatalogDirectory, loadUserSourceConfiguration } = require("../core/catalogs/config.js");
+const { printHelp, parseArguments } = require("./arguments.js");
+const { loadCommandCatalogs } = require("./loading.js");
+const { collectionData } = require("../core/collections/manifest.js");
+const { signCollectionManifest } = require("../core/collections/signatures.js");
+const { importCollectionText } = require("../core/collections/import.js");
+const { manageCatalogCommand } = require("./catalog-command.js");
+const { formatSourceVersionTable } = require("./history.js");
+const { diagnose } = require("../core/installations/doctor.js");
+const { catalogEntries, listCatalogResources, enrichInstalledResources } = require("../core/resources/queries.js");
+const { checkInstalledResources, collectInstalledScopes } = require("../core/installations/checks.js");
+const { checkCatalogFreshness } = require("../core/catalogs/manage.js");
+const { formatSourceResource } = require("./resource-format.js");
+const { executeInstallationOperation } = require("../core/installations/actions.js");
+const { formatAuditLines } = require("./inspection-format.js");
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { Worker } = require("node:worker_threads");
 const { execFileSync } = require("node:child_process");
 const os = require("node:os");
-const { CatalogError, USER_INSTALLABLE_KINDS } = require("../catalog/resources/index.js");
-const inventoryApi = require("../catalog/inventory/index.js");
-const terminalApi = require("../tui/terminal.js");
-const sourceResourcesApi = require("../catalog/sources/resources.js");
-const sourceCommandApi = require("./source-command.js");
-const sourceHistoryApi = require("../catalog/sources/history.js");
-const sourceInventoryApi = require("../catalog/sources/installed.js");
-const lifecycleApi = require("../catalog/lifecycle.js");
-const { acquireOperationLock } = require("../catalog/operation.js");
-const { loadCommandCatalogs } = require("../catalog/loading.js");
-const { diagnose } = require("../catalog/doctor.js");
-const { userCatalogDirectory } = require("../catalog/sources/config.js");
-const {
-  manageCatalogCommand, checkCatalogFreshness,
-} = require("../catalog/sources/manage.js");
-const { loadUserSourceConfiguration } = require("../catalog/sources/config.js");
-const { collectionData, importCollectionText, signCollectionManifest } = require("../catalog/collections.js");
-const { catalogEntries, listCatalogResources, formatDashboardRows } = require("./catalog.js");
-const { parseArguments, printHelp } = require("./arguments.js");
-const { readInstalledSourceSkills, readInstalledSourceResources } = sourceInventoryApi;
-const { runSourceCommand, formatSourceResource } = sourceCommandApi;
-const { validateSourceUpdates, updateSourceResources, updateSourceResourcesAsync, uninstallSourceResource } = sourceResourcesApi;
-const { checkInstalledResources, collectInstalledScopes } = lifecycleApi;
-const {
-  formatCatalogTable, resolveCatalogResource, selectCatalogResource,
-  renderInstalledResources, browseInstalledResources, colorize,
-} = terminalApi;
+const sourceHistoryApi = require("../core/resources/history.js");
+
+
+
+
 
 function runDashboardWorker(
   data,
@@ -89,27 +86,6 @@ function copyTextToClipboard(text) {
     } catch {}
   }
   throw new Error("Clipboard access requires wl-copy or xclip on Linux.");
-}
-
-function resolveListedSourceRef(resource, ref) {
-  if (!resource.source_repository || !resource.source_path) {
-    throw new CatalogError("--ref supports only GitHub source resources.");
-  }
-  if (ref.length === 40) return ref;
-  try {
-    return sourceHistoryApi.resolveSourceVersionPrefix(
-      sourceHistoryApi.listSourceVersions(resource),
-      ref,
-    );
-  } catch (error) {
-    if (error.code === "RESOURCE_NOT_FOUND" || error.code === "AMBIGUOUS_RESOURCE") {
-      throw new CatalogError(
-        `${error.message.replace(/ in source history\.$/, ` for ${resource.catalog}:${resource.kind}:${resource.id}.`)}`,
-        error.code,
-      );
-    }
-    throw error;
-  }
 }
 function selectedSourceResource(resources, options) {
   return resolveCatalogResource(
@@ -194,7 +170,7 @@ async function executeCommand(options, report) {
     const [resource] = candidates;
     const versions = sourceHistoryApi.listSourceVersions(resource);
     output.log(`Commit history for ${resource.catalog}:${resource.kind}:${resource.id} (up to 500 newest commits; date is commit committer date):`);
-    for (const row of sourceHistoryApi.formatSourceVersionTable(
+    for (const row of formatSourceVersionTable(
       versions, process.stdout.isTTY ? process.stdout.columns : undefined,
     )) output.log(row);
     if (!versions.length) output.log("No commits found for this resource path.");
@@ -251,7 +227,7 @@ async function executeCommand(options, report) {
       sourceResources,
     );
     result.errors.push(...catalogWarnings.map((warning) => ({ ...warning, scope: "catalog" })));
-    const rows = formatDashboardRows(result.resources, allResources);
+    const rows = enrichInstalledResources(result.resources, allResources);
     if (!options.nonInteractive && process.stdin.isTTY && process.stdout.isTTY &&
         typeof process.stdin.setRawMode === "function") {
       const userCatalogState = () => loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
@@ -294,135 +270,28 @@ async function executeCommand(options, report) {
     console.log(renderInstalledResources(rows, process.stdout, result.errors));
     return unavailable.length || result.errors.length ? 1 : 0;
   }
-  if (options.command === "uninstall") {
-    const target = fs.realpathSync(options.target);
-    const installed = [
-      ...readInstalledSourceSkills(target, sourceResources, { catalog: options.catalog }),
-      ...readInstalledSourceResources(target, sourceResources, { catalog: options.catalog }),
-    ].filter(({ resource }) => resource.id === options.id && (!options.kind || resource.kind === options.kind));
-    if (!installed.length) {
-      throw new CatalogError(`No tracked source installation for ${options.kind ? `${options.kind}:` : ""}${options.id}`, "RESOURCE_NOT_FOUND");
-    }
-    const resource = installed.length === 1
-      ? installed[0].resource
-      : await selectedSourceResource(installed.map(({ resource: entry }) => entry), options);
-    if (!resource) return 0;
-    options.onResource?.({ catalog: resource.catalog || "source", kind: resource.kind, id: resource.id, status: "planned", source: true });
-    for (const message of uninstallSourceResource(resource, target, options)) output.log(message);
-    return 0;
-  }
-  if (options.command === "update") {
-    const target = fs.realpathSync(options.target);
-    const installed = [
-      ...readInstalledSourceSkills(target, sourceResources, { catalog: options.catalog }),
-      ...readInstalledSourceResources(target, sourceResources, { catalog: options.catalog }),
-    ];
-    let sourceToUpdate = options.id
-      ? installed.filter(({ resource }) => resource.id === options.id && (!options.kind || resource.kind === options.kind))
-      : installed;
-    if (options.id && sourceToUpdate.length > 1) {
-      const chosen = await selectedSourceResource(sourceToUpdate.map(({ resource }) => resource), options);
-      if (!chosen) return 0;
-      sourceToUpdate = sourceToUpdate.filter(({ resource }) => resource.catalog === chosen.catalog && resource.kind === chosen.kind);
-    }
-    if (!sourceToUpdate.length) {
-      throw new CatalogError(options.id
-        ? `No tracked source installation for ${options.kind ? `${options.kind}:` : ""}${options.id}`
-        : "No tracked source resources to update.", "RESOURCE_NOT_FOUND");
-    }
-    if (options.ref) {
-      if (sourceToUpdate.some(({ resource }) => !resource.source_repository || !resource.source_path)) {
-        throw new CatalogError("--ref supports only GitHub source resources.");
-      }
-      sourceToUpdate = sourceToUpdate.map((entry) => ({
-        ...entry,
-        resource: {
-          ...entry.resource,
-          source_ref: resolveListedSourceRef(entry.resource, options.ref),
-        },
-      }));
-    }
-    const sourceToUpdateResources = sourceToUpdate.map(({ resource }) => resource);
-    validateSourceUpdates(sourceToUpdate, { ...options, target });
-
-    for (const resource of sourceToUpdateResources) {
-      options.onResource?.({ catalog: resource.catalog || "source", kind: resource.kind, id: resource.id, status: "planned", source: true });
-    }
-    const messages = options.onProgress
-      ? await updateSourceResourcesAsync(sourceToUpdate, target, options)
-      : updateSourceResources(sourceToUpdate, target, options);
-    for (const message of messages) output.log(message);
-    return 0;
-  }
-  if (["show", "preview", "install"].includes(options.command)) {
+  if (options.command === "show") {
     const resource = await selectedSourceResource(allResources, options);
-    if (!resource) return 0;
-    if (options.command === "show") {
-      console.log(formatSourceResource(resource));
-      return 0;
-    }
-    if (options.command === "preview") {
-      return runSourceCommand({ ...options, action: "preview", id: resource.id, resource });
-    }
-    if (options.scope === "user" && !USER_INSTALLABLE_KINDS.has(resource.kind)) {
-      throw new CatalogError("--scope user supports source skills and agents; instructions are project-only", "INVALID_ARGUMENT");
-    }
-    if (options.ref) {
-      const target = fs.realpathSync(options.target);
-      if (!resource.source_repository || !resource.source_path) {
-        throw new CatalogError("--ref supports only GitHub source resources.");
-      }
-      const selectedResource = {
-        ...resource,
-        source_ref: resolveListedSourceRef(resource, options.ref),
-      };
-      const projectTarget = options.scope === "user" ? fs.realpathSync(process.cwd()) : target;
-      const userTarget = fs.realpathSync(os.homedir());
-      const targetRootsOverlap = projectTarget === userTarget;
-      const matchingInstalled = [
-        ...readInstalledSourceSkills(target, sourceResources, { catalog: options.catalog }),
-        ...readInstalledSourceResources(target, sourceResources, { catalog: options.catalog }),
-      ].filter(({ resource: current }) =>
-        current.catalog === resource.catalog && current.kind === resource.kind && current.id === resource.id &&
-        current.source_repository === resource.source_repository && current.source_path === resource.source_path);
-      if (targetRootsOverlap && matchingInstalled.length) {
-        throw new CatalogError(
-          `Cannot safely replace ${resource.catalog}:${resource.kind}:${resource.id}: project and user scopes resolve to the same target (${target}), and the install record does not distinguish them.`,
-          "AMBIGUOUS_RESOURCE",
-        );
-      }
-      if (matchingInstalled.length > 1) {
-        throw new CatalogError(
-          `Multiple tracked installations found for ${resource.catalog}:${resource.kind}:${resource.id} in ${options.scope || "project"} scope.`,
-          "AMBIGUOUS_RESOURCE",
-        );
-      }
-      if (matchingInstalled.length === 1) {
-        const replacement = {
-          ...matchingInstalled[0],
-          resource: { ...matchingInstalled[0].resource, ...selectedResource },
-        };
-        validateSourceUpdates([replacement], { ...options, target });
-        const messages = options.onProgress
-          ? await updateSourceResourcesAsync([replacement], target, options)
-          : updateSourceResources([replacement], target, options);
-        for (const message of messages) output.log(message);
-        return 0;
-      }
-      return runSourceCommand({
-        ...options, action: "install", id: resource.id,
-        resource: selectedResource,
-      });
-    }
-    return runSourceCommand({ ...options, action: "install", id: resource.id, resource });
+    if (resource) output.log(formatSourceResource(resource));
+    return 0;
+  }
+  if (["install", "preview", "update", "uninstall"].includes(options.command)) {
+    const result = await executeInstallationOperation({
+      ...options,
+      planOnly: options.json,
+      operation: options.command,
+      onMessage: ({ level, text }) => output[level](text),
+      onAudit: (audit) => {
+        for (const line of formatAuditLines(audit)) output.log(line);
+      },
+    }, sourceResources, selectedSourceResource);
+    if (result.preview !== undefined) output.log(`${formatSourceResource(result.resource)}\n\n${result.preview}`);
+    return result.status;
   }
   throw new CatalogError(`Unsupported command: ${options.command || "unknown"}`);
 }
 
 module.exports = {
-  ...inventoryApi,
-  ...terminalApi,
-  ...lifecycleApi,
   parseArguments,
   printHelp,
   catalogEntries,

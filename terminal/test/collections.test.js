@@ -1,13 +1,14 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 const os = require("node:os");
 const path = require("node:path");
 const { afterEach, test } = require("node:test");
-const { loadUserSourceConfiguration } = require("../dist/catalog/sources/config.js");
-const { loadSourceCatalogsFromDirectory } = require("../dist/catalog/sources/loader.js");
+const { loadUserSourceConfiguration } = require("../dist/core/catalogs/config.js");
+const { loadSourceCatalogsFromDirectory } = require("../dist/core/catalogs/loader.js");
 
 let temporary;
 const previousConfig = process.env.KITIA_CONFIG_DIR;

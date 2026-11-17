@@ -7,11 +7,14 @@ const os = require("node:os");
 const path = require("node:path");
 const { afterEach, test } = require("node:test");
 const {
-  collectionData, collectionKeyId, importCollectionText, signCollectionManifest,
-  validateCollectionManifest, verifyCollectionSignature,
-} = require("../../catalog/collections.ts");
-const { loadUserSourceConfiguration } = require("../../catalog/sources/config.ts");
-const { loadSourceCatalogsFromDirectory } = require("../../catalog/sources/loader.ts");
+  collectionData, validateCollectionManifest,
+} = require("../../core/collections/manifest.ts");
+const {
+  collectionKeyId, signCollectionManifest, verifyCollectionSignature,
+} = require("../../core/collections/signatures.ts");
+const { importCollectionText } = require("../../core/collections/import.ts");
+const { loadUserSourceConfiguration } = require("../../core/catalogs/config.ts");
+const { loadSourceCatalogsFromDirectory } = require("../../core/catalogs/loader.ts");
 
 let temporary;
 const previousConfig = process.env.KITIA_CONFIG_DIR;
