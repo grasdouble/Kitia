@@ -1,5 +1,7 @@
 "use strict";
 
+import type { SourceConfiguration } from "./model.js";
+import type { CatalogResource } from "../resources/model.js";
 const { CatalogError } = require("../resources/model.js");
 const { readUtf8 } = require("../resources/content.js");
 const { validateSourceCatalog } = require("../resources/manifest.js");
@@ -72,8 +74,8 @@ function loadSourceCatalogsFromDirectory(directory, sources) {
 
 export interface CatalogLoadRequest {
   names?: string[];
-  sources?: Array<{ name: string; repository: string; repositoryId: string; mode?: string; entries?: Array<{kind: string; id?: string; path: string}> }>;
-  sourceResources?: import("../resources/model.js").CatalogResource[];
+  sources?: SourceConfiguration[];
+  sourceResources?: CatalogResource[];
   allowUnavailable?: boolean;
 }
 export interface CatalogLoadWarning { code: string; catalog: string; message: string; }

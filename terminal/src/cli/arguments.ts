@@ -1,7 +1,7 @@
 "use strict";
 
 import { CATALOG_PRESETS } from "../core/catalogs/presets.js";
-import type { CatalogResource } from "../core/resources/model.js";
+import type { CatalogResource, ResourceKind } from "../core/resources/model.js";
 import type { PlanAction, InstallationTool, InstallationScope } from "../core/installations/model.js";
 import type { spawn } from "node:child_process";
 export interface CliOptions {
@@ -11,7 +11,7 @@ export interface CliOptions {
   userTarget?: string;
   catalog?: string;
   ref?: string;
-  kind?: string;
+  kind?: ResourceKind;
   id?: string;
   scope?: InstallationScope;
   tool?: InstallationTool | null;
@@ -47,7 +47,9 @@ const path = require("node:path");
 const { CatalogError, RESOURCE_ID, USER_INSTALLABLE_KINDS } = require("../core/resources/model.js");
 const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
 const { catalogNameKey } = require("../core/catalogs/model.js");
-const KINDS = new Set(["skill", "agent", "instruction"]);
+function isResourceKind(value: unknown): value is ResourceKind {
+  return value === "skill" || value === "agent" || value === "instruction";
+}
 const catalogPresetCommands = CATALOG_PRESETS.map(({ command }) => command);
 
 function isInstallationTool(value: string): value is InstallationTool {
@@ -219,7 +221,6 @@ function parseCommandArguments(args: string[]): CliOptions {
       }
       const value = remaining[++index];
       if (!value || value.startsWith("--")) throw new CatalogError(`${option} requires a value`);
-      if (option === "--kind" && !KINDS.has(value)) throw new CatalogError(`Unknown kind: ${value}`);
       const resolvedCatalog = option === "--catalog" ? resolveCatalogName(value) : undefined;
       if (option === "--catalog" && !resolvedCatalog) {
         const configured = catalogNames();
@@ -229,7 +230,10 @@ function parseCommandArguments(args: string[]): CliOptions {
       if (option === "--status" && !["experimental", "stable", "deprecated"].includes(value)) {
         throw new CatalogError(`Unknown status: ${value}`);
       }
-      if (option === "--kind") options.kind = value;
+      if (option === "--kind") {
+        if (!isResourceKind(value)) throw new CatalogError(`Unknown kind: ${value}`);
+        options.kind = value;
+      }
       else if (option === "--tag") options.tag = value;
       else if (option === "--status") options.status = value;
       else if (option === "--license") options.license = value;
@@ -239,14 +243,15 @@ function parseCommandArguments(args: string[]): CliOptions {
   }
   if (command === "versions") {
     const [kind, id, ...extra] = remaining;
-    if (!KINDS.has(kind) || !RESOURCE_ID.test(id || "") || extra.length) {
+    if (!isResourceKind(kind) || !RESOURCE_ID.test(id || "") || extra.length) {
       throw new CatalogError("Usage: Kitia versions <kind> <id>");
     }
     return { command, kind, id };
   }
   if (command === "show" || command === "preview") {
-    const typed = remaining.length >= 2 && KINDS.has(remaining[0]) && RESOURCE_ID.test(remaining[1]);
-    const [kind, id, ...extra] = typed ? remaining : [null, remaining[0], ...remaining.slice(1)];
+    const kind = isResourceKind(remaining[0]) && remaining.length >= 2 && RESOURCE_ID.test(remaining[1])
+      ? remaining[0] : undefined;
+    const [id, ...extra] = remaining.slice(kind ? 1 : 0);
     if (typeof id !== "string" || !RESOURCE_ID.test(id) || extra.length) {
       throw new CatalogError(`Usage: Kitia ${command} [<kind>] <id>`);
     }
@@ -267,9 +272,10 @@ function parseCommandArguments(args: string[]): CliOptions {
     throw new CatalogError(`Unknown command: ${command}`);
   }
   const updateAll = command === "update" && (!remaining.length || remaining[0]?.startsWith("--"));
-  const typed = !updateAll && remaining.length >= 2 && KINDS.has(remaining[0]) && RESOURCE_ID.test(remaining[1]);
-  const [kind, id] = updateAll ? [null, null] : typed ? remaining : [null, remaining[0]];
-  const options = updateAll ? remaining : remaining.slice(typed ? 2 : 1);
+  const kind = !updateAll && isResourceKind(remaining[0]) && remaining.length >= 2 && RESOURCE_ID.test(remaining[1])
+    ? remaining[0] : undefined;
+  const id = updateAll ? undefined : remaining[kind ? 1 : 0];
+  const options = updateAll ? remaining : remaining.slice(kind ? 2 : 1);
   if (!updateAll && (typeof id !== "string" || !RESOURCE_ID.test(id))) {
     throw new CatalogError(`Usage: kitia ${command} [<kind>] <id> [--target <dir>]`);
   }
@@ -295,7 +301,7 @@ function parseCommandArguments(args: string[]): CliOptions {
       index += 1;
     } else throw new CatalogError(`Unknown option: ${option}`);
   }
-  if (result.ref && (!result.kind || !KINDS.has(result.kind) || !result.id)) {
+  if (result.ref && (!result.kind || !result.id)) {
     throw new CatalogError("--ref requires a specific skill, agent, or instruction install or update");
   }
   return result;

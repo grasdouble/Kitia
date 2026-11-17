@@ -275,9 +275,10 @@ function readInstalledSourceSkills(
   const records = Object.fromEntries([...sourceSkillRecords(state)]
     .filter(([key]) => !catalog || key.startsWith(`${catalog}:`)));
   const candidates = new Map<string, CatalogResource>(sourceResources
-    .filter((resource) => !catalog || sourceCatalogName(resource) === catalog)
+    .filter((resource) => resource.kind === "skill" &&
+      (!catalog || sourceCatalogName(resource) === catalog))
     .map((resource) => [
-    sourceSkillKey(resource), resource,
+      sourceSkillKey(resource), resource,
     ]));
   for (const [key, record] of Object.entries(records)) {
     const current = candidates.get(key);

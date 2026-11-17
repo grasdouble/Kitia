@@ -497,7 +497,13 @@ so its ownership, conflict and path checks remain in force.
 | JSON `check` and `doctor` | `0` | `2` | `1` |
 | JSON lifecycle preview | `0` | N/A | `1` |
 | Discovery | `0` | `1` for incomplete sources | `1` |
-| Other commands | `0` | N/A | Nonzero; delegated `gh` failures may retain its exit code |
+| Other commands | `0` | N/A | Nonzero; other delegated `gh` failures may retain its exit code |
+
+For source-skill installation, a nonzero GitHub CLI result is reported as
+`GH_INSTALL_FAILED` and exits with status `1`; it does not reuse the delegated
+process status as the Kitia command's exit code. A failure to launch `gh` is
+reported as `GH_SPAWN_FAILED` and also exits with status `1`. The source-skill
+`preview` command may retain the delegated process status.
 
 A doctor finding such as an unavailable executable is a diagnostic result
 requiring attention, not necessarily a failure to execute doctor itself.

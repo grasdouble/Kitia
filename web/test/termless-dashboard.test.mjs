@@ -1017,11 +1017,13 @@ test("Termless Inventory previews and audits installed local content", {
     const missing = await press("p", "Local preview file is missing");
     assert.ok(missing.includes(".agents/skills/ask-matt/SKILL.md"),
       "a missing installed file reports its exact local path");
-    await press("\x1b", "INVENTORY");
     session.input.write("\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await waitForGrid(session, (grid) => grid.includes("INVENTORY") &&
+      grid.includes("INSTALLED RESOURCES") && grid.includes("Q quit") &&
+      !grid.includes("PREVIEW FAILED") && !grid.includes("ENTER / ESC CLOSE"),
+    "render the narrow Inventory frame and dismiss the missing-file preview failure before quitting");
     session.input.write("q");
-    await dashboardExit(session);
+    assert.equal(await dashboardExit(session), false, "quit retains the failed preview status");
   } finally {
     if (session) await closeShowcaseDashboard(session);
     await rm(directory, { recursive: true, force: true });

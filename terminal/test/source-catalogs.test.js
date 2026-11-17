@@ -3878,6 +3878,7 @@ test("CLI install --ref replaces only the selected scope and retains skill updat
       : ["install", "skill", "demo-skill", "--catalog", "Test", "--ref", selectedRef, "--target", target];
     const options = {
       ...parseArguments(args),
+      nonInteractive: true,
       output,
       onProgress() {},
       spawnProcess: nodeScriptSpawn(path.join(binDirectory, "gh")),

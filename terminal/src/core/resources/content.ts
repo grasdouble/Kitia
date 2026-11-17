@@ -1,5 +1,6 @@
 "use strict";
 
+import type { CatalogResource } from "./model.js";
 const { CatalogError } = require("./model.js");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -21,7 +22,37 @@ function readUtf8(filePath, label = "file") {
 
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
-function readPinnedSourceFile(resource) {
+class PreparedPinnedSourceFile {
+  private constructor(
+    readonly resource: Readonly<CatalogResource>,
+    readonly path: string,
+    readonly content: Buffer,
+  ) {
+    Object.freeze(this);
+  }
+
+  static acquire(resource: CatalogResource): PreparedPinnedSourceFile {
+    if (!resource.source_repository || !resource.source_ref) {
+      throw new CatalogError("Retrieval only supports pinned source-catalog resources", "INVALID_ARGUMENT");
+    }
+    if (!resource.source_path) throw new CatalogError("Source resource has no pinned path", "INVALID_ARGUMENT");
+    const pinned = Object.freeze({ ...resource });
+    const filePath = resource.kind === "skill"
+      ? `${resource.source_path.replace(/\/$/, "")}/SKILL.md`
+      : resource.source_path;
+    return new PreparedPinnedSourceFile(pinned, filePath, readPinnedContent({ ...pinned, source_path: filePath }));
+  }
+}
+
+function preparePinnedSourceFile(resource: CatalogResource): PreparedPinnedSourceFile {
+  return PreparedPinnedSourceFile.acquire(resource);
+}
+
+export function isPreparedPinnedSourceFile(source: CatalogResource | PreparedPinnedSourceFile): source is PreparedPinnedSourceFile {
+  return source instanceof PreparedPinnedSourceFile;
+}
+
+function readPinnedContent(resource) {
   if (!/^[a-f0-9]{40}$/i.test(resource.source_ref)) throw new CatalogError("Source resource has no pinned commit SHA");
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-source-file-"));
   try {
@@ -59,6 +90,6 @@ function readPinnedSourceFile(resource) {
 }
 
 
-module.exports = { isWithin, readUtf8, readPinnedSourceFile };
+module.exports = { isWithin, readUtf8, preparePinnedSourceFile, isPreparedPinnedSourceFile };
 
-export {};
+export type { PreparedPinnedSourceFile };

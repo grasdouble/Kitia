@@ -1,27 +1,16 @@
 import type { AuditResult } from "./audit.js";
+import type { PreparedPinnedSourceFile } from "../resources/content.js";
 "use strict";
 
-import type { CatalogResource } from "../resources/model.js";
-const { CatalogError } = require("../resources/model.js");
-const { readPinnedSourceFile } = require("../resources/content.js");
 const { auditTextResources } = require("./audit.js");
-function auditPinnedResource(
-  resource: CatalogResource,
+function auditPreparedSourceFile(
+  prepared: PreparedPinnedSourceFile,
 ): AuditResult {
-  if (!resource.source_repository || !resource.source_ref) {
-    throw new CatalogError("--audit only supports pinned source-catalog resources", "INVALID_ARGUMENT");
-  }
-  if (!resource.source_path) throw new CatalogError("Source resource has no pinned path to audit", "INVALID_ARGUMENT");
-  const filePath = resource.kind === "skill"
-    ? `${resource.source_path.replace(/\/$/, "")}/SKILL.md`
-    : resource.source_path;
-  const files = [{
-    path: filePath,
-    kind: resource.kind,
-    content: readPinnedSourceFile({ ...resource, source_path: filePath }),
-  }];
-  const result = auditTextResources(files);
-  return result;
+  return auditTextResources([{
+    path: prepared.path,
+    kind: prepared.resource.kind,
+    content: prepared.content,
+  }]);
 }
 
-module.exports = { auditPinnedResource };
+module.exports = { auditPreparedSourceFile };

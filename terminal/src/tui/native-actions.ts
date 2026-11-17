@@ -1,6 +1,7 @@
 "use strict";
 
 import type { CatalogResource } from "../core/resources/model.js";
+const { CatalogError } = require("../core/resources/model.js");
 import type { InstallationRequest } from "../core/installations/lifecycle.js";
 import type { ScanError } from "../core/inventory/checks.js";
 const { collectInstalledScopes } = require("../core/inventory/checks.js");
@@ -40,6 +41,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
     let previewAuditLines: string[] | undefined;
     let release: (() => void) | undefined;
     let code = 0;
+    let failure: DashboardActionResult["failure"];
     try {
       if (action !== "preview") release = acquireOperationLock(target);
       const targetRoot = fs.realpathSync(target);
@@ -84,6 +86,17 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
         code = result.status;
         if (result.preview !== undefined) messages.push(`${formatSourceResource(result.resource)}\n\n${result.preview}`);
       }
+    } catch (error) {
+      if (!(error instanceof CatalogError)) throw error;
+      code = 1;
+      failure = {
+        code: error.code,
+        category: error.category,
+        paths: error.paths,
+        recoverable: error.recoverable,
+        userMessage: error.userMessage || error.message,
+        agent: error.agent,
+      };
     } finally {
       release?.();
     }
@@ -96,6 +109,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
     return {
       code,
       messages,
+      ...(failure ? { failure } : {}),
       ...(previewFiles ? { previewFiles, previewTree, previewAuditLines } : {}),
       resources: enrichInstalledResources(
         result.resources,

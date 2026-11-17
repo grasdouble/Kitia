@@ -1,6 +1,6 @@
 "use strict";
 
-import type { CatalogResource } from "../resources/model.js";
+import type { CatalogResource, ResourceKind } from "../resources/model.js";
 const { CatalogError, USER_INSTALLABLE_KINDS } = require("../resources/model.js");
 const { resolveCatalogResource } = require("../resources/selection.js");
 const { catalogEntries } = require("../resources/queries.js");
@@ -13,8 +13,8 @@ const { SOURCE_SKILL_DIRECTORIES } = require("./model.js");
 const { targetPath } = require("./files.js");
 import type { GhSkillResult } from "./gh-skill.js";
 const { runGhSkill, buildSourceSkillArgs, runGhSkillAsync, formatGhDiagnostics, describeGhFailure } = require("./gh-skill.js");
-const { auditPinnedResource } = require("../inspection/pinned-preview.js");
-const { readPinnedSourceFile } = require("../resources/content.js");
+const { auditPreparedSourceFile } = require("../inspection/pinned-preview.js");
+const { preparePinnedSourceFile } = require("../resources/content.js");
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -53,7 +53,7 @@ export interface InstallationRequest extends Omit<SourceOperationRequest, "actio
   operation: "install" | "preview" | "update" | "uninstall";
   resource?: CatalogResource;
   id?: string;
-  kind?: string;
+  kind?: ResourceKind;
   catalog?: string;
   ref?: string;
   ghForce?: boolean;
@@ -148,7 +148,7 @@ async function executeInstallationOperation(
     for (const resource of sourceToUpdateResources) {
       options.onResource?.({ catalog: resource.catalog || "source", kind: resource.kind, id: resource.id, status: "planned", source: true });
     }
-    const updates = options.onProgress
+    const updates = options.nonInteractive
       ? await updateSourceResourcesAsync(sourceToUpdate, target, options)
       : updateSourceResources(sourceToUpdate, target, options);
     updates.forEach((message) => output.log(message));
@@ -199,7 +199,7 @@ async function executeInstallationOperation(
           resource: { ...matchingInstalled[0].resource, ...selectedResource },
         };
         validateSourceUpdates([replacement], { ...options, target });
-        const updates = options.onProgress
+        const updates = options.nonInteractive
           ? await updateSourceResourcesAsync([replacement], target, options)
           : updateSourceResources([replacement], target, options);
         updates.forEach((message) => output.log(message));
@@ -261,8 +261,11 @@ function runSourceOperation(
       output.error(`Warning: ${resource.id} has no declared license; verify usage rights before installing.`);
     }
   }
+  const prepared = options.audit || (resource.kind !== "skill" && (options.action === "preview" || !options.dryRun))
+    ? preparePinnedSourceFile(resource)
+    : undefined;
   if (options.audit) {
-    const audit = auditPinnedResource(resource);
+    const audit = auditPreparedSourceFile(prepared);
     options.onAudit?.(audit);
     if (options.action === "install" && (!audit.coverage.complete || audit.findings.length)) {
       throw new CatalogError(
@@ -275,7 +278,7 @@ function runSourceOperation(
   }
   if (resource.kind !== "skill") {
     if (options.action === "preview") {
-      const content = readPinnedSourceFile(resource);
+      const content = prepared.content;
       let markdown;
       try {
         markdown = new TextDecoder("utf-8", { fatal: true }).decode(content);
@@ -285,7 +288,7 @@ function runSourceOperation(
       return finish(0, markdown);
     }
     if (options.action !== "install") throw new CatalogError(`Unsupported source resource action: ${options.action}`);
-    const paths = installSourceFileResource(resource, target, options.tool || "claude", {
+    const paths = installSourceFileResource(prepared || resource, target, options.tool || "claude", {
       scope: options.scope || "project",
       force: Boolean(options.force),
       dryRun: Boolean(options.dryRun),
@@ -323,48 +326,64 @@ function runSourceOperation(
     return finish(typeof result === "number" ? result : result.status);
   }
 
-  if (options.onProgress) {
-    return (async () => {
-      const completed = [];
-      for (const agent of agents) {
-        const args = buildSourceSkillArgs("install", resource, agent, options);
-        const result = injectedInvokeGhSkill
-          ? await injectedInvokeGhSkill(args, target)
-          : await runGhSkillAsync(
-            args,
-            target,
-            { nonInteractive: options.nonInteractive, onProgress: options.onProgress, spawnProcess: options.spawnProcess },
-          );
-        const status = typeof result === "number" ? result : result.status;
-        if (status !== 0) {
-          const diagnostic = typeof result === "number" ? "" : formatGhDiagnostics(result);
-          const cause = describeGhFailure(diagnostic);
-          const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${agent}: gh exited with status ${status}. ${cause}`;
-          throw new CatalogError(
-            `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
-            "GH_INSTALL_FAILED",
-            { category: "github-cli", userMessage, technicalDetail: diagnostic || undefined },
-          );
-        }
-        recordSourceInstallation(resource, target, agent);
-        completed.push(agent);
+  function* installSkill(): Generator<string[], InstallationResult, number | GhSkillResult> {
+    const completed: string[] = [];
+    for (const agent of agents) {
+      let result: number | GhSkillResult;
+      const partial = completed.length
+        ? ` Already installed for ${completed.join(", ")}. Those installations remain in place.`
+        : " No agents were confirmed installed before this failure.";
+      try {
+        result = yield buildSourceSkillArgs("install", resource, agent, options);
+      } catch (error) {
+        const code = (error as Error & { code?: string }).code;
+        if (code !== "GH_SPAWN_FAILED" && code !== "GH_TIMEOUT") throw error;
+        const cause = code === "GH_SPAWN_FAILED"
+          ? "Could not start GitHub CLI. Check that gh is installed and available on PATH."
+          : "GitHub CLI timed out. Check network connectivity and retry.";
+        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${agent}. ${cause}${partial}`;
+        throw new CatalogError(userMessage, code, { category: "github-cli", userMessage });
       }
-      options.onProgress?.(`Installed ${catalogLabel(resource)} skill ${resource.id} for ${completed.join(", ")}.`);
-      return finish(0);
+      const status = typeof result === "number" ? result : result.status;
+      if (status !== 0) {
+        const diagnostic = typeof result === "number" ? "" : formatGhDiagnostics(result);
+        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${agent}: gh exited with status ${status}. ${describeGhFailure(diagnostic)}${partial}`;
+        throw new CatalogError(
+          `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ""}`,
+          "GH_INSTALL_FAILED",
+          { category: "github-cli", userMessage, technicalDetail: diagnostic || undefined },
+        );
+      }
+      recordSourceInstallation(resource, target, agent);
+      completed.push(agent);
+    }
+    options.onProgress?.(`Installed ${catalogLabel(resource)} skill ${resource.id} for ${completed.join(", ")}.`);
+    return finish(0);
+  }
+  const installation = installSkill();
+  if (options.nonInteractive) {
+    return (async () => {
+      let step = installation.next();
+      while (step.done === false) {
+        let result: number | GhSkillResult;
+        try {
+          result = injectedInvokeGhSkill
+            ? await injectedInvokeGhSkill(step.value, target)
+            : await runGhSkillAsync(step.value, target, options);
+        } catch (error) { step = installation.throw(error); continue; }
+        step = installation.next(result);
+      }
+      return step.value;
     })();
   }
-  const completed = [];
-  for (const agent of agents) {
-    const result = invokeGhSkill(buildSourceSkillArgs("install", resource, agent, options), target);
-    const status = typeof result === "number" ? result : result.status;
-    if (status !== 0) {
-      if (completed.length) output.error(`The skill was already installed for ${completed.join(", ")}, but installation for ${agent} failed.`);
-      return finish(status);
-    }
-    recordSourceInstallation(resource, target, agent);
-    completed.push(agent);
+  let step = installation.next();
+  while (step.done === false) {
+    let result: number | GhSkillResult;
+    try { result = invokeGhSkill(step.value, target); }
+    catch (error) { step = installation.throw(error); continue; }
+    step = installation.next(result);
   }
-  return finish(0);
+  return step.value;
 }
 
 function resolveListedSourceRef(resource, ref) {

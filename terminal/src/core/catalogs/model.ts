@@ -1,5 +1,6 @@
 "use strict";
 
+import type { ResourceKind } from "../resources/model.js";
 const CATALOG_NAME_FORBIDDEN = /[\/\\:\u0000-\u001f\u007f-\u009f]/u;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const { CatalogError } = require("../resources/model.js");
@@ -27,7 +28,7 @@ function repositoryId(value: string): string {
   return id;
 }
 
-function validateSourceConfiguration(configuration: unknown) {
+function validateSourceConfiguration(configuration: unknown): SourceConfiguration[] {
   if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)) {
     throw new CatalogError("catalogSources.json must have catalog_version: 1 and a sources array");
   }
@@ -49,9 +50,9 @@ function validateSourceConfiguration(configuration: unknown) {
     if (Object.keys(entry).some((key) => !["name", "repository", "mode", "entries"].includes(key))) {
       throw new CatalogError(`${label} contains unsupported fields`);
     }
-    let mode: "basic" | "custom" = entry.mode === undefined ? "basic" : entry.mode as "basic" | "custom";
+    const mode = entry.mode === undefined ? "basic" : entry.mode;
     if (mode !== "basic" && mode !== "custom") throw new CatalogError(`${label}.mode must be basic or custom`);
-    let entries: Array<{ kind: string; id?: string; path: string }> = [];
+    let entries: CatalogEntry[] = [];
     if (entry.entries !== undefined) {
       if (!Array.isArray(entry.entries)) throw new CatalogError(`${label}.entries must be an array`);
       entries = entry.entries.map((item: unknown, itemIndex) => {
@@ -59,7 +60,7 @@ function validateSourceConfiguration(configuration: unknown) {
         if (!item || typeof item !== "object" || Array.isArray(item)) throw new CatalogError(`${itemLabel} must be an object`);
         const mapping = item as Record<string, unknown>;
         if (Object.keys(mapping).some((key) => !["kind", "id", "path"].includes(key)) ||
-            !["skill", "agent", "instruction"].includes(String(mapping.kind)) ||
+            (mapping.kind !== "skill" && mapping.kind !== "agent" && mapping.kind !== "instruction") ||
             typeof mapping.path !== "string") {
           throw new CatalogError(`${itemLabel} must define a supported kind and safe repository-relative path`);
         }
@@ -83,12 +84,12 @@ function validateSourceConfiguration(configuration: unknown) {
               id.length > 64 || id.includes("--"))) {
           throw new CatalogError(`${itemLabel}.id must be a valid kebab-case identifier`);
         }
-        const kind = mapping.kind as string;
+        const kind = mapping.kind;
         if (entries.some((existing) => existing.kind === kind &&
             (existing.path === sourcePath || (id !== undefined && existing.id === id)))) {
           throw new CatalogError(`${label} contains duplicate resource mappings`);
         }
-        return { kind, ...(id === undefined ? {} : { id: id as string }), path: sourcePath };
+        return { kind, ...(typeof id === "string" ? { id } : {}), path: sourcePath };
       });
     }
     if (mode === "custom" && entry.entries === undefined) throw new CatalogError(`${label} custom mode requires entries`);
@@ -106,7 +107,15 @@ function validateSourceConfiguration(configuration: unknown) {
 module.exports = { catalogNameKey, isValidCatalogName, repositoryId, validateSourceConfiguration };
 
 
-export type CatalogEntry = { kind: "skill" | "agent" | "instruction"; id?: string; path: string };
+export type CatalogEntry = { kind: ResourceKind; id?: string; path: string };
+
+export interface SourceConfiguration {
+  name: string;
+  repository: string;
+  repositoryId: string;
+  mode: "basic" | "custom";
+  entries: CatalogEntry[];
+}
 
 export type AddCatalogRequest = {
   name: string;

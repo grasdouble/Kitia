@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -145,5 +145,267 @@ test("progress-enabled source install preserves the injected GitHub runner", asy
     );
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+
+test("audited agent and instruction operations acquire pinned content once and dry runs remain offline", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-pinned-once-"));
+  const fixture = path.join(temporary, "repository");
+  fs.mkdirSync(fixture);
+  const content = "---\nname: demo\ndescription: Safe fixture.\n---\n\nSafe local fixture body.\n";
+  fs.writeFileSync(path.join(fixture, "demo.md"), content);
+  execFileSync("git", ["init", "--quiet", fixture]);
+  execFileSync("git", ["-C", fixture, "add", "."]);
+  execFileSync("git", ["-C", fixture, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture"]);
+  const ref = execFileSync("git", ["-C", fixture, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const trace = path.join(temporary, "git-trace");
+  const environment = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.${pathToFileURL(fixture).href}.insteadOf`,
+    GIT_CONFIG_VALUE_0: "https://github.com/test/repository.git", GIT_TRACE: trace };
+  const previous = Object.fromEntries(Object.keys(environment).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, environment);
+  try {
+    let clones = 0;
+    for (const kind of ["agent", "instruction"]) {
+      const resource = { kind, id: "demo", catalog: "Fixture", source_repository: "test/repository",
+        source_path: "demo.md", source_ref: ref, license_status: "MIT", apply_to: ["**/*.ts"] };
+      for (const action of ["preview", "install"]) {
+        const target = path.join(temporary, `${kind}-${action}`);
+        fs.mkdirSync(target);
+        const audits = [];
+        const result = runSourceOperation({ action, resource, target, tool: "both", audit: true,
+          onAudit: (audit) => audits.push(audit) });
+        assert.equal(result.status, 0);
+        assert.equal(audits.length, 1);
+        assert.equal(audits[0].coverage.complete, true);
+        assert.deepEqual(audits[0].findings, []);
+        assert.equal(fs.readFileSync(trace, "utf8").match(/built-in: git clone /g).length, ++clones);
+        if (action === "preview") assert.equal(result.preview, content);
+        else {
+          const installed = path.join(target, kind === "agent" ? ".claude/agents/demo.md" : ".claude/rules/demo.md");
+          assert.match(fs.readFileSync(installed, "utf8"), /Safe local fixture body/);
+          assert.equal(readInstallState(target).sources.Fixture[`${kind}s`].demo.source_ref, ref);
+        }
+      }
+      const target = path.join(temporary, `${kind}-dry`);
+      fs.mkdirSync(target);
+      runSourceOperation({ action: "install", resource, target, tool: "both", dryRun: true });
+      assert.equal(fs.readFileSync(trace, "utf8").match(/built-in: git clone /g).length, clones);
+      assert.deepEqual(fs.readdirSync(target), []);
+      runSourceOperation({ action: "install", resource, target, tool: "both", dryRun: true, audit: true });
+      assert.equal(fs.readFileSync(trace, "utf8").match(/built-in: git clone /g).length, ++clones);
+      assert.deepEqual(fs.readdirSync(target), []);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+function writeSkillFixture(args, target) {
+  const agent = args[args.indexOf("--agent") + 1];
+  const ref = args[args.indexOf("--pin") + 1];
+  const id = args[3].split("/").at(-1);
+  const file = path.join(target, agent === "claude-code" ? ".claude" : ".agents", "skills", id, "SKILL.md");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, ["---", `name: ${id}`, "description: Fixture.", "metadata:",
+    `  github-repo: https://github.com/${args[2]}`, `  github-path: ${args[3]}`,
+    `  github-ref: ${ref}`, `  github-pinned: ${ref}`, "---", "Fixture body.", ""].join("\n"));
+}
+
+function fixtureSpawn(run) {
+  const { EventEmitter } = require("node:events");
+  const { PassThrough } = require("node:stream");
+  return (_program, args, options) => {
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(options.env.GH_PROMPT_DISABLED, "1");
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    queueMicrotask(() => {
+      try {
+        const result = run(args, options.cwd);
+        if (result.stderr) child.stderr.write(result.stderr);
+        child.emit("close", result.status);
+      } catch (error) { child.emit("error", error); }
+    });
+    return child;
+  };
+}
+
+test("sync and async updates share plans, resource summaries, no-update results, partial failures and agent force", async () => {
+  const { updateSourceResources, updateSourceResourcesAsync } = require("../../core/installations/mutations.ts");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-update-parity-"));
+  const resource = { kind: "skill", id: "demo", catalog: "Fixture", source_repository: "test/repository",
+    source_path: "skills/demo", source_ref: "b".repeat(40), license_status: "MIT" };
+  const installed = [{ resource, installations: ["github-copilot", "claude-code"].map((agent) => ({
+    agent, path: `${agent === "claude-code" ? ".claude" : ".agents"}/skills/demo/SKILL.md`,
+    ref: "a".repeat(40), missing: true,
+  })) }];
+  installed.unshift({ resource: { ...resource, id: "prior", source_path: "skills/prior" },
+    installations: [{ agent: "github-copilot", path: ".agents/skills/prior/SKILL.md", ref: "a".repeat(40), missing: true }] });
+  try {
+    for (const scenario of ["dry", "current", "success", "partial", "spawn", "force", "retry"]) {
+      const outcomes = [];
+      for (const asyncTransport of [false, true]) {
+        for (const observed of [false, true]) {
+          const target = fs.mkdtempSync(path.join(directory, "target-"));
+          const actions = [];
+          const calls = [];
+          const run = (args, cwd) => {
+            calls.push(args);
+            if (args[args.indexOf("--agent") + 1] === "claude-code") {
+              if (scenario === "spawn") throw Object.assign(new Error("spawn fixture"), { code: "ENOENT" });
+              if (scenario === "partial") return { status: 7, stderr: "fixture failure" };
+              if (scenario === "force") return { status: 7, stderr: "Skills already installed: demo (Use --force to overwrite)" };
+            }
+            writeSkillFixture(args, cwd);
+            return { status: 0 };
+          };
+          const entries = scenario === "current"
+            ? installed.map((entry) => ({ ...entry, installations: entry.installations.map((item) => ({ ...item, missing: false, ref: resource.source_ref })) }))
+            : installed;
+          const options = { nonInteractive: true, dryRun: scenario === "dry", ghForce: scenario === "retry",
+            ghForceAgent: scenario === "retry" ? "claude-code" : undefined,
+            onAction: (action) => actions.push(action), ...(observed ? { onProgress: () => {} } : {}) };
+          let messages, failure;
+          try {
+            messages = asyncTransport
+              ? await updateSourceResourcesAsync(entries, target, { ...options, nonInteractive: undefined, spawnProcess: fixtureSpawn(run) })
+              : updateSourceResources(entries, target, options, (args, cwd) => {
+                try { return run(args, cwd); }
+                catch (error) { throw Object.assign(error, { code: "GH_SPAWN_FAILED" }); }
+              });
+          } catch (error) {
+            failure = { code: error.code, message: error.message, userMessage: error.userMessage, agent: error.agent, recoverable: error.recoverable };
+          }
+          const state = readInstallState(target).sources;
+          outcomes.push({ messages, failure, actions, calls, state });
+          if (["partial", "spawn", "force"].includes(scenario)) {
+            assert.equal(Object.keys(state.Fixture.skills.demo.files).length, 1);
+            assert.match(failure.message, /Already updated: Updated Fixture catalog skill: prior/);
+            assert.match(failure.message, /Updated agents: github-copilot.*remain in place/);
+          }
+          const mentions = (id) => messages.filter((message) => message.includes(id)).length;
+          if (scenario === "success" || scenario === "retry") {
+            assert.equal(messages.length, 2);
+            assert.equal(mentions("prior"), 1);
+            assert.equal(mentions("demo"), 1);
+          }
+          if (scenario === "current") {
+            assert.equal(messages.length, 1);
+            assert.ok(messages[0]);
+          }
+          if (scenario === "dry") {
+            assert.equal(messages.length, 2);
+            assert.equal(mentions("prior"), 1);
+            assert.equal(mentions("demo"), 1);
+          }
+          if (scenario === "retry") {
+            assert.equal(calls[0].includes("--force"), false);
+            assert.equal(calls[1].includes("--force"), false);
+            assert.equal(calls[2].includes("--force"), true);
+          }
+          if (scenario === "force") assert.equal(failure.agent, "claude-code");
+        }
+      }
+      for (const outcome of outcomes.slice(1)) assert.deepEqual(outcome, outcomes[0], scenario);
+    }
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("install failures and successful-agent records are independent of progress and transport", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-install-parity-"));
+  const resource = { kind: "skill", id: "demo", catalog: "Fixture", source_repository: "test/repository",
+    source_path: "skills/demo", source_ref: "b".repeat(40), license_status: "not-declared" };
+  try {
+    const outcomes = [];
+    for (const nonInteractive of [false, true]) {
+      for (const observed of [false, true]) {
+        const target = fs.mkdtempSync(path.join(directory, "target-"));
+        const messages = [];
+        const run = (args, cwd) => {
+          if (args[args.indexOf("--agent") + 1] === "claude-code") return { status: 7, stderr: "fixture failure" };
+          writeSkillFixture(args, cwd);
+          return { status: 0 };
+        };
+        let failure;
+        try { await runSourceOperation({ action: "install", resource, target, tool: "both", nonInteractive,
+          onMessage: (message) => messages.push(message), ...(observed ? { onProgress: () => {} } : {}),
+          ...(nonInteractive ? { spawnProcess: fixtureSpawn(run) } : {}),
+        }, nonInteractive ? undefined : run); } catch (error) { failure = { code: error.code, message: error.message }; }
+        assert.equal(failure.code, "GH_INSTALL_FAILED");
+        assert.match(failure.message, /Already installed for github-copilot.*remain in place/);
+        assert.equal(messages.length, 1);
+        outcomes.push({ failure, messages, state: readInstallState(target).sources });
+      }
+    }
+    for (const outcome of outcomes.slice(1)) assert.deepEqual(outcome, outcomes[0]);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("CLI maps exited install status seven to exit one, preserves warnings, and keeps JSON plans offline", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-gh-cli-contract-"));
+  const config = path.join(directory, "config");
+  const indexes = path.join(config, "source-catalogs");
+  const target = path.join(directory, "target");
+  for (const folder of [indexes, target]) fs.mkdirSync(folder, { recursive: true });
+  const registry = { catalog_version: 1, sources: [{ name: "Fixture", repository: "https://github.com/test/repository" }] };
+  fs.writeFileSync(path.join(config, "catalogSources.json"), JSON.stringify(registry));
+  fs.writeFileSync(path.join(indexes, "catalogSources.json"), JSON.stringify(registry));
+  fs.writeFileSync(path.join(indexes, "Fixture.json"), JSON.stringify({
+    catalog_version: 1, catalog_name: "Fixture", source_repository: "test/repository", source_ref: "b".repeat(40),
+    resources: [{ id: "demo", kind: "skill", source_path: "skills/demo", description: "Fixture.", license_status: "not-declared" }],
+  }));
+  const invoked = path.join(directory, "gh-invoked");
+  const ghScript = path.join(directory, "gh-fixture.cjs");
+  fs.writeFileSync(ghScript, [
+    'const fs = require("node:fs");',
+    'fs.writeFileSync(process.env.KITIA_TEST_GH_INVOKED, "invoked");',
+    'process.stderr.write("fixture failure\\n");',
+    "process.exitCode = 7;",
+    "",
+  ].join("\n"));
+  const preload = path.resolve(__dirname, "../../../test/gh-process-preload.cjs");
+  const cli = path.resolve(__dirname, "../../../bin/kitia.js");
+  const env = { ...process.env, KITIA_CONFIG_DIR: config, KITIA_TEST_GH_SCRIPT: ghScript, KITIA_TEST_GH_INVOKED: invoked };
+  const runCli = (...args) => spawnSync(process.execPath, ["--require", preload, cli, ...args], {
+    cwd: process.cwd(), env, encoding: "utf8",
+  });
+  try {
+    for (const nonInteractive of [false, true]) {
+      const result = runCli("install", "skill", "demo", "--target", target,
+        ...(nonInteractive ? ["--non-interactive"] : []));
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(result.stderr.match(/has no declared license/g)?.length, 1);
+      assert.match(result.stderr, /Error: Could not install.*gh exited with status 7/);
+      assert.equal(fs.existsSync(invoked), true);
+      fs.unlinkSync(invoked);
+    }
+    const dryRun = runCli("install", "skill", "demo", "--target", target, "--dry-run", "--json");
+    assert.equal(dryRun.status, 0, dryRun.stderr);
+    const report = JSON.parse(dryRun.stdout);
+    assert.equal(report.schema_version, 1);
+    assert.equal(report.status, "ok");
+    assert.deepEqual(report.errors, []);
+    assert.equal(report.actions[0].action, "delegate_install");
+    assert.equal(report.warnings.filter(({ message }) => /has no declared license/.test(message)).length, 1);
+    assert.equal(fs.existsSync(invoked), false, "JSON dry-run must not execute delegated installation");
+
+    const jsonInstall = runCli("install", "skill", "demo", "--target", target, "--json");
+    assert.equal(jsonInstall.status, 1);
+    const invalidReport = JSON.parse(jsonInstall.stdout);
+    assert.equal(invalidReport.status, "error");
+    assert.equal(invalidReport.errors[0].code, "INVALID_ARGUMENT");
+    assert.equal(fs.existsSync(invoked), false);
+
+    const preview = runCli("preview", "skill", "demo");
+    assert.equal(preview.status, 7);
+    assert.equal(fs.existsSync(invoked), true);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

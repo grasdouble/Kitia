@@ -125,7 +125,7 @@ function writeInstallPlan(
     throw new CatalogError(`Target must be an existing directory: ${target}`);
   }
   const targetRoot = fs.realpathSync(target);
-  const actions = [];
+  const actions: Array<["install" | "overwrite" | "unchanged" | "remove", string, InstallPlanEntry | null]> = [];
   const conflicts = [];
 
   for (const relativePath of remove) {
@@ -172,7 +172,6 @@ function writeInstallPlan(
       actions.push(["overwrite", relativePath, file]);
     } else {
       conflicts.push(relativePath);
-      actions.push(["conflict", relativePath, file]);
     }
   }
 
