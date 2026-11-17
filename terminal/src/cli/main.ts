@@ -4,7 +4,7 @@ import type { CliReport } from "./report.js";
 const { CLI_REPORT_SCHEMA_VERSION } = require("./schema-versions.js");
 const { parseArguments } = require("./arguments.js");
 const { acquireOperationLock } = require("../core/installations/lock.js");
-const { readInstallState } = require("../core/installations/state.js");
+const { readInstallState } = require("../core/installations/inventory.js");
 const { executeCommand } = require("./commands.js");
 
 const fs = require("node:fs");

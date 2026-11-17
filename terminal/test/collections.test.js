@@ -8,7 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { afterEach, test } = require("node:test");
 const { loadUserSourceConfiguration } = require("../dist/core/catalogs/config.js");
-const { loadSourceCatalogsFromDirectory } = require("../dist/core/catalogs/loader.js");
+const { loadSourceCatalogsFromDirectory } = require("../dist/core/catalogs/indexes.js");
 
 let temporary;
 const previousConfig = process.env.KITIA_CONFIG_DIR;

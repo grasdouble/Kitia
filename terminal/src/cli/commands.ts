@@ -16,7 +16,7 @@ const { catalogEntries, listCatalogResources, enrichInstalledResources } = requi
 const { checkInstalledResources, collectInstalledScopes } = require("../core/installations/checks.js");
 const { checkCatalogFreshness } = require("../core/catalogs/manage.js");
 const { formatSourceResource } = require("./resource-format.js");
-const { executeInstallationOperation } = require("../core/installations/actions.js");
+const { executeInstallationOperation } = require("../core/installations/lifecycle.js");
 const { formatAuditLines } = require("./inspection-format.js");
 
 const fs = require("node:fs");

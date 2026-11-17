@@ -1,8 +1,8 @@
 "use strict";
 
-const { prepareTrackedResources } = require("../core/installations/preparation.js");
+const { prepareTrackedResources } = require("../core/installations/inventory.js");
 const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
-const { loadCatalogs } = require("../core/catalogs/loading.js");
+const { loadCatalogs } = require("../core/catalogs/indexes.js");
 
 function loadCommandCatalogs(options, warn = (_warning) => {}) {
   const { command, catalog, kind, id } = options;

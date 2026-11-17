@@ -14,7 +14,7 @@ const {
 } = require("../../core/collections/signatures.ts");
 const { importCollectionText } = require("../../core/collections/import.ts");
 const { loadUserSourceConfiguration } = require("../../core/catalogs/config.ts");
-const { loadSourceCatalogsFromDirectory } = require("../../core/catalogs/loader.ts");
+const { loadSourceCatalogsFromDirectory } = require("../../core/catalogs/indexes.ts");
 
 let temporary;
 const previousConfig = process.env.KITIA_CONFIG_DIR;

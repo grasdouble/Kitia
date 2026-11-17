@@ -2,8 +2,7 @@
 
 import type { CatalogResource } from "../resources/model.js";
 const { CatalogError } = require("../resources/model.js");
-const { readInstallState } = require("./state.js");
-const { readInstalledSourceSkills, readInstalledSourceResources } = require("./inventory.js");
+const { readInstallState, readInstalledSourceSkills, readInstalledSourceResources } = require("./inventory.js");
 const { latestSourceVersionAtRef } = require("../resources/history.js");
 const { findUnmanagedArtifacts } = require("./discovery.js");
 const { trackedPaths } = require("./files.js");

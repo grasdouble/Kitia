@@ -7,8 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { test } = require("node:test");
-const { runSourceOperation } = require("../../core/installations/source-operation.ts");
-const { readInstallState } = require("../../core/installations/state.ts");
+const { runSourceOperation } = require("../../core/installations/lifecycle.ts");
+const { readInstallState } = require("../../core/installations/inventory.ts");
 
 test("audit rejects resources without pinned source metadata instead of claiming to audit them", () => {
   assert.throws(() => runSourceOperation({

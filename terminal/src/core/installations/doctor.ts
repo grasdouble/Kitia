@@ -1,7 +1,7 @@
 "use strict";
 
 const { loadUserSourceConfiguration } = require("../catalogs/config.js");
-const { readInstallState } = require("./state.js");
+const { readInstallState } = require("./inventory.js");
 const { inspectOperationLock, OPERATION_LOCK } = require("./lock.js");
 
 const fs = require("node:fs");

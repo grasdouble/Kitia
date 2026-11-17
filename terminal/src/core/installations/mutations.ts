@@ -7,9 +7,8 @@ const { targetPath, installedFingerprint, sameFingerprint, writeInstallPlan, add
 const { readPinnedSourceFile } = require("../resources/content.js");
 import type { InstallPlanEntry, FileFingerprint } from "./plan.js";
 const { addPlanEntry } = require("./plan.js");
-const { readInstallState } = require("./state.js");
+const { readInstallState, sourceCatalogName, recordSourceResourceInstallation, sourceSkillKey, sourceSkillRecords, sourceSkillRecord, recordSourceInstallation, readInstalledSourceResources, removeSourceResourceRecord, readInstalledSourceSkills, removeSourceSkillRecord } = require("./inventory.js");
 import type { InstalledSourceResource } from "./inventory.js";
-const { sourceCatalogName, recordSourceResourceInstallation, sourceSkillKey, sourceSkillRecords, sourceSkillRecord, recordSourceInstallation, readInstalledSourceResources, removeSourceResourceRecord, readInstalledSourceSkills, removeSourceSkillRecord } = require("./inventory.js");
 import type { GhSkillResult } from "./gh-skill.js";
 const { runGhSkill, buildSourceSkillArgs, formatGhDiagnostics, describeGhFailure, runGhSkillAsync } = require("./gh-skill.js");
 const { LOCK_PATH } = require("./model.js");

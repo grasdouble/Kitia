@@ -47,7 +47,7 @@ function validateCurrentInventory(inventory) {
       `${JSON.stringify(inventory)}\n`,
       { flag: "wx", mode: 0o600 },
     );
-    const { readInstallState } = require("../dist/core/installations/state.js");
+    const { readInstallState } = require("../dist/core/installations/inventory.js");
     readInstallState(temporary);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
