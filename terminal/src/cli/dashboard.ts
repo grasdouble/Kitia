@@ -5,24 +5,7 @@ import type { CliReport } from "./report.js";
 import type { CliOptions } from "./arguments.js";
 import type { ScanError } from "../catalog/lifecycle.js";
 import type { InstallState } from "../catalog/inventory/files.js";
-export interface DashboardActionFailure {
-  code: string;
-  category?: string;
-  paths?: string[];
-  recoverable?: boolean;
-  userMessage: string;
-  agent?: string;
-}
-export interface DashboardActionResult {
-  code: number;
-  messages: string[];
-  resources: CatalogResource[];
-  errors: ScanError[];
-  failure?: DashboardActionFailure;
-  previewFiles?: Array<{ path: string; content: string }>;
-  previewTree?: string[];
-  previewAuditLines?: string[];
-}
+import type { DashboardActionResult } from "../tui/contracts.js";
 
 const fs = require("node:fs");
 const os = require("node:os");

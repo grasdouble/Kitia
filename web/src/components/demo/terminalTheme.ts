@@ -1,5 +1,5 @@
 import type { ITheme } from '@xterm/xterm';
-import { DASHBOARD_THEME } from '../../../../terminal/src/dashboard/colors';
+import { DASHBOARD_THEME } from '../../../../terminal/src/tui/colors';
 
 const { semantic, terminalAnsi } = DASHBOARD_THEME;
 const palette = terminalAnsi.palette;

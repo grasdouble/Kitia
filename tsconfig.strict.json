@@ -9,10 +9,10 @@
     "noEmit": true
   },
   "files": [
-    "terminal/src/dashboard/helpers.mts",
-    "terminal/src/dashboard/catalog-freshness.mts",
-    "terminal/src/dashboard/action-retry.mts",
-    "terminal/src/dashboard/version-check.mts",
-    "terminal/src/dashboard/components/detail-fields.mts"
+    "terminal/src/tui/helpers.mts",
+    "terminal/src/tui/catalog-freshness.mts",
+    "terminal/src/tui/action-retry.mts",
+    "terminal/src/tui/version-check.mts",
+    "terminal/src/tui/components/detail-fields.mts"
   ]
 }

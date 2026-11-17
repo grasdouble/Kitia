@@ -4,7 +4,7 @@ import {
   createDashboardInputTransport,
   type DashboardInputTransport,
   type DashboardMouseRegions,
-} from '../../../../terminal/src/dashboard/input-transport.mjs';
+} from '../../../../terminal/src/tui/input-transport.mjs';
 import { XTERM_THEME } from './terminalTheme';
 
 export interface BrowserTerminalSession {

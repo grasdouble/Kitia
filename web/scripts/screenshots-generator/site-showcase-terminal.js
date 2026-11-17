@@ -7,7 +7,7 @@ const { collectInstalledScopes } = require("../../../terminal/dist/catalog/lifec
 const { catalogEntries, formatDashboardRows } = require("../../../terminal/dist/cli/catalog.js");
 const { loadUserSourceConfiguration } = require("../../../terminal/dist/catalog/sources/config.js");
 const { executeDashboardAction } = require("../../../terminal/dist/cli/commands.js");
-const { DASHBOARD_THEME } = require("../../../terminal/dist/dashboard/colors.js");
+const { DASHBOARD_THEME } = require("../../../terminal/dist/tui/colors.js");
 const { root, seedShowcase } = require("./site-showcase-fixture.js");
 const { assertTermlessRuntime } = require("./termless-preflight.js");
 

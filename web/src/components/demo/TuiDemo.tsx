@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Dashboard } from '../../../../terminal/src/dashboard/dashboard.mjs';
-import { DASHBOARD_THEME } from '../../../../terminal/src/dashboard/colors';
+import { Dashboard } from '../../../../terminal/src/tui/dashboard.mjs';
+import { DASHBOARD_THEME } from '../../../../terminal/src/tui/colors';
 import { mountDashboardTerminal, type BrowserTerminalSession } from './browserTerminal';
 import { createTuiDemoSession } from './tuiDemoSession';
 import { terminalColor } from './terminalTheme';

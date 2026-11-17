@@ -67,7 +67,7 @@ export function browserInkPlugins(): Plugin[] {
       }),
       transform(code, id) {
         const file = id.split('?')[0];
-        if (!file.endsWith('/terminal/src/dashboard/helpers.mts') && !file.endsWith('/terminal/src/dashboard/source-highlighting.mts')) return;
+        if (!file.endsWith('/terminal/src/tui/helpers.mts') && !file.endsWith('/terminal/src/tui/source-highlighting.mts')) return;
         // These two ESM files use createRequire only for static CJS dependencies.
         // Expose those exact dependencies to Vite; the CLI source stays untouched.
         let transformed = code

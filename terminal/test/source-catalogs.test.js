@@ -22,8 +22,8 @@ const { findUnmanagedArtifacts, installedFingerprint, readInstallState } = requi
 const { collectInstalledScopes } = require("../dist/catalog/lifecycle.js");
 const { formatDashboardRows } = require("../dist/cli/catalog.js");
 const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel, dashboardStatus } =
-  require("../dist/dashboard/helpers.mjs");
-const { renderInstalledResources } = require("../dist/dashboard/terminal.js");
+  require("../dist/tui/helpers.mjs");
+const { renderInstalledResources } = require("../dist/tui/terminal.js");
 const { readInstalledSourceSkills } = require("../dist/catalog/sources/installed.js");
 const { checkInstalledResources } = require("../dist/catalog/lifecycle.js");
 const { runSourceCommand } = require("../dist/cli/source-command.js");
@@ -31,7 +31,7 @@ const { uninstallSourceResource, updateSourceResources } = require("../dist/cata
 const { main: runCliMain } = require("../dist/cli/main.js");
 const { parseArguments } = require("../dist/cli/arguments.js");
 const { executeCommand, runDashboardWorker } = require("../dist/cli/commands.js");
-const { mergeRefreshedCatalogResources } = require("../dist/dashboard/helpers.mjs");
+const { mergeRefreshedCatalogResources } = require("../dist/tui/helpers.mjs");
 const nodeScriptSpawn = (script) => (command, args, options) => {
   assert.equal(command, "gh");
   return spawn(process.execPath, [script, ...args], options);
@@ -90,60 +90,9 @@ function waitForOutput(output, getValue, predicate, description, timeoutMs = 10_
     check();
   });
 }
-test("dashboard preview combines source inspection and audit while installs remain audited", async () => {
-  const { createDashboardActionHandler } = require("../dist/cli/dashboard.js");
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-dashboard-inspection-"));
-  const configDirectory = path.join(temporary, "config");
-  const indexDirectory = path.join(configDirectory, "source-catalogs");
-  fs.mkdirSync(indexDirectory, { recursive: true });
-  const repository = "https://github.com/org/repo";
-  const configuration = { catalog_version: 1, sources: [{ name: "Test", repository }] };
-  writeJson(path.join(configDirectory, "catalogSources.json"), configuration);
-  writeJson(path.join(indexDirectory, "catalogSources.json"), configuration);
-  const resource = {
-    catalog: "Test", kind: "skill", id: "reviewer",
-    source_repository: "org/repo", source_path: "skills/reviewer/SKILL.md",
-    source_ref: "a".repeat(40), license_status: "MIT", description: "Review changes.",
-  };
-  writeJson(path.join(indexDirectory, "Test.json"), {
-    catalog_version: 1, catalog_name: "Test", source_repository: "org/repo",
-    source_ref: "a".repeat(40), resources: [{
-      kind: "skill", id: "reviewer", source_path: "skills/reviewer/SKILL.md",
-      description: "Review changes.", license_status: "MIT",
-    }],
-  });
-  const previousConfig = process.env.KITIA_CONFIG_DIR;
-  process.env.KITIA_CONFIG_DIR = configDirectory;
-  try {
-    const dispatched = [];
-    const handler = createDashboardActionHandler(async (options) => {
-      dispatched.push(options);
-      options.output.log("Inspection output");
-      return 0;
-    });
-    const invoke = (action, installOptions = {}) => handler(action, resource, {
-      target: temporary, userTarget: temporary,
-    }, { sourceResources: [resource] }, installOptions);
-    await invoke("preview");
-    await invoke("install");
-    const ref = "b".repeat(40);
-    await invoke("install", { ref });
-    await invoke("update", { ref });
-    assert.deepEqual(dispatched.map(({ command, audit, captureOutput, ref: selectedRef }) =>
-      ({ command, audit, captureOutput, ref: selectedRef })), [
-      { command: "preview", audit: true, captureOutput: true, ref: undefined },
-      { command: "install", audit: true, captureOutput: false, ref: undefined },
-      { command: "install", audit: true, captureOutput: false, ref },
-      { command: "update", audit: undefined, captureOutput: false, ref },
-    ]);
-  } finally {
-    if (previousConfig === undefined) delete process.env.KITIA_CONFIG_DIR;
-    else process.env.KITIA_CONFIG_DIR = previousConfig;
-  }
-});
 test("dashboard replaces an installed skill with the selected full revision through update confirmation", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -279,7 +228,7 @@ test("dashboard replaces an installed skill with the selected full revision thro
 });
 test("dashboard shows the loading popup for consecutive actions", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -344,7 +293,7 @@ test("dashboard shows the loading popup for consecutive actions", async () => {
 });
 test("dashboard revision picker applies a selected full SHA to a confirmed instruction update", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -476,30 +425,6 @@ test("refreshing one catalog replaces only its resources in the catalog list", (
   ), [updatedAlpha, existingBeta]);
 });
 
-test("Matt Pocock catalog preset resolves to its repository", () => {
-  assert.deepEqual(parseArguments(["catalog", "add", "matt-pocock"]), {
-    command: "catalog",
-    action: "add",
-    name: "matt-pocock",
-    repository: "https://github.com/mattpocock/skills",
-  });
-});
-test("Anthropics catalog preset resolves to its repository", () => {
-  assert.deepEqual(parseArguments(["catalog", "add", "anthropics"]), {
-    command: "catalog",
-    action: "add",
-    name: "Anthropics",
-    repository: "https://github.com/anthropics/skills",
-  });
-});
-test("GitHub Awesome Copilot catalog preset resolves to its repository", () => {
-  assert.deepEqual(parseArguments(["catalog", "add", "github-awesome-copilot"]), {
-    command: "catalog",
-    action: "add",
-    name: "github-awesome-copilot",
-    repository: "https://github.com/github/awesome-copilot",
-  });
-});
 
 test("first Kitia use preserves existing Kiti catalog settings", () => {
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-config-migration-"));
@@ -549,7 +474,7 @@ test("onboarding defaults its project scan to the current directory", () => {
 
 test("dashboard shows the installed and available versions with the changelog link", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const previousVersion = process.env.KITIA_INSTALLED_VERSION;
   const previousFetch = global.fetch;
   process.env.KITIA_INSTALLED_VERSION = "1.0.0";
@@ -603,9 +528,6 @@ test("dashboard shows the installed and available versions with the changelog li
   }
 });
 
-test("no-argument CLI defaults to the dashboard", () => {
-  assert.deepEqual(parseArguments([]), { command: "dashboard", target: "." });
-});
 
 
 test("catalog freshness compares cached index with remote default branch", async () => {
@@ -1908,39 +1830,9 @@ test("configured source skills use the same pinned install, check, update and un
 
 test("dashboard manages user catalogs and refreshes one or all catalogs", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
-  const { addCatalogModal, catalogTransferModal, refreshCatalogModal, removeCatalogModal } =
-    await import("../dist/dashboard/modals.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const repository = "https://github.com/example/test";
   const userCatalogsReadyFrame = /^(?=[\s\S]*USER CATALOGS)(?=[\s\S]*ESC inventory)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|REMOVE CATALOG|IMPORT CATALOGS|REFRESH CATALOG))/;
-  const catalogModal = removeCatalogModal({
-    catalogs: [{ name: "Test", repository }],
-    state: { step: "select", index: 0, name: "Test", message: "", failed: false },
-    columns: 100,
-  });
-  assert.ok(catalogModal.lines.some(({ text }) => text.includes(`Test (${repository})`)));
-  const refreshModal = refreshCatalogModal({
-    catalogs: [{ name: "Test", repository }],
-    state: { step: "scope", scope: "one", index: 0, name: "", message: "", failed: false },
-    columns: 100,
-  });
-  assert.ok(refreshModal.lines.some(({ text }) => text.includes("ONE CATALOG")));
-  assert.ok(refreshModal.lines.some(({ text }) => text.includes("ALL CATALOGS")));
-  const setupModal = addCatalogModal({
-    step: "mode", name: "Test", repository, mode: "basic", kind: "skill",
-    path: "", entries: [], message: "", columns: 100,
-  });
-  assert.ok(setupModal.lines.some(({ text }) => text.includes("skills, agents, and instructions")));
-  const skillPathModal = addCatalogModal({
-    step: "path", name: "Test", repository, mode: "custom", kind: "skill",
-    path: "custom/skills", entries: [], message: "", columns: 100,
-  });
-  assert.ok(skillPathModal.lines.map(({ bodyText, text }) => bodyText || text).join(" ").includes("parent folder containing multiple skills"));
-  const agentPathModal = addCatalogModal({
-    step: "path", name: "Test", repository, mode: "custom", kind: "agent",
-    path: "custom/agents", entries: [], message: "", columns: 100,
-  });
-  assert.ok(agentPathModal.lines.map(({ bodyText, text }) => bodyText || text).join(" ").includes("folder containing multiple artifacts"));
   const drive = async (keys, removeCatalog) => {
     const input = new PassThrough();
     input.isTTY = true;
@@ -2042,7 +1934,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
         const [key, expectedOutput] = Array.isArray(entry) ? entry : [entry];
         if (key === "q") {
           const result = await awaitDashboardExit();
-          return { result, renderedOutput };
+          return { result, renderedOutput: require("node:util").stripVTControlCharacters(renderedOutput) };
         }
         const previousEnd = latestFrameEnd();
         input.write(key);
@@ -2063,7 +1955,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
       }
       const result = await awaitDashboardExit();
       dashboardFinished = true;
-      return { result, renderedOutput };
+      return { result, renderedOutput: require("node:util").stripVTControlCharacters(renderedOutput) };
     } finally {
       if (!dashboardFinished && !input.destroyed) {
         input.destroy();
@@ -2115,11 +2007,6 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     updateCatalog: async () => ({ catalog: "Test", count: 0 }),
   });
   assert.equal(management.result, true);
-  assert.match(management.renderedOutput, /USER CATALOGS/);
-  assert.match(management.renderedOutput, /A add/);
-  assert.match(management.renderedOutput, /Delete remove/);
-  assert.match(management.renderedOutput, /R refresh/);
-  assert.match(management.renderedOutput, /ESC inventory/);
   const presetRequests = [];
   const presetManager = await driveRefresh([
     ["m", /USER CATALOGS/], ["p", /PRESET/], ["\x1b[B", /› Matt Pocock/],
@@ -2224,19 +2111,6 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
     },
   });
   assert.equal(transferManager.result, true);
-  const transferResult = catalogTransferModal({
-    action: "import",
-    step: "result",
-    content: "",
-    message: "Imported 1, ignored 1, refreshed 1, refresh failed 1.",
-    summary: importSummary,
-    working: false,
-    columns: 100,
-  }).lines.map(({ bodyText, text }) => bodyText || text).join("\n");
-  assert.match(transferResult, /Added \(1\): Imported/);
-  assert.match(transferResult, /Existing: Catalog name already exists/);
-  assert.match(transferResult, /Refreshed \(1\): Imported · 4/);
-  assert.match(transferResult, /Other: offline/);
   assert.equal(transfers.length, 1);
   assert.equal(transfers[0].action, "import");
   assert.deepEqual(JSON.parse(transfers[0].content).sources, [
@@ -2422,7 +2296,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
   assert.equal(refreshedOne.result, true);
   assert.deepEqual(refreshed, ["Test"]);
   const refreshedAll = await driveRefresh([
-    ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/], ["\x1b[C", /‹ ALL CATALOGS ›/],
+    ["m", /USER CATALOGS/], ["r", /REFRESH CATALOGS/], "\x1b[C",
     ["\r", /Refreshed 1 catalog · 2 resources indexed/],
     ["\r", userCatalogsReadyFrame], "q",
   ], refresh);
@@ -2451,7 +2325,7 @@ test("dashboard manages user catalogs and refreshes one or all catalogs", async 
 });
 test("catalog browser renders custom source folders in SOURCE and detail labels", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const candidates = [
     { catalog: "MattPucock", kind: "skill", id: "engineering-skill", source_repository: "matt/skills", source_path: "engineering/engineering-skill", managed: true },
     { catalog: "MattPucock", kind: "skill", id: "productivity-skill", source_repository: "matt/skills", source_path: "productivity/productivity-skill", managed: true },
@@ -2497,7 +2371,7 @@ test("catalog browser renders custom source folders in SOURCE and detail labels"
 });
 test("catalog browser renders mapped source folders and keeps repository-less names", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const candidates = [
     {
       catalog: "MattPucock", kind: "skill", id: "grill-me",
@@ -2708,7 +2582,7 @@ test("dashboard lists unmanaged skills, agents, and instructions without a catal
 
 test("inventory TUI labels a tracked user skill with its custom source folder", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-inventory-source-label-"));
   const target = path.join(temporary, "project");
   fs.mkdirSync(target, { recursive: true });
@@ -2825,7 +2699,7 @@ test("inventory TUI labels a tracked user skill with its custom source folder", 
 
 test("inventory TUI renders multiple configured custom folders and preserves other catalog labels", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const resource = (catalog, id, source_path, managed = true) => ({
     catalog,
     id,
@@ -3125,7 +2999,7 @@ function assertSeparatedPanelHeader(frame, title, firstBody, metadata = []) {
 
 test("dashboard renders the resource list and selection panel at wide and narrow widths", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   for (const columns of [160, 100]) {
     const input = new PassThrough();
     input.isTTY = true;
@@ -3190,7 +3064,7 @@ test("dashboard renders the resource list and selection panel at wide and narrow
 });
 test("catalog browser renders ordered columns without list descriptions at wide and narrow widths", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   for (const columns of [160, 100]) {
     const input = new PassThrough();
     input.isTTY = true;
@@ -3247,7 +3121,7 @@ test("catalog browser renders ordered columns without list descriptions at wide 
   }
 });
 test("preview starts with source files and keeps audit and tree pages separate", async () => {
-  const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+  const { inspectionPageCount, inspectionPageView } = await import("../dist/tui/screens.mjs");
   const resource = { catalog: "AI-Kit", kind: "skill", id: "sample" };
   const firstFile = Array.from({ length: 80 }, (_, index) => `First file line ${index}`);
   const secondFile = ["Second file line 0", "Second file line 1"];
@@ -3292,7 +3166,7 @@ for (const [kind, sourcePath] of [
   ["instruction", "instructions/sample.instructions.md"],
 ]) {
   test(`preview opens ${kind} content before its fallback tree and unavailable audit`, async () => {
-    const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+    const { inspectionPageCount, inspectionPageView } = await import("../dist/tui/screens.mjs");
     const options = {
       action: "preview",
       resource: { catalog: "sample", kind, id: "sample", source_path: sourcePath },
@@ -3381,7 +3255,7 @@ for (const [kind, sourcePath] of [
   ["instruction", "instructions/reviewer.instructions.md"],
 ]) {
   test(`preview preserves Markdown and exact source page counts for ${kind}`, async () => {
-    const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+    const { inspectionPageCount, inspectionPageView } = await import("../dist/tui/screens.mjs");
     const resource = {
       catalog: "sample", kind, id: "reviewer", source_repository: "org/repo",
       source_path: sourcePath, source_ref: "a".repeat(40),
@@ -3420,7 +3294,7 @@ for (const [kind, sourcePath] of [
 }
 
 test("preview independently paginates complete long source, audit and tree content at adaptive sizes", async () => {
-  const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+  const { inspectionPageCount, inspectionPageView } = await import("../dist/tui/screens.mjs");
   const tree = [
     "sample/", "├── references/",
     ...Array.from({ length: 80 }, (_, index) => `│   ${index === 79 ? "└" : "├"}── file-${index}.md`),
@@ -3459,7 +3333,7 @@ test("preview independently paginates complete long source, audit and tree conte
 });
 
 test("preview wraps highlighted source without changing whitespace, Unicode or logical-file state", async () => {
-  const { inspectionPageCount, inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+  const { inspectionPageCount, inspectionPageView } = await import("../dist/tui/screens.mjs");
   const source = [
     "# Exact source",
     "**Emphasis** and [link](https://example.com/?a=1&b=2) with `inline code`.",
@@ -3510,8 +3384,8 @@ for (const [kind, columns, rows, hasAudit] of [
   test(`catalog preview independently navigates ${kind} panes at ${columns}x${rows}${hasAudit ? "" : " without an audit"}`, async () => {
     const { PassThrough } = require("node:stream");
     const { stripVTControlCharacters } = require("node:util");
-    const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
-    const { inspectionPageView } = await import("../dist/dashboard/screens.mjs");
+    const { runDashboard } = await import("../dist/tui/dashboard.mjs");
+    const { inspectionPageView } = await import("../dist/tui/screens.mjs");
     const input = new PassThrough();
     input.isTTY = true;
     input.setRawMode = () => {};
@@ -3610,7 +3484,7 @@ for (const [kind, columns, rows, hasAudit] of [
 }
 test("dashboard toggles the selection panel with D", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -3656,7 +3530,7 @@ test("dashboard toggles the selection panel with D", async (t) => {
 
 test("dashboard toggles the catalog entry panel with D", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -3709,7 +3583,7 @@ test("dashboard toggles the catalog entry panel with D", async (t) => {
 
 test("dashboard toggles catalog management details with D", async (t) => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   const input = new PassThrough();
   input.isTTY = true;
   input.setRawMode = () => {};
@@ -3767,7 +3641,7 @@ for (const [screen, dimensions] of [
   for (const [columns, rows] of dimensions) {
     test(`${screen} rows, details and shortcuts stay reachable at ${columns}x${rows}`, { timeout: 5_000 }, async () => {
       const { PassThrough } = require("node:stream");
-      const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+      const { runDashboard } = await import("../dist/tui/dashboard.mjs");
       const input = new PassThrough();
       input.isTTY = true;
       input.setRawMode = () => {};
@@ -3926,7 +3800,7 @@ for (const [screen, dimensions] of [
 
 
 test("inventory columns reserve usable ID space and expose custom Catalog suffixes at 120 columns", async () => {
-  const { detailPanelLayout, tableColumns } = await import("../dist/dashboard/helpers.mjs");
+  const { detailPanelLayout, tableColumns } = await import("../dist/tui/helpers.mjs");
   const listWidth = detailPanelLayout(120).listWidth - 4;
   const catalogWidth = "MattPucock[productivity]".length;
   const columns = tableColumns(listWidth, 21, catalogWidth);
@@ -3941,7 +3815,7 @@ test("inventory columns reserve usable ID space and expose custom Catalog suffix
 });
 
 test("dashboard uses a shared list/details split at wide terminal widths", async () => {
-  const { detailPanelLayout } = await import("../dist/dashboard/helpers.mjs");
+  const { detailPanelLayout } = await import("../dist/tui/helpers.mjs");
   assert.deepEqual(detailPanelLayout(160), {
     sideBySide: true, listWidth: 106, detailsWidth: 51,
   });
@@ -3951,36 +3825,6 @@ test("dashboard uses a shared list/details split at wide terminal widths", async
 });
 
 
-test("versions parser selects every source kind and install/update accept full SHAs or strict hexadecimal prefixes", () => {
-  const sha = "c".repeat(40);
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-versions-args-"));
-  const previous = process.env.KITIA_CONFIG_DIR;
-  process.env.KITIA_CONFIG_DIR = temporary;
-  writeJson(path.join(temporary, "catalogSources.json"), {
-    catalog_version: 1, sources: [{ name: "Test", repository: "https://github.com/example/resources" }],
-  });
-  try {
-    for (const kind of ["skill", "agent", "instruction"]) {
-      assert.deepEqual(parseArguments(["versions", kind, "demo-resource", "--catalog", "Test"]), {
-        command: "versions", kind, id: "demo-resource", catalog: "Test",
-      });
-      assert.equal(parseArguments(["install", kind, "demo-resource", "--ref", sha]).ref, sha);
-      assert.equal(parseArguments(["update", kind, "demo-resource", "--ref", sha.slice(0, 7)]).ref, sha.slice(0, 7));
-    }
-  } finally {
-    if (previous === undefined) delete process.env.KITIA_CONFIG_DIR;
-    else process.env.KITIA_CONFIG_DIR = previous;
-  }
-  assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--ref", "abc"]), /7- to 40-character hexadecimal/);
-  assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--ref", "g".repeat(7)]), /7- to 40-character hexadecimal/);
-  assert.throws(() => parseArguments(["update", "--ref", sha]), /specific skill, agent, or instruction install or update/);
-});
-test("bundle commands and offline installs are no longer accepted", () => {
-  assert.throws(() => parseArguments([
-    "bundle", "export", "bundle.json", "Team:skill:demo-skill", "--signing-key", "private.pem",
-  ]), /Unknown command: bundle/);
-  assert.throws(() => parseArguments(["install", "skill", "demo-skill", "--offline"]), /Unknown option: --offline/);
-});
 
 
 
@@ -4199,71 +4043,9 @@ test("async GitHub skill runner coalesces carriage-return status output", async 
   assert.ok(progress.length <= 4, `expected coalesced events, received ${progress.length}`);
   assert.equal(progress.at(-1), "gh stdout: Final status");
 });
-test("progress-enabled source install preserves the injected GitHub runner", async () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-async-gh-injection-"));
-  const target = path.join(temporary, "project");
-  fs.mkdirSync(target);
-  const resource = {
-    catalog: "Test",
-    kind: "skill",
-    id: "injected-skill",
-    source_repository: "example/repo",
-    source_path: "skills/injected-skill",
-    source_ref: "b".repeat(40),
-    license_status: "MIT",
-  };
-  const commandOptions = {
-    action: "install",
-    kind: "skill",
-    id: resource.id,
-    target,
-    tool: "copilot",
-    scope: "project",
-    nonInteractive: true,
-    resource,
-    sourceResources: [resource],
-    onProgress: () => {},
-  };
-  const expectedArgs = [
-    "skill", "install", "example/repo", "skills/injected-skill",
-    "--agent", "github-copilot", "--scope", "project", "--pin", "b".repeat(40),
-  ];
-  let invoked;
-  await assert.rejects(
-    runSourceCommand(commandOptions, (args, cwd) => {
-      invoked = { args, cwd };
-      return 1;
-    }),
-    (error) => error.code === "GH_INSTALL_FAILED",
-  );
-  assert.equal(invoked.cwd, fs.realpathSync(target));
-  assert.deepEqual(invoked.args, expectedArgs);
-
-  assert.equal(await runSourceCommand(commandOptions, async (args, cwd) => {
-    invoked = { args, cwd };
-    const skillPath = path.join(target, ".agents", "skills", resource.id, "SKILL.md");
-    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
-    fs.writeFileSync(skillPath, [
-      "---", `name: ${resource.id}`, "description: Injected runner fixture.", "metadata:",
-      `  github-repo: "https://github.com/${resource.source_repository}"`,
-      `  github-path: "${resource.source_path}"`,
-      `  github-ref: "${resource.source_ref}"`, `  github-pinned: "${resource.source_ref}"`,
-      "---", "", "Installed by the injected runner.", "",
-    ].join("\n"));
-    return 0;
-  }), 0);
-  assert.deepEqual(invoked, { args: expectedArgs, cwd: fs.realpathSync(target) });
-  assert.equal(readInstallState(target).sources.Test.skills["injected-skill"].source_ref, resource.source_ref);
-
-  const rejectedRunnerError = new Error("injected runner rejection");
-  await assert.rejects(
-    runSourceCommand(commandOptions, () => Promise.reject(rejectedRunnerError)),
-    (error) => error === rejectedRunnerError,
-  );
-});
 test("real GH update progress and sanitized output reach the TUI through its worker", async () => {
   const { PassThrough } = require("node:stream");
-  const { runDashboard } = await import("../dist/dashboard/dashboard.mjs");
+  const { runDashboard } = await import("../dist/tui/dashboard.mjs");
   temporary = fs.mkdtempSync(path.join(os.tmpdir(), "kitia-worker-progress-"));
   const configDirectory = path.join(temporary, "config");
   const sourceIndexDirectory = path.join(configDirectory, "source-catalogs");

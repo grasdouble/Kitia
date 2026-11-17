@@ -1,28 +1,13 @@
-import type * as React from 'react';
-import type { Dashboard } from '../../../../terminal/src/dashboard/dashboard.mts';
 import type { CatalogResource } from '../../../../terminal/src/catalog/entries';
-import type { DashboardActionResult as ActionResult } from '../../../../terminal/src/cli/dashboard';
+import type {
+  DashboardActions as Actions, DashboardActionResult as ActionResult,
+  AddCatalogRequest as CatalogRequest, UserCatalog as Catalog, CatalogActionResult as CatalogResult,
+} from '../../../../terminal/src/tui/contracts';
 import {
   initialCatalogs, initialInstallations, resources as samples, revisions, sourcePath,
   type DemoResource,
 } from './demoData';
 
-type DashboardProps = React.ComponentProps<typeof Dashboard>;
-type Actions = NonNullable<DashboardProps['actions']>;
-type CatalogRequest = Parameters<NonNullable<Actions['addCatalog']>>[0];
-type Catalog = NonNullable<Actions['userCatalogs']>[number];
-type CatalogResult = {
-  catalogs?: Catalog[];
-  resources?: CatalogResource[];
-  refreshed?: Array<{ name: string; count: number }>;
-  failures?: Array<{ name: string; message: string }>;
-  importSummary?: {
-    added: string[];
-    ignored: Array<{ name: string; reason: string }>;
-    refreshed: Array<{ name: string; count: number }>;
-    refreshFailures: Array<{ name: string; message: string }>;
-  };
-};
 type Scope = 'project' | 'user';
 type Tool = 'copilot' | 'claude' | 'both';
 type IndexedResource = { resource: CatalogResource; sample: DemoResource };
@@ -142,7 +127,7 @@ function contentAt(sample: DemoResource, ref: string): string {
 }
 
 /** A reset creates a completely independent, browser-only installation and catalog store. */
-export function createTuiDemoSession(): { resources: DashboardProps['resources']; actions: Actions } {
+export function createTuiDemoSession(): { resources: CatalogResource[]; actions: Actions } {
   let catalogs = initialCatalogs.map((catalog) => indexCatalog({
     name: catalog.name, repository: `https://github.com/${catalog.repository}`, mode: 'basic', entries: [],
   }, catalog.name === 'team' ? 1 : 0));
