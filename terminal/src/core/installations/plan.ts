@@ -1,10 +1,7 @@
 "use strict";
 
 const { CatalogError } = require("../resources/model.js");
-export interface FileFingerprint {
-  sha256: string;
-  executable: boolean;
-}
+import type { FileFingerprint } from "../inventory/model.js";
 
 export interface InstallPlanEntry {
   content: Buffer;

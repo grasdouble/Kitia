@@ -6,8 +6,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { randomUUID } = require("node:crypto");
 
-const { CURRENT_INVENTORY_VERSION } = require("../dist/core/installations/version.js");
-const { LOCK_PATH: INVENTORY_PATH } = require("../dist/core/installations/model.js");
+const { CURRENT_INVENTORY_VERSION } = require("../dist/core/inventory/version.js");
+const { LOCK_PATH: INVENTORY_PATH } = require("../dist/core/inventory/model.js");
 const { OPERATION_LOCK } = require("../dist/core/installations/lock.js");
 const CURRENT_VERSION = CURRENT_INVENTORY_VERSION;
 const MIGRATIONS = new Map();
@@ -47,7 +47,7 @@ function validateCurrentInventory(inventory) {
       `${JSON.stringify(inventory)}\n`,
       { flag: "wx", mode: 0o600 },
     );
-    const { readInstallState } = require("../dist/core/installations/inventory.js");
+    const { readInstallState } = require("../dist/core/inventory/inventory.js");
     readInstallState(temporary);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });

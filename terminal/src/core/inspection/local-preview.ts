@@ -1,7 +1,7 @@
 "use strict";
 
 import type { ResourceInspection } from "./model.js";
-import type { InstallState } from "../installations/model.js";
+import type { InstallState } from "../inventory/model.js";
 const { targetPath } = require("../installations/files.js");
 import type { CatalogResource } from "../resources/model.js";
 const { auditTextResources } = require("./audit.js");

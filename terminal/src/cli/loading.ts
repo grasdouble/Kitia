@@ -1,6 +1,6 @@
 "use strict";
 
-const { prepareTrackedResources } = require("../core/installations/inventory.js");
+const { prepareTrackedResources } = require("../core/inventory/inventory.js");
 const { loadUserSourceConfiguration } = require("../core/catalogs/config.js");
 const { loadCatalogs } = require("../core/catalogs/indexes.js");
 

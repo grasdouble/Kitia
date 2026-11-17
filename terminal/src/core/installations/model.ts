@@ -1,43 +1,14 @@
-import type { FileFingerprint } from "./plan.js";
-
-const LOCK_PATH = ".agents/kitia-lock.json";
-
-const INSTALL_SCAN_DIRECTORIES = {
-  claude: [".claude/skills", ".claude/agents", ".claude/rules"],
-  copilot: [".agents/skills", ".agents/agents", ".agents/instructions", ".github/agents", ".github/instructions"],
-};
-
-const USER_INSTALL_SCAN_DIRECTORIES = {
-  claude: [".claude/skills", ".claude/agents"],
-  copilot: [".agents/skills", ".copilot/agents"],
-};
+import type { FileFingerprint } from "../inventory/model.js";
 
 const SOURCE_SKILL_DIRECTORIES = {
   "github-copilot": ".agents/skills",
   "claude-code": ".claude/skills",
 };
 
-
-
-
 export type InstallationTool = "claude" | "copilot" | "both";
 
-export type InventoryScope = "project" | "user";
+export type InstallationScope = "project" | "user";
 
-export interface SourceResourceInventoryRecord {
-  source_repository: string;
-  source_path: string;
-  source_ref?: string;
-  apply_to?: string[];
-  license_status?: string;
-  files: Record<string, FileFingerprint>;
-}
-
-export interface InstallState {
-  lock_version: number;
-  catalog: string;
-  sources: Record<string, Record<string, Record<string, SourceResourceInventoryRecord>>>;
-}
 
 export interface PlanAction {
   action: string;
@@ -54,4 +25,4 @@ export interface InstallPlanOptions {
   onAction?: (action: PlanAction) => void;
 }
 
-module.exports = { LOCK_PATH, INSTALL_SCAN_DIRECTORIES, USER_INSTALL_SCAN_DIRECTORIES, SOURCE_SKILL_DIRECTORIES };
+module.exports = { SOURCE_SKILL_DIRECTORIES };

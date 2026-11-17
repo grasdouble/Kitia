@@ -2,16 +2,17 @@
 
 import type { CatalogResource } from "../resources/model.js";
 const { CatalogError } = require("../resources/model.js");
-import type { PlanAction, InstallState } from "./model.js";
+import type { PlanAction } from "./model.js";
+import type { InstallState, FileFingerprint } from "../inventory/model.js";
 const { targetPath, installedFingerprint, sameFingerprint, writeInstallPlan, addInventoryStateToPlan } = require("./files.js");
 const { readPinnedSourceFile } = require("../resources/content.js");
-import type { InstallPlanEntry, FileFingerprint } from "./plan.js";
+import type { InstallPlanEntry } from "./plan.js";
 const { addPlanEntry } = require("./plan.js");
-const { readInstallState, sourceCatalogName, recordSourceResourceInstallation, sourceSkillKey, sourceSkillRecords, sourceSkillRecord, recordSourceInstallation, readInstalledSourceResources, removeSourceResourceRecord, readInstalledSourceSkills, removeSourceSkillRecord } = require("./inventory.js");
-import type { InstalledSourceResource } from "./inventory.js";
+const { readInstallState, sourceCatalogName, recordSourceResourceInstallation, sourceSkillKey, sourceSkillRecords, sourceSkillRecord, recordSourceInstallation, readInstalledSourceResources, removeSourceResourceRecord, readInstalledSourceSkills, removeSourceSkillRecord } = require("../inventory/inventory.js");
+import type { InstalledSourceResource } from "../inventory/inventory.js";
 import type { GhSkillResult } from "./gh-skill.js";
 const { runGhSkill, buildSourceSkillArgs, formatGhDiagnostics, describeGhFailure, runGhSkillAsync } = require("./gh-skill.js");
-const { LOCK_PATH } = require("./model.js");
+const { LOCK_PATH } = require("../inventory/model.js");
 
 const fs = require("node:fs");
 const path = require("node:path");

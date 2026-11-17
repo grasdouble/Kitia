@@ -2,10 +2,11 @@
 
 import type { CatalogResource } from "../resources/model.js";
 const { CatalogError, rejectUnsupportedVersion, RESOURCE_ID } = require("../resources/model.js");
-import type { InstallState, SourceResourceInventoryRecord } from "./model.js";
-const { installedFingerprint, sameFingerprint, addInventoryStateToPlan, writeInstallPlan, targetPath } = require("./files.js");
-import type { InstallPlanEntry, FileFingerprint } from "./plan.js";
-const { SOURCE_SKILL_DIRECTORIES, LOCK_PATH } = require("./model.js");
+import type { InstallState, SourceResourceInventoryRecord, FileFingerprint } from "./model.js";
+const { installedFingerprint, sameFingerprint, addInventoryStateToPlan, writeInstallPlan, targetPath } = require("../installations/files.js");
+import type { InstallPlanEntry } from "../installations/plan.js";
+const { SOURCE_SKILL_DIRECTORIES } = require("../installations/model.js");
+const { LOCK_PATH } = require("./model.js");
 const { CURRENT_INVENTORY_VERSION } = require("./version.js");
 import { isJsonObject } from "../resources/json.js";
 const { parseFrontmatter } = require("../resources/frontmatter.js");

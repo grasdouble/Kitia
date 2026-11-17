@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 const { createDashboardActionHandler } = require("../native-actions.ts");
-const { recordSourceResourceInstallation } = require("../../core/installations/inventory.ts");
+const { recordSourceResourceInstallation } = require("../../core/inventory/inventory.ts");
 
 function writeFile(root, relativePath, content) {
   const file = path.join(root, ...relativePath.split("/"));

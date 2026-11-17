@@ -5,7 +5,7 @@ const { CatalogError } = require("../resources/model.js");
 const { readInstallState, readInstalledSourceSkills, readInstalledSourceResources } = require("./inventory.js");
 const { latestSourceVersionAtRef } = require("../resources/history.js");
 const { findUnmanagedArtifacts } = require("./discovery.js");
-const { trackedPaths } = require("./files.js");
+const { trackedPaths } = require("../installations/files.js");
 
 const fs = require("node:fs");
 import type { execFileSync as ExecFileSync } from "node:child_process";

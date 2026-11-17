@@ -2,7 +2,7 @@
 
 import { CATALOG_PRESETS } from "../core/catalogs/presets.js";
 import type { CatalogResource } from "../core/resources/model.js";
-import type { PlanAction, InstallationTool, InventoryScope } from "../core/installations/model.js";
+import type { PlanAction, InstallationTool, InstallationScope } from "../core/installations/model.js";
 import type { spawn } from "node:child_process";
 export interface CliOptions {
   command?: string;
@@ -13,7 +13,7 @@ export interface CliOptions {
   ref?: string;
   kind?: string;
   id?: string;
-  scope?: InventoryScope;
+  scope?: InstallationScope;
   tool?: InstallationTool | null;
   nonInteractive?: boolean;
   json?: boolean;

@@ -16,12 +16,12 @@ const { runGhSkill, runGhSkillAsync, buildSourceSkillArgs } = require("../dist/c
 const { latestSourceVersionAtRef } = require("../dist/core/resources/history.js");
 const { loadUserSourceConfiguration } = require("../dist/core/catalogs/config.js");
 const { validateSourceConfiguration } = require("../dist/core/catalogs/model.js");
-const { recordSourceInstallation, readInstalledSourceSkills, readInstallState } = require("../dist/core/installations/inventory.js");
+const { recordSourceInstallation, readInstalledSourceSkills, readInstallState } = require("../dist/core/inventory/inventory.js");
 const { executeInstallationOperation, runSourceOperation } = require("../dist/core/installations/lifecycle.js");
 const { loadCommandCatalogs } = require("../dist/cli/loading.js");
-const { findUnmanagedArtifacts } = require("../dist/core/installations/discovery.js");
+const { findUnmanagedArtifacts } = require("../dist/core/inventory/discovery.js");
 const { installedFingerprint } = require("../dist/core/installations/files.js");
-const { collectInstalledScopes, checkInstalledResources } = require("../dist/core/installations/checks.js");
+const { collectInstalledScopes, checkInstalledResources } = require("../dist/core/inventory/checks.js");
 const { catalogEntries, enrichInstalledResources } = require("../dist/core/resources/queries.js");
 const { filterCatalogResources, cycleFilter, filterInventory, inventoryCatalogLabel, dashboardStatus } =
   require("../dist/tui/helpers.mjs");

@@ -1,7 +1,7 @@
 "use strict";
 
 import type { CatalogResource } from "../core/resources/model.js";
-const { sourceCatalogName } = require("../core/installations/inventory.js");
+const { sourceCatalogName } = require("../core/inventory/inventory.js");
 
 function formatSourceResource(resource: CatalogResource): string {
   return [

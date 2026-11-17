@@ -2,11 +2,11 @@
 
 import type { CatalogResource } from "../core/resources/model.js";
 import type { InstallationRequest } from "../core/installations/lifecycle.js";
-import type { ScanError } from "../core/installations/checks.js";
-const { collectInstalledScopes } = require("../core/installations/checks.js");
+import type { ScanError } from "../core/inventory/checks.js";
+const { collectInstalledScopes } = require("../core/inventory/checks.js");
 import type { DashboardActionResult } from "./action-result.js";
 const { acquireOperationLock } = require("../core/installations/lock.js");
-const { readInstallState } = require("../core/installations/inventory.js");
+const { readInstallState } = require("../core/inventory/inventory.js");
 const { removeUnmanagedResource } = require("../core/installations/unmanaged.js");
 const { localPreviewFiles } = require("../core/inspection/local-preview.js");
 const { formatAuditLines } = require("../cli/inspection-format.js");

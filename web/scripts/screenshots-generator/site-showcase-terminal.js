@@ -3,7 +3,7 @@
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
 const { loadCommandCatalogs } = require("../../../terminal/dist/cli/loading.js");
-const { collectInstalledScopes } = require("../../../terminal/dist/core/installations/checks.js");
+const { collectInstalledScopes } = require("../../../terminal/dist/core/inventory/checks.js");
 const { catalogEntries, enrichInstalledResources } = require("../../../terminal/dist/core/resources/queries.js");
 const { loadUserSourceConfiguration } = require("../../../terminal/dist/core/catalogs/config.js");
 const { createDashboardActionHandler } = require("../../../terminal/dist/tui/native-actions.js");

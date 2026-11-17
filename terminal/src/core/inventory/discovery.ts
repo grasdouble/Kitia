@@ -1,10 +1,18 @@
 "use strict";
 
-const { targetPath } = require("./files.js");
+const { targetPath } = require("../installations/files.js");
 const { CatalogError } = require("../resources/model.js");
 const { parseFrontmatter } = require("../resources/frontmatter.js");
 const { readUtf8 } = require("../resources/content.js");
-const { INSTALL_SCAN_DIRECTORIES, USER_INSTALL_SCAN_DIRECTORIES } = require("./model.js");
+const INSTALL_SCAN_DIRECTORIES = {
+  claude: [".claude/skills", ".claude/agents", ".claude/rules"],
+  copilot: [".agents/skills", ".agents/agents", ".agents/instructions", ".github/agents", ".github/instructions"],
+};
+
+const USER_INSTALL_SCAN_DIRECTORIES = {
+  claude: [".claude/skills", ".claude/agents"],
+  copilot: [".agents/skills", ".copilot/agents"],
+};
 
 const fs = require("node:fs");
 const path = require("node:path");

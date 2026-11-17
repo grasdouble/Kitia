@@ -1,8 +1,8 @@
 "use strict";
 
 const { loadUserSourceConfiguration } = require("../catalogs/config.js");
-const { readInstallState } = require("./inventory.js");
-const { inspectOperationLock, OPERATION_LOCK } = require("./lock.js");
+const { readInstallState } = require("../inventory/inventory.js");
+const { inspectOperationLock, OPERATION_LOCK } = require("../installations/lock.js");
 
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");

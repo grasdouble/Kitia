@@ -1,11 +1,12 @@
 "use strict";
 
-import type { InstallState, InstallPlanOptions } from "./model.js";
-import type { FileFingerprint, InstallPlanEntry } from "./plan.js";
+import type { InstallPlanOptions } from "./model.js";
+import type { InstallState, FileFingerprint } from "../inventory/model.js";
+import type { InstallPlanEntry } from "./plan.js";
 const { addPlanEntry } = require("./plan.js");
 const { CatalogError } = require("../resources/model.js");
 const { isWithin } = require("../resources/content.js");
-const { LOCK_PATH } = require("./model.js");
+const { LOCK_PATH } = require("../inventory/model.js");
 
 const fs = require("node:fs");
 const path = require("node:path");

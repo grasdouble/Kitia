@@ -1,9 +1,9 @@
 "use strict";
 
-import type { InstallState } from "./model.js";
+import type { InstallState } from "../inventory/model.js";
 const { trackedPaths } = require("./files.js");
 import type { CatalogResource } from "../resources/model.js";
-const { findUnmanagedArtifacts } = require("./discovery.js");
+const { findUnmanagedArtifacts } = require("../inventory/discovery.js");
 
 const fs = require("node:fs");
 const path = require("node:path");

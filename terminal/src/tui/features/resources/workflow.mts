@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Key } from "ink";
 import type { CatalogResource } from "../../../core/resources/model.js";
-import type { ScanError } from "../../../core/installations/checks.js";
+import type { ScanError } from "../../../core/inventory/checks.js";
 import type { DashboardActionResult } from "../../action-result.js";
 import type { DashboardActions, SourceVersionOption } from "../../contracts.js";
 import type { PendingDashboardAction } from "./types.js";
