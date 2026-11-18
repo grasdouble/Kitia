@@ -22,15 +22,15 @@
     "catalog"
   ],
   "bin": {
-    "kitia": "terminal/bin/kitia.js"
+    "kitia": "terminal/dist/kitia.js"
   },
   "files": [
     "terminal/dist/cli/",
     "terminal/dist/core/",
     "terminal/dist/tui/",
     "terminal/dist/table-layout.js",
-    "terminal/bin/kitia.js",
-    "terminal/migrations/",
+    "terminal/dist/kitia.js",
+    "terminal/dist/migrations/**/*.js",
     "terminal/schemas/",
     "README.md",
     "CHANGELOG.md",
@@ -44,18 +44,20 @@
     "node": ">=26"
   },
   "scripts": {
-    "format": "oxfmt \"scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"docs/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/bin/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/migrations/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
-    "format:check": "oxfmt --check \"scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"docs/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/bin/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/migrations/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
+    "format": "oxfmt \"scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"docs/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
+    "format:check": "oxfmt --check \"scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"docs/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"terminal/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/test/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/scripts/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
     "build": "pnpm run cli:build && pnpm run web:build",
     "prepare": "pnpm run cli:build && husky",
     "test": "pnpm run docs:test && pnpm run typecheck:strict && pnpm run cli:test && pnpm run web:test:components",
     "cli:build": "rimraf dist terminal/dist && tsc -p tsconfig.json",
     "typecheck:strict": "tsc -p tsconfig.strict.json",
-    "cli:test": "pnpm run cli:build && node --test \"terminal/test/*.test.js\" && pnpm run cli:test:source && pnpm run tui:test:source",
-    "cli:test:source": "tsx --test \"terminal/src/cli/__tests__/*.test.js\"",
+    "cli:test": "pnpm run cli:test:contract && node --test \"terminal/test/*.test.js\" && pnpm run cli:test:source && pnpm run tui:test:source",
     "tui:test:source": "tsx --test \"terminal/src/tui/**/__tests__/*.test.js\"",
+    "cli:test:contract": "pnpm run cli:build && node --test terminal/test/contract/cli-contract.test.js",
+    "core:test:source": "tsx --test \"terminal/src/core/**/__tests__/*.test.js\"",
+    "cli:test:source": "tsx --test \"terminal/src/cli/**/__tests__/*.test.js\" && pnpm run core:test:source",
     "cli:test:package-smoke": "pnpm run cli:build && node terminal/scripts/package-smoke.js",
-    "cli:validate": "pnpm run cli:build && node terminal/bin/kitia.js validate",
+    "cli:validate": "pnpm run cli:build && node terminal/dist/kitia.js validate",
     "changeset": "changeset",
     "changeset:format": "node scripts/check-changeset-format.mjs",
     "changeset:version": "changeset version && pnpm install --lockfile-only --ignore-scripts",
@@ -63,7 +65,7 @@
     "docs:test": "node --test docs/test/documentation.test.js",
     "web:build": "vite build --config web/vite.config.ts",
     "web:dev": "vite --config web/vite.config.ts",
-    "web:test:components": "node --conditions=development --test web/src/analytics.test.mjs web/src/HomePage.test.mjs web/src/sectionScrolling.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/src/components/demo/tuiDemoSession.test.mjs web/test/website-screenshots.test.mjs",
+    "web:test:components": "node --conditions=development --test web/src/analytics.test.mjs web/src/HomePage.test.mjs web/src/sectionScrolling.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/src/components/demo/browserTerminal.test.mjs web/src/components/demo/tuiDemoSession.test.mjs web/test/browser-ink-dev.test.mjs web/test/website-screenshots.test.mjs",
     "web:test:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node --test web/test/termless-dashboard.test.mjs",
     "web:screenshots:update:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node web/scripts/screenshots-generator/update-site-screenshots-termless.js"
   },

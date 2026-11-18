@@ -12,10 +12,12 @@ bundles, or MCPs. Older local lock files that contain `resources`, `bundles`, or
 only `.agents/kitia-lock.json` to resume with an empty inventory; installed
 files are left untouched and can be rediscovered as unmanaged artifacts.
 
-No historical migrations are shipped. `Kitia migrate` remains the runner for
+No historical migrations are shipped. `kitia migrate` remains the runner for
 future inventory format changes; current version 1 inventories are skipped.
-The runner validates any converted inventory, creates a timestamped backup
-before writing, and refuses to proceed if an operation lock exists or records
-conflict.
+For a real apply, the runner acquires the same target lock as other Kitia
+writes, then rereads and validates the inventory under that lock. It creates a
+timestamped backup of those original bytes before replacing the inventory.
+An active operation prevents apply. A dry run or an already-current target
+does not acquire a lock or create a backup.
 
 Do not edit `lock_version` by hand or use `--force` as a migration mechanism.

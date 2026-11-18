@@ -1,6 +1,6 @@
 'use strict';
 
-const { validateSourceConfiguration } = require('./model.js');
+const { validateSourceConfiguration, catalogNameKey } = require('./model.js');
 const { readUtf8 } = require('../resources/content.js');
 
 const fs = require('node:fs');
@@ -8,14 +8,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 function userCatalogDirectory() {
-  if (process.env.KITIA_CONFIG_DIR) return process.env.KITIA_CONFIG_DIR;
-  const current = path.join(os.homedir(), '.config', 'kitia');
-  const previous = path.join(os.homedir(), '.config', 'kiti');
-  if (!fs.existsSync(current) && fs.existsSync(previous)) {
-    fs.mkdirSync(path.dirname(current), { recursive: true });
-    fs.cpSync(previous, current, { recursive: true, errorOnExist: true, force: false });
-  }
-  return current;
+  return process.env.KITIA_CONFIG_DIR || path.join(os.homedir(), '.config', 'kitia');
 }
 
 function userCatalogSourcesFile() {
@@ -24,6 +17,12 @@ function userCatalogSourcesFile() {
 
 function userCatalogIndexDirectory() {
   return path.join(userCatalogDirectory(), 'source-catalogs');
+}
+
+function catalogIndexFileName(name: string) {
+  const crypto = require('node:crypto');
+  const digest = crypto.createHash('sha256').update(catalogNameKey(name), 'utf8').digest('hex');
+  return path.join('.kitia-index', `${digest}.json`);
 }
 
 function loadUserSourceConfiguration() {
@@ -36,6 +35,7 @@ module.exports = {
   userCatalogDirectory,
   userCatalogSourcesFile,
   userCatalogIndexDirectory,
+  catalogIndexFileName,
   loadUserSourceConfiguration,
 };
 

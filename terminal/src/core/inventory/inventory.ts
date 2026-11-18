@@ -321,14 +321,12 @@ function readInstalledSourceResources(
   return installed;
 }
 
-function recordSourceResourceInstallation(resource, target, files) {
-  const targetRoot = fs.realpathSync(target);
-  const state = readInstallState(targetRoot);
+function setSourceResourceRecord(
+  state: InstallState,
+  resource: CatalogResource,
+  files: Record<string, FileFingerprint>,
+): void {
   const collectionName = `${resource.kind}s`;
-  const previous = sourceResourceRecord(state, sourceCatalogName(resource), resource.kind, resource.id);
-  const same = previous && sameSourceRecord(previous, resource);
-  const trackedFiles = same ? { ...previous.files } : {};
-  for (const relativePath of files) trackedFiles[relativePath] = installedFingerprint(targetRoot, relativePath);
   state.sources ||= {};
   state.sources[sourceCatalogName(resource)] ||= {};
   state.sources[sourceCatalogName(resource)][collectionName] ||= {};
@@ -338,11 +336,8 @@ function recordSourceResourceInstallation(resource, target, files) {
     source_ref: resource.source_ref,
     ...(resource.apply_to ? { apply_to: resource.apply_to } : {}),
     license_status: resource.license_status,
-    files: trackedFiles,
+    files,
   };
-  const plan = new Map<string, InstallPlanEntry>();
-  addInventoryStateToPlan(plan, state);
-  writeInstallPlan(plan, targetRoot, { force: true });
 }
 function readInstalledSourceSkills(
   target: string,
@@ -586,6 +581,6 @@ module.exports = {
   removeSourceSkillRecord,
   readInstalledSourceSkills,
   readInstalledSourceResources,
-  recordSourceResourceInstallation,
+  setSourceResourceRecord,
   recordSourceInstallation,
 };

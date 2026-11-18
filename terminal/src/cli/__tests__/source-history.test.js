@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { formatSourceVersionTable } = require('../history.ts');
+const { uniqueSourceVersionPrefixes, resolveSourceVersionPrefix } = require('../../core/resources/history.ts');
 
 test('terminal source-history tables fit 80 and 120 columns while pipes retain full values', () => {
   const versions = [
@@ -31,4 +32,20 @@ test('terminal source-history tables fit 80 and 120 columns while pipes retain f
   const piped = formatSourceVersionTable(versions)[3];
   assert.ok(piped.includes(versions[1].subject));
   assert.ok(piped.includes(versions[1].date));
+});
+
+test('source history displays unique, aligned prefixes when seven-character SHAs collide', () => {
+  const versions = [
+    { sha: `abcdef0${'0'.repeat(33)}`, date: '2025-04-03T12:13:14Z', subject: 'first' },
+    { sha: `abcdef0${'1'.repeat(33)}`, date: '2025-04-03T12:13:14Z', subject: 'second' },
+  ];
+  const prefixes = uniqueSourceVersionPrefixes(versions);
+  assert.deepEqual(prefixes, ['abcdef00', 'abcdef01']);
+  for (const [index, prefix] of prefixes.entries()) {
+    assert.equal(resolveSourceVersionPrefix(versions, prefix), versions[index].sha);
+  }
+  const [header, , ...rows] = formatSourceVersionTable(versions);
+  const dateColumn = header.indexOf('DATE');
+  assert.equal(rows[0].indexOf(versions[0].date), dateColumn);
+  assert.equal(rows[1].indexOf(versions[1].date), dateColumn);
 });

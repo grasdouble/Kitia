@@ -7,6 +7,9 @@ const { CatalogError } = require('../resources/model.js');
 function catalogNameKey(name: string): string {
   return name.toUpperCase();
 }
+function isReservedCatalogName(name: unknown): boolean {
+  return typeof name === 'string' && catalogNameKey(name) === 'CATALOGSOURCES';
+}
 
 function isValidCatalogName(name: unknown): name is string {
   return typeof name === 'string' && name.length > 0 && name === name.trim() && !CATALOG_NAME_FORBIDDEN.test(name);
@@ -131,7 +134,13 @@ function validateSourceConfiguration(configuration: unknown): SourceConfiguratio
   });
 }
 
-module.exports = { catalogNameKey, isValidCatalogName, repositoryId, validateSourceConfiguration };
+module.exports = {
+  catalogNameKey,
+  isReservedCatalogName,
+  isValidCatalogName,
+  repositoryId,
+  validateSourceConfiguration,
+};
 
 export type CatalogEntry = { kind: ResourceKind; id?: string; path: string };
 

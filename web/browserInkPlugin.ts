@@ -1,10 +1,8 @@
-import { readFileSync } from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
-import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import inject from '@rollup/plugin-inject';
-import { type Plugin } from 'vite';
+import { normalizePath, type Plugin } from 'vite';
 import commonjs from 'vite-plugin-commonjs';
 
 const require = createRequire(import.meta.url);
@@ -28,6 +26,7 @@ export function browserInkPlugins(): Plugin[] {
     tty: adapter('tty.js'),
     os: adapter('os.js'),
   };
+  let injectGlobals: Plugin['transform'];
   return [
     {
       name: 'kitia-browser-ink',
@@ -54,23 +53,6 @@ export function browserInkPlugins(): Plugin[] {
           include: ['ink'],
           esbuildOptions: {
             target: 'esnext',
-            inject: ['kitia-terminal-globals'],
-            plugins: [
-              {
-                name: 'kitia-terminal-globals',
-                setup(build) {
-                  build.onResolve({ filter: /^kitia-terminal-globals$/ }, () => ({
-                    path: globals,
-                    namespace: 'kitia-terminal-globals',
-                  }));
-                  build.onLoad({ filter: /.*/, namespace: 'kitia-terminal-globals' }, () => ({
-                    contents: readFileSync(globals, 'utf8'),
-                    loader: 'js',
-                    resolveDir: dirname(globals),
-                  }));
-                },
-              },
-            ],
           },
         },
         build: { target: 'esnext' },
@@ -111,15 +93,29 @@ export function browserInkPlugins(): Plugin[] {
     },
     commonjs({ filter: (id) => id.includes('/terminal/src/') }),
     {
-      ...inject({
-        include: ['**/terminal/src/**', '**/node_modules/**'],
-        exclude: ['**/terminalRuntime/**'],
-        process: [globals, 'process'],
-        Buffer: [globals, 'Buffer'],
-        setImmediate: [globals, 'setImmediate'],
-        clearImmediate: [globals, 'clearImmediate'],
-      }),
+      name: 'kitia-browser-ink-globals',
       enforce: 'post',
-    } as Plugin,
+      configResolved({ cacheDir }) {
+        // Inject actual references after prebundling. Esbuild's blanket injection
+        // makes the process shim and its dependencies initialize one another.
+        const plugin = inject({
+          include: [
+            '**/terminal/src/**',
+            '**/node_modules/**',
+            new RegExp(`^${RegExp.escape(normalizePath(cacheDir))}/`),
+          ],
+          exclude: ['**/terminalRuntime/**'],
+          process: [globals, 'process'],
+          Buffer: [globals, 'Buffer'],
+          setImmediate: [globals, 'setImmediate'],
+          clearImmediate: [globals, 'clearImmediate'],
+        }) as Plugin;
+        injectGlobals = plugin.transform;
+      },
+      transform(code, id, options) {
+        const transform = typeof injectGlobals === 'function' ? injectGlobals : injectGlobals?.handler;
+        return transform?.call(this, code, id, options);
+      },
+    },
   ];
 }

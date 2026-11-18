@@ -6,20 +6,22 @@ import type { InstallState, FileFingerprint } from '../inventory/model.js';
 import type { PlanAction } from './model.js';
 const {
   targetPath,
+  fileFingerprint,
   installedFingerprint,
   sameFingerprint,
   writeInstallPlan,
   addInventoryStateToPlan,
 } = require('./files.js');
 const { preparePinnedSourceFile } = require('../resources/content.js');
-import { isPreparedPinnedSourceFile } from '../resources/content.js';
+import { isPreparedPinnedSourceFile, withPinnedSourceFiles } from '../resources/content.js';
 import type { PreparedPinnedSourceFile } from '../resources/content.js';
+const { parseInstruction } = require('../resources/frontmatter.js');
 import type { InstallPlanEntry } from './plan.js';
 const { addPlanEntry } = require('./plan.js');
 const {
   readInstallState,
   sourceCatalogName,
-  recordSourceResourceInstallation,
+  setSourceResourceRecord,
   sourceSkillKey,
   sourceSkillRecords,
   sourceSkillRecord,
@@ -72,66 +74,125 @@ function sourceFileDestinations(resource, tool, scope = 'project') {
   return paths;
 }
 
+interface SourceFileInstallPlan {
+  target: string;
+  state: InstallState;
+  inventory: FileFingerprint | null;
+  files: Map<string, InstallPlanEntry>;
+}
+
+interface SourceFileInstallOptions {
+  scope?: string;
+  force?: boolean;
+  dryRun?: boolean;
+  onAction?: (action: PlanAction) => void;
+  onProgress?: (message: string) => void;
+}
+
+function createSourceFileInstallPlan(target: string, dryRun: boolean): SourceFileInstallPlan {
+  return {
+    target,
+    inventory: dryRun ? null : installedFingerprint(target, LOCK_PATH),
+    state: readInstallState(target),
+    files: new Map(),
+  };
+}
+
+function publishSourceFileInstallPlan({ target, state, inventory, files }: SourceFileInstallPlan): void {
+  if (!files.size) return;
+  addInventoryStateToPlan(files, state);
+  files.get(LOCK_PATH).expected = inventory;
+  writeInstallPlan(files, target);
+}
+
 function installSourceFileResource(
   source: CatalogResource | PreparedPinnedSourceFile,
   target: string,
   tool: string,
-  {
-    scope = 'project',
-    force = false,
-    dryRun = false,
-    onAction = () => {},
-    onProgress = () => {},
-    destinations: requestedDestinations,
-  }: {
-    scope?: string;
-    force?: boolean;
-    dryRun?: boolean;
-    onAction?: (action: PlanAction) => void;
-    onProgress?: (message: string) => void;
-    destinations?: string[];
-  } = {},
+  options: SourceFileInstallOptions = {},
 ): string[] {
   const resource = isPreparedPinnedSourceFile(source) ? source.resource : source;
   if (!['agent', 'instruction'].includes(resource.kind))
     throw new CatalogError(`Unsupported source resource kind: ${resource.kind}`);
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory())
     throw new CatalogError(`Target must be an existing directory: ${target}`);
-  const targetRoot = fs.realpathSync(target);
-  const destinations = requestedDestinations || sourceFileDestinations(resource, tool, scope);
-  if (!dryRun) onProgress(`Retrieving pinned ${resource.kind} ${resource.id} from GitHub...`);
-  const content = dryRun
-    ? null
-    : (isPreparedPinnedSourceFile(source) ? source : preparePinnedSourceFile(resource)).content;
-  const plan = new Map<string, InstallPlanEntry>();
-  const previous =
-    readInstallState(targetRoot).sources?.[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id];
-  const matchingPrevious =
-    previous?.source_repository === resource.source_repository && previous?.source_path === resource.source_path
-      ? previous
-      : null;
+  const destinations = sourceFileDestinations(resource, tool, options.scope);
+  const plan = createSourceFileInstallPlan(fs.realpathSync(target), Boolean(options.dryRun));
+  stageSourceFileInstallation(source, destinations, plan, options);
+  if (!options.dryRun) {
+    options.onProgress?.('Updating installed files...');
+    publishSourceFileInstallPlan(plan);
+  }
+  return destinations;
+}
+
+function stageSourceFileInstallation(
+  source: CatalogResource | PreparedPinnedSourceFile,
+  destinations: string[],
+  { target, state, files }: SourceFileInstallPlan,
+  { force = false, dryRun = false, onAction = () => {}, onProgress = () => {} }: SourceFileInstallOptions,
+  prepare = preparePinnedSourceFile,
+): void {
+  const isPrepared = isPreparedPinnedSourceFile(source);
+  const resource = isPrepared ? source.resource : source;
+  assertSourceFileCanBeInstalled(resource, state);
+  const previous = state.sources?.[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id];
+  const sameSource =
+    previous &&
+    previous.source_repository === resource.source_repository &&
+    previous.source_path === resource.source_path;
+  if (previous && (!sameSource || previous.source_ref?.toLowerCase() !== resource.source_ref?.toLowerCase())) {
+    const untouched = Object.keys(previous.files).filter((relativePath) => !destinations.includes(relativePath));
+    if (untouched.length) {
+      throw new CatalogError(
+        `Cannot change the shared pin for ${resource.kind}:${resource.id} while leaving tracked destinations unchanged. Install with --tool both or use update to replace all tracked runtimes.`,
+        'SHARED_SOURCE_PIN',
+        { category: 'provenance-conflict', paths: untouched },
+      );
+    }
+  }
+  let content: Buffer | undefined;
+  if (!dryRun) {
+    if (!isPrepared) onProgress(`Retrieving pinned ${resource.kind} ${resource.id} from GitHub...`);
+    content = (isPrepared ? source : prepare(resource)).content;
+  }
+  const instruction =
+    content && resource.kind === 'instruction'
+      ? parseInstruction(content, `${resource.source_repository}:${resource.source_path}`)
+      : undefined;
+  const sourceFingerprint = content && !instruction ? fileFingerprint(content, false) : undefined;
+  const trackedFiles = sameSource ? { ...previous.files } : {};
   for (const relativePath of destinations) {
-    targetPath(targetRoot, relativePath);
-    if (!dryRun) {
-      const output = materializeSourceFile(resource, content, relativePath);
-      const expected = matchingPrevious?.files?.[relativePath];
-      if (expected) {
-        const actual = installedFingerprint(targetRoot, relativePath);
-        if (actual && !sameFingerprint(actual, expected) && !force) {
-          throw new CatalogError(
-            `Refusing to overwrite locally modified source file ${relativePath}; pass --force.`,
-            'LOCAL_CONFLICT',
-            {
-              category: 'tracked-modification',
-              paths: [relativePath],
-              recoverable: true,
-            },
-          );
-        }
-        plan.set(relativePath, { content: output, executable: false, expected: actual });
-      } else {
-        addPlanEntry(plan, relativePath, output);
+    if (!content) {
+      targetPath(target, relativePath);
+    } else {
+      let output = content;
+      if (instruction) {
+        const runtimeScope = relativePath.startsWith('.claude/')
+          ? `paths: ${JSON.stringify(instruction.applyTo)}`
+          : `applyTo: ${JSON.stringify(instruction.applyTo.join(', '))}`;
+        output = Buffer.from(`---\n${runtimeScope}\n---\n\n${instruction.body}`, 'utf8');
       }
+      const fingerprint = sourceFingerprint ?? fileFingerprint(output, false);
+      const actual = installedFingerprint(target, relativePath);
+      const expected = trackedFiles[relativePath];
+      if (expected && actual && !sameFingerprint(actual, expected) && !force) {
+        throw new CatalogError(
+          `Refusing to overwrite locally modified source file ${relativePath}; pass --force.`,
+          'LOCAL_CONFLICT',
+          { category: 'tracked-modification', paths: [relativePath], recoverable: true },
+        );
+      }
+      const unchanged = sameFingerprint(actual, fingerprint);
+      if (!expected && actual && !unchanged && !force) {
+        throw new CatalogError(`Refusing to overwrite existing file ${relativePath}; pass --force.`, 'LOCAL_CONFLICT', {
+          category: 'untracked-destination',
+          paths: [relativePath],
+          recoverable: true,
+        });
+      }
+      files.set(relativePath, { content: output, executable: false, fingerprint, expected: actual });
+      trackedFiles[relativePath] = unchanged ? actual : fingerprint;
     }
     onAction({
       action: 'install',
@@ -139,30 +200,16 @@ function installSourceFileResource(
       resource: { catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id },
     });
   }
-  if (dryRun) return destinations;
-  onProgress('Updating installed files...');
-  writeInstallPlan(plan, targetRoot, { force });
-  recordSourceResourceInstallation(resource, targetRoot, destinations);
-  return destinations;
-}
-function materializeSourceFile(resource, content, relativePath) {
-  if (resource.kind !== 'instruction') return content;
-  let text;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(content);
-  } catch {
-    throw new CatalogError(`Source instruction is not valid UTF-8: ${resource.source_path}`);
+  if (content) {
+    setSourceResourceRecord(
+      state,
+      instruction ? { ...resource, apply_to: instruction.applyTo } : resource,
+      trackedFiles,
+    );
   }
-  const frontmatter = text.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
-  if (!frontmatter) throw new CatalogError(`Source instruction must have YAML frontmatter: ${resource.source_path}`);
-  const runtimeField = relativePath.startsWith('.claude/')
-    ? `paths: ${JSON.stringify(resource.apply_to)}`
-    : `applyTo: ${JSON.stringify(resource.apply_to.join(', '))}`;
-  return Buffer.from(`---\n${runtimeField}\n---\n\n${text.slice(frontmatter[0].length)}`, 'utf8');
 }
 
-function assertSourceFileCanBeInstalled(resource, target) {
-  const state = readInstallState(target);
+function assertSourceFileCanBeInstalled(resource: CatalogResource, state: InstallState): void {
   for (const [catalog, collections] of Object.entries(state.sources || {})) {
     if (catalog !== sourceCatalogName(resource) && collections[`${resource.kind}s`]?.[resource.id]) {
       throw new CatalogError(
@@ -195,7 +242,7 @@ function assertSourceSkillCanBeInstalled(resource: CatalogResource, target: stri
 
 function assertSourceResourceCanBeInstalled(resource: CatalogResource, target: string): void {
   if (resource.kind === 'skill') assertSourceSkillCanBeInstalled(resource, target);
-  else assertSourceFileCanBeInstalled(resource, target);
+  else assertSourceFileCanBeInstalled(resource, readInstallState(target));
 }
 
 function validateSourceUpdates(
@@ -261,75 +308,41 @@ function validateSourceUpdates(
 function updateSourceFileResources(
   installed: InstalledSourceResource[],
   target: string,
-  {
-    dryRun = false,
-    force = false,
-    onAction = () => {},
-    onProgress = () => {},
-    scope = 'project',
-  }: {
-    dryRun?: boolean;
-    force?: boolean;
-    onAction?: (action: PlanAction) => void;
-    onProgress?: (message: string) => void;
-    scope?: string;
-  } = {},
+  options: SourceFileInstallOptions & { preparedSourceFile?: PreparedPinnedSourceFile },
 ): string[] {
-  const targetRoot = fs.realpathSync(target);
-  const messages = [];
-  for (const { resource, installations, removed } of installed) {
-    if (removed)
-      throw new CatalogError(
-        `${catalogLabel(resource)} ${resource.kind} ${resource.id} was removed; uninstall it explicitly.`,
+  const messages: string[] = [];
+  let plan: SourceFileInstallPlan | undefined;
+  withPinnedSourceFiles((prepare) => {
+    for (const { resource, installations } of installed) {
+      const stale = installations.filter(
+        (item) => item.missing || item.modified || item.ref?.toLowerCase() !== resource.source_ref?.toLowerCase(),
       );
-    const stale = installations.filter(
-      (item) => item.missing || item.modified || item.ref?.toLowerCase() !== resource.source_ref.toLowerCase(),
-    );
-    if (!stale.length) continue;
-    const modified = stale.filter((item) => item.modified);
-    if (modified.length && !force) {
-      throw new CatalogError(
-        `Refusing to overwrite locally modified ${catalogLabel(resource)} ${resource.kind} files: ${modified.map((item) => item.path).join(', ')}. Pass --force.`,
-        'LOCAL_CONFLICT',
-        {
-          category: 'tracked-modification',
-          paths: modified.map((item) => item.path),
-          recoverable: true,
-        },
+      if (!stale.length) continue;
+      plan ??= createSourceFileInstallPlan(target, Boolean(options.dryRun));
+      stageSourceFileInstallation(
+        options.preparedSourceFile ?? resource,
+        stale.map((item) => item.path),
+        plan,
+        options,
+        prepare,
+      );
+      messages.push(
+        `${options.dryRun ? 'Would update' : 'Updated'} ${catalogLabel(resource)} ${resource.kind}: ${resource.id}`,
       );
     }
-    if (dryRun) {
-      for (const item of stale)
-        onAction({
-          action: 'install',
-          path: item.path,
-          resource: { catalog: sourceCatalogName(resource), kind: resource.kind, id: resource.id },
-        });
-      messages.push(`Would update ${catalogLabel(resource)} ${resource.kind}: ${resource.id}`);
-    } else {
-      onProgress(`Updating files for ${resource.id}...`);
-      installSourceFileResource(resource, targetRoot, 'both', {
-        scope,
-        force,
-        destinations: stale.map((item) => item.path),
-        onAction,
-        onProgress,
-      });
-      messages.push(`Updated ${catalogLabel(resource)} ${resource.kind}: ${resource.id}`);
-    }
+  });
+  if (plan && !options.dryRun) {
+    options.onProgress?.('Updating installed files...');
+    publishSourceFileInstallPlan(plan);
   }
   return messages;
 }
 
-interface SourceUpdateOptions {
-  dryRun?: boolean;
-  force?: boolean;
+interface SourceUpdateOptions extends SourceFileInstallOptions {
+  preparedSourceFile?: PreparedPinnedSourceFile;
   ghForce?: boolean;
   ghForceAgent?: string;
-  onAction?: (action: PlanAction) => void;
-  onProgress?: (message: string) => void;
   nonInteractive?: boolean;
-  scope?: string;
   spawnProcess?: typeof spawn;
 }
 
@@ -349,6 +362,7 @@ function* sourceUpdates(
     onAction = () => {},
     onProgress = () => {},
     scope = 'project',
+    preparedSourceFile,
   }: SourceUpdateOptions,
 ): Generator<SkillUpdateTask, string[], number | GhSkillResult> {
   onProgress('Validating installed resource and local file state...');
@@ -365,7 +379,7 @@ function* sourceUpdates(
       force,
       onAction,
       onProgress,
-      scope,
+      preparedSourceFile,
     },
   );
   const skills = installed.filter(({ resource }) => resource.kind === 'skill');

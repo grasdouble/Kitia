@@ -88,6 +88,29 @@ export interface InstallationResult {
   resource?: CatalogResource;
 }
 
+function prepareSourceOperation(
+  resource: CatalogResource,
+  action: SourceOperationRequest['action'],
+  { audit, onAudit }: Pick<SourceOperationRequest, 'audit' | 'onAudit'>,
+  needsContent = false,
+) {
+  if (!audit && !needsContent) return undefined;
+  const prepared = preparePinnedSourceFile(resource);
+  if (audit) {
+    const report = auditPreparedSourceFile(prepared);
+    onAudit?.(report);
+    if (action === 'install' && (!report.coverage.complete || report.findings.length)) {
+      throw new CatalogError(
+        report.findings.length
+          ? `Audit found ${report.findings.length} finding(s); installation blocked. Inspect the reported files and lines before installing.`
+          : 'Audit coverage is incomplete; installation blocked because not all resource text was analyzed.',
+        'AUDIT_BLOCKED',
+      );
+    }
+  }
+  return prepared;
+}
+
 /**
  * Callers hold the target operation lock for mutations, including catalog/inventory
  * preparation before this call and all selection, validation, apply, and recording.
@@ -255,9 +278,11 @@ async function executeInstallationOperation(
           resource: { ...matchingInstalled[0].resource, ...selectedResource },
         };
         validateSourceUpdates([replacement], { ...options, target });
+        const preparedSourceFile = prepareSourceOperation(replacement.resource, 'install', options);
+        const updateOptions = { ...options, preparedSourceFile };
         const updates = options.nonInteractive
-          ? await updateSourceResourcesAsync([replacement], target, options)
-          : updateSourceResources([replacement], target, options);
+          ? await updateSourceResourcesAsync([replacement], target, updateOptions)
+          : updateSourceResources([replacement], target, updateOptions);
         updates.forEach((message) => output.log(message));
         return { status: 0, messages };
       }
@@ -325,22 +350,12 @@ function runSourceOperation(
       output.error(`Warning: ${resource.id} has no declared license; verify usage rights before installing.`);
     }
   }
-  const prepared =
-    options.audit || (resource.kind !== 'skill' && (options.action === 'preview' || !options.dryRun))
-      ? preparePinnedSourceFile(resource)
-      : undefined;
-  if (options.audit) {
-    const audit = auditPreparedSourceFile(prepared);
-    options.onAudit?.(audit);
-    if (options.action === 'install' && (!audit.coverage.complete || audit.findings.length)) {
-      throw new CatalogError(
-        audit.findings.length
-          ? `Audit found ${audit.findings.length} finding(s); installation blocked. Inspect the reported files and lines before installing.`
-          : 'Audit coverage is incomplete; installation blocked because not all resource text was analyzed.',
-        'AUDIT_BLOCKED',
-      );
-    }
-  }
+  const prepared = prepareSourceOperation(
+    resource,
+    options.action,
+    options,
+    resource.kind !== 'skill' && options.action === 'preview',
+  );
   if (resource.kind !== 'skill') {
     if (options.action === 'preview') {
       const content = prepared.content;

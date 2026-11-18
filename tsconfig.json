@@ -11,5 +11,6 @@
     "strict": false,
     "noEmitOnError": true
   },
-  "include": ["terminal/src/**/*.ts", "terminal/src/**/*.mts"]
+  "include": ["terminal/src/**/*.ts", "terminal/src/**/*.mts"],
+  "exclude": ["terminal/src/**/__tests__/**"]
 }

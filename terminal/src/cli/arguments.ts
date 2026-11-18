@@ -36,7 +36,7 @@ export interface CliOptions {
   resourceSelectors?: string[];
   sourceResources?: CatalogResource[];
   resource?: CatalogResource;
-  output?: { log(message: string): void; error(message: string): void };
+  network?: boolean;
   onAction?: (action: PlanAction) => void;
   captureOutput?: boolean;
   onResource?: (resource: { catalog: string; kind: string; id: string; status?: string; source?: boolean }) => void;
@@ -66,6 +66,7 @@ function resolveCatalogName(value: string): string | undefined {
 }
 
 function parseArguments(args: string[]): CliOptions {
+  if (args.length === 1 && ['--help', '-h'].includes(args[0])) return { command: 'help' };
   if (args.length === 0) args = ['dashboard'];
   const extras: CliOptions = {};
   const command = args[0];
@@ -85,22 +86,24 @@ function parseArguments(args: string[]): CliOptions {
       extras.scope = scope;
     } else if (argument === '--catalog' && !discovery) {
       const catalog = args[++index];
-      const resolvedCatalog = resolveCatalogName(catalog);
-      if (!resolvedCatalog) {
-        const configured = catalogNames();
-        const hint = configured.length
-          ? `Choose one of: ${configured.join(', ')}`
-          : "No user catalogs are configured; add one with 'kitia catalog add'.";
-        throw new CatalogError(`Unknown catalog: ${catalog}. ${hint}`, 'INVALID_ARGUMENT');
+      if (!catalog || catalog.startsWith('--'))
+        throw new CatalogError('--catalog requires a catalog name', 'INVALID_ARGUMENT');
+      if (command === 'uninstall') extras.catalog = catalog;
+      else {
+        const resolvedCatalog = resolveCatalogName(catalog);
+        if (!resolvedCatalog) {
+          const configured = catalogNames();
+          const hint = configured.length
+            ? `Choose one of: ${configured.join(', ')}`
+            : "No user catalogs are configured; add one with 'kitia catalog add'.";
+          throw new CatalogError(`Unknown catalog: ${catalog}. ${hint}`, 'INVALID_ARGUMENT');
+        }
+        extras.catalog = resolvedCatalog;
       }
-      extras.catalog = resolvedCatalog;
     } else remaining.push(argument);
   }
   try {
-    const options: CliOptions =
-      command === 'doctor'
-        ? { ...parseCommandArguments(['check', ...remaining.slice(1)]), command: 'doctor' }
-        : parseCommandArguments(remaining);
+    const options = parseCommandArguments(remaining);
     const action = options.action || options.command;
     if (extras.audit && !['preview', 'install'].includes(action)) {
       throw new CatalogError('--audit is only supported for source preview and install commands', 'INVALID_ARGUMENT');
@@ -286,6 +289,20 @@ function parseCommandArguments(args: string[]): CliOptions {
       throw new CatalogError(`Usage: Kitia ${command} [<kind>] <id>`);
     }
     return { command, kind, id };
+  }
+  if (command === 'doctor') {
+    let target = '.';
+    let network = false;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const option = remaining[index];
+      if (option === '--network') network = true;
+      else if (option === '--target') {
+        const value = remaining[++index];
+        if (!value || value.startsWith('--')) throw new CatalogError('--target requires a value');
+        target = value;
+      } else throw new CatalogError(`Unknown option: ${option}`);
+    }
+    return { command, target, network };
   }
   if (command === 'check') {
     let target = '.';

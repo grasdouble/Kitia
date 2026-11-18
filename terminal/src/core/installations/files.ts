@@ -181,7 +181,7 @@ function writeInstallPlan(
       throw new CatalogError(`Refusing to replace symbolic link: ${destination}`);
     } else if (!stat.isFile()) {
       throw new CatalogError(`Installation destination is not a file: ${destination}`);
-    } else if (sameFingerprint(current, fileFingerprint(content, executable))) {
+    } else if (sameFingerprint(current, file.fingerprint ?? fileFingerprint(content, executable))) {
       actions.push(['unchanged', relativePath, file]);
     } else if (force || (hasExpected && file.expected !== null)) {
       actions.push(['overwrite', relativePath, file]);
@@ -238,7 +238,7 @@ function writeInstallPlan(
           ? null
           : {
               content: fs.readFileSync(destination),
-              mode: fs.statSync(destination).mode & 0o777,
+              mode: fs.statSync(destination).mode & 0o7777,
             };
       if (action === 'remove') {
         staged.push({ action, destination, previous });
@@ -266,6 +266,7 @@ function writeInstallPlan(
         fs.unlinkSync(item.destination);
       } else if (item.action === 'remove') {
         fs.writeFileSync(item.destination, item.previous.content, { mode: item.previous.mode });
+        if (process.platform !== 'win32') fs.chmodSync(item.destination, item.previous.mode);
       } else {
         const restorePath = path.join(
           path.dirname(item.destination),
@@ -275,6 +276,7 @@ function writeInstallPlan(
           flag: 'wx',
           mode: item.previous.mode,
         });
+        if (process.platform !== 'win32') fs.chmodSync(restorePath, item.previous.mode);
         fs.renameSync(restorePath, item.destination);
       }
     }
@@ -293,7 +295,9 @@ function writeInstallPlan(
 }
 
 function equalOptionalFingerprint(left: FileFingerprint | null, right: FileFingerprint | null): boolean {
-  return (!left && !right) || Boolean(sameFingerprint(left, right));
+  return (
+    (!left && !right) || Boolean(left && right && left.sha256 === right.sha256 && left.executable === right.executable)
+  );
 }
 
 function addInventoryStateToPlan(plan: Map<string, InstallPlanEntry>, state: InstallState) {

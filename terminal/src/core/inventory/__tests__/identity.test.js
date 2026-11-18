@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { afterEach, test } = require('node:test');
-const { checkInstalledResources } = require('../dist/core/inventory/checks.js');
-const { recordSourceInstallation, readInstalledSourceSkills } = require('../dist/core/inventory/inventory.js');
-const { updateSourceResources } = require('../dist/core/installations/mutations.js');
+const { checkInstalledResources } = require('../checks.ts');
+const { recordSourceInstallation, readInstalledSourceSkills } = require('../inventory.ts');
+const { updateSourceResources } = require('../../installations/mutations.ts');
 
 const pinnedRef = 'a'.repeat(40);
 const catalog = 'sample-catalog';

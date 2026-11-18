@@ -1,31 +1,13 @@
 'use strict';
-
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const {
   listSourceVersions,
   listSourceVersionsAsync,
+  latestSourceVersionAtRef,
   uniqueSourceVersionPrefixes,
   resolveSourceVersionPrefix,
-} = require('../dist/core/resources/history.js');
-const { formatSourceVersionTable } = require('../dist/cli/history.js');
-
-test('source history displays unique, aligned prefixes when seven-character SHAs collide', () => {
-  const versions = [
-    { sha: `abcdef0${'0'.repeat(33)}`, date: '2025-04-03T12:13:14Z', subject: 'first' },
-    { sha: `abcdef0${'1'.repeat(33)}`, date: '2025-04-03T12:13:14Z', subject: 'second' },
-  ];
-  const prefixes = uniqueSourceVersionPrefixes(versions);
-  assert.deepEqual(prefixes, ['abcdef00', 'abcdef01']);
-  for (const [index, prefix] of prefixes.entries()) {
-    assert.equal(resolveSourceVersionPrefix(versions, prefix), versions[index].sha);
-  }
-  const [header, , ...rows] = formatSourceVersionTable(versions);
-  const dateColumn = header.indexOf('DATE');
-  assert.equal(rows[0].indexOf(versions[0].date), dateColumn);
-  assert.equal(rows[1].indexOf(versions[1].date), dateColumn);
-});
-
+} = require('../history.ts');
 test('source history resolves only unique listed SHA prefixes', () => {
   const versions = [{ sha: 'abcdef0'.padEnd(40, '0') }, { sha: 'abcdef1'.padEnd(40, '1') }];
   assert.equal(resolveSourceVersionPrefix(versions, 'ABCDEF0'), versions[0].sha);
@@ -156,5 +138,21 @@ test('source version history caps API pagination and reports authentication/netw
   assert.throws(
     () => listSourceVersions({ ...resource, source_path: '../escape' }, () => assert.fail()),
     /GitHub source resources with supported file paths/,
+  );
+});
+test('history parses paginated source commits and resolves unique prefixes', () => {
+  const sha = 'a'.repeat(40);
+  const resource = { kind: 'agent', source_repository: 'owner/repo', source_path: 'agents/a.md' };
+  const run = (_c, args) => {
+    assert.ok(args.includes('page=1'));
+    return JSON.stringify([{ sha, commit: { committer: { date: '2025-01-01T00:00:00Z' }, message: 'first\nbody' } }]);
+  };
+  const versions = listSourceVersions(resource, run);
+  assert.equal(versions[0].subject, 'first');
+  assert.deepEqual(uniqueSourceVersionPrefixes(versions), [sha.slice(0, 7)]);
+  assert.equal(resolveSourceVersionPrefix(versions, 'aaaa'), sha);
+  assert.equal(
+    latestSourceVersionAtRef(resource, 'main', () => JSON.stringify([{ sha }])),
+    sha,
   );
 });

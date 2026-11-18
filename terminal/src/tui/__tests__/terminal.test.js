@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 test('CLI catalog and installed-resource tables adapt to terminal width without truncating piped output', async () => {
-  const { formatCatalogTable, renderInstalledResources, selectCatalogResource } = require('../dist/tui/terminal.js');
+  const { formatCatalogTable, renderInstalledResources, selectCatalogResource } = require('../terminal.ts');
   const description = 'A complete description retained for piped terminal output.';
   const resources = [
     {

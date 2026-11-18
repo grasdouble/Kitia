@@ -1,6 +1,6 @@
 'use strict';
 
-const { parseFrontmatter } = require('../resources/frontmatter.js');
+const { parseFrontmatter, parseInstruction } = require('../resources/frontmatter.js');
 const { CatalogError } = require('../resources/model.js');
 const { repositoryId } = require('./model.js');
 const { spdxExpression } = require('../resources/license.js');
@@ -226,13 +226,9 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || id.length > 64 || id.includes('--')) {
       throw new CatalogError(`Invalid resource id in ${name}: ${id}`);
     }
-    let metadata;
-    try {
-      metadata = sourceMetadata(file);
-    } catch (error) {
-      if (kind !== 'instruction') throw error;
-      metadata = new Map();
-    }
+    const instruction =
+      kind === 'instruction' ? parseInstruction(fs.readFileSync(file), `${sourceRepository}:${sourcePath}`) : undefined;
+    const metadata = instruction?.values ?? sourceMetadata(file);
     if (
       kind !== 'instruction' &&
       (typeof metadata.get('name') !== 'string' ||
@@ -246,30 +242,10 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
         `${file} must define a non-empty name${kind === 'skill' ? ' matching its id and a non-empty description' : ''}`,
       );
     }
-    const instructionKey = ['apply_to', 'applyTo', 'paths'].find((key) => metadata.has(key));
-    const instructionMetadata = instructionKey === undefined ? undefined : metadata.get(instructionKey);
-    const applyTo =
-      instructionKey === undefined
-        ? ['**']
-        : typeof instructionMetadata === 'string'
-          ? [instructionMetadata]
-          : instructionMetadata;
-    if (
-      kind === 'instruction' &&
-      (!Array.isArray(applyTo) ||
-        !applyTo.length ||
-        applyTo.some((pattern) => typeof pattern !== 'string' || !pattern.trim()))
-    ) {
-      throw new CatalogError(
-        `${sourceRepository}:${sourcePath} must define a non-empty apply_to, applyTo, or paths frontmatter value`,
-      );
-    }
     const description =
       typeof metadata.get('description') === 'string' && metadata.get('description').trim()
         ? metadata.get('description').trim().replace(/\s+/g, ' ')
-        : fs
-            .readFileSync(file, 'utf8')
-            .replace(/^---[\s\S]*?---\s*/, '')
+        : (instruction?.body ?? fs.readFileSync(file, 'utf8').replace(/^---[\s\S]*?---\s*/, ''))
             .trim()
             .split('\n')[0]
             .replace(/^#\s*/, '')
@@ -281,7 +257,7 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
       kind,
       description,
       source_path: sourcePath,
-      ...(kind === 'instruction' ? { apply_to: applyTo } : {}),
+      ...(instruction ? { apply_to: instruction.applyTo } : {}),
       license_status: licenseStatus,
       license_spdx: spdxExpression(licenseStatus),
     });

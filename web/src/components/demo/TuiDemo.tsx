@@ -9,7 +9,7 @@ import { createTuiDemoSession } from './tuiDemoSession';
 
 import styles from './TuiDemo.module.css';
 
-type Phase = 'loading' | 'ready' | 'ended' | 'error';
+type Phase = 'loading' | 'ready' | 'ended' | 'startup-error' | 'error';
 
 const navigationKeys = [
   ['↑', '\u001b[A', 'Up arrow'],
@@ -62,29 +62,38 @@ const themeStyle = {
 export function TuiDemo() {
   const container = useRef<HTMLDivElement>(null);
   const terminal = useRef<BrowserTerminalSession | null>(null);
+  const mount = useRef<AbortController | null>(null);
   const [generation, setGeneration] = useState(0);
   const [phase, setPhase] = useState<Phase>('loading');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    let active = true;
     const controller = new AbortController();
+    mount.current = controller;
+    const { signal } = controller;
+    let finished = false;
     const session = createTuiDemoSession();
     void mountDashboardTerminal(
       container.current!,
-      (mouse) => (
-        <Dashboard
-          {...session}
-          mouse={mouse}
-          onFinish={() => {
-            if (active) setPhase('ended');
-          }}
-        />
-      ),
-      { signal: controller.signal },
+      (mouse, finish) => <Dashboard {...session} mouse={mouse} onFinish={finish} />,
+      {
+        signal,
+        onExit(exit) {
+          if (signal.aborted) return;
+          finished = true;
+          terminal.current = null;
+          if (exit.status === 'error') {
+            setError(exit.cause instanceof Error ? exit.cause.message : String(exit.cause));
+            setPhase('error');
+          } else {
+            setPhase('ended');
+          }
+        },
+      },
     )
       .then((mounted) => {
-        if (!active) {
+        if (!mounted) return;
+        if (signal.aborted || finished) {
           mounted.dispose();
           return;
         }
@@ -92,25 +101,24 @@ export function TuiDemo() {
         setPhase('ready');
       })
       .catch((cause: unknown) => {
-        if (!active) return;
+        if (signal.aborted || finished) return;
         setError(cause instanceof Error ? cause.message : String(cause));
-        setPhase('error');
+        setPhase('startup-error');
       });
     return () => {
-      active = false;
       controller.abort();
-      terminal.current?.dispose();
-      terminal.current = null;
+      if (mount.current === controller) {
+        mount.current = null;
+        terminal.current = null;
+      }
     };
   }, [generation]);
 
-  useEffect(() => {
-    if (phase !== 'ended') return;
-    terminal.current?.dispose();
-    terminal.current = null;
-  }, [phase]);
+  const hasError = phase === 'startup-error' || phase === 'error';
 
   function reset() {
+    mount.current?.abort();
+    terminal.current = null;
     setError('');
     setPhase('loading');
     setGeneration((value) => value + 1);
@@ -166,7 +174,7 @@ export function TuiDemo() {
             aria-describedby="terminal-instructions"
           />
           {phase !== 'ready' && (
-            <div className={styles.overlay} role={phase === 'error' ? 'alert' : 'status'}>
+            <div className={styles.overlay} role={hasError ? 'alert' : 'status'}>
               {phase === 'loading' ? (
                 <p>Starting terminal…</p>
               ) : phase === 'ended' ? (
@@ -179,7 +187,7 @@ export function TuiDemo() {
                 </>
               ) : (
                 <>
-                  <h2>Unable to start the terminal.</h2>
+                  <h2>{phase === 'startup-error' ? 'Unable to start the terminal.' : 'The terminal stopped.'}</h2>
                   <p className={styles.error}>{error}</p>
                   <button type="button" onClick={reset}>
                     Try again

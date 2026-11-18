@@ -6,6 +6,7 @@ import type { FileFingerprint } from '../inventory/model.js';
 export interface InstallPlanEntry {
   content: Buffer;
   executable: boolean;
+  fingerprint?: FileFingerprint;
   expected?: FileFingerprint | null;
   mode?: number;
 }

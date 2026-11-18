@@ -7,11 +7,12 @@ package version.
 
 ## Public surface and defaults
 
-The public surface consists of command syntax, documented options and defaults,
-JSON output, exit codes, and the supported installation-inventory formats.
-`terminal/src/**/*.ts` and `terminal/src/**/*.mts` compile into the matching directory
-under `dist/`; these modules are implementation details, not a supported
-JavaScript SDK. The `terminal/bin/` entry point is the supported executable.
+The public surface consists of the `kitia` command, documented options and
+defaults, and the machine-readable output described below. The package
+executable is `terminal/dist/kitia.js`. Direct callers of `terminal/bin/kitia.js`
+must switch to the new path or invoke the installed `kitia` command. In a
+checkout, run `pnpm run cli:build` before using the executable. The other JavaScript
+modules in `terminal/dist/` are implementation details, not a supported JavaScript SDK.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
@@ -37,12 +38,25 @@ are silent. Other commands and non-interactive launches skip the check.
 | `validate` | Strict validation of all catalog sources |
 | `collection export`, `collection import` | Share versioned pinned references to selected resources; collections contain no resource content and do not install resources |
 
+Top-level `kitia --help` prints help before configuration loading. `doctor
+--network` enables GitHub authentication/repository probes; `check --network`
+is an invalid argument.
+Aggregate discovery loads each catalog index independently, retaining healthy
+results and reporting warnings for only unavailable or invalid catalogs.
+Targeted discovery loads only the selected index; explicit `validate` remains
+strict across the complete configured set.
+
+
 
 Installation defaults to Copilot and the target defaults to the current
 directory. Updates preserve registered runtimes; they do not silently remove
 resources absent from the current catalog. `--force` remains explicit and does
 not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
+
+Explicit `uninstall --catalog` resolves its selector against the selected
+target's installed inventory, including catalogs no longer registered; other
+catalog selectors remain limited to registered sources.
 
 `kitia versions <kind> <id> [--catalog <name>]` supports skills, agents, and
 instructions. It uses `gh api` against the GitHub commits endpoint, filtered
@@ -70,6 +84,21 @@ pin comparison. Path-history checks require GitHub CLI authentication and
 network access. If either lookup fails or is invalid, `check` reports an error
 (dashboard inventory reports a scope scan error); it must not report the
 resource as current.
+An audited `install --ref` replacement of a tracked resource audits the selected
+revision before any destination or inventory write. If the audit blocks, every
+tracked runtime in the chosen scope remains unchanged.
+An ordinary agent or instruction install cannot advance a shared resource pin
+while omitting a runtime already tracked for that resource, even with `--force`.
+Use `--tool both` to install both runtimes or use `update` to preserve tracked
+runtime coverage.
+Instruction scope is parsed from the pinned Markdown (`apply_to`, `applyTo`, or
+`paths`); without frontmatter, the global default is `["**"]`. Destination
+paths remain ID-scoped; runtime metadata and inventory describe the selected
+content. Agent and instruction destination writes and inventory publication are
+one staged transaction: inventory is published last, and a failure restores
+previous destination bytes and modes. Bulk updates reuse one verified checkout
+for each repository and commit within the operation.
+
 `--audit` is opt-in and applies only to `preview` and `install` of pinned
 source-catalog resources; it is not an update check. It is rejected for other
 commands and for resources without pinned source metadata. Preview reports
@@ -92,6 +121,12 @@ project-only. Inventories and operation locks are target-local, so the two
 scopes are managed independently. Inventory format upgrades are explicit; see
 the [inventory migration guide](inventory-migrations.md).
 Read-only commands and previews do not create home configuration directories.
+Kitia uses `~/.config/kitia` unless `KITIA_CONFIG_DIR` names another directory.
+Kitia no longer reads or copies `~/.config/kiti` automatically and leaves the
+old files untouched. To keep using that configuration, copy `~/.config/kiti`
+to `~/.config/kitia` only if the destination does not exist, or set
+`KITIA_CONFIG_DIR` to the old directory instead. `kitia migrate` upgrades
+installation inventories, not home configuration.
 `dashboard` reads both scopes; if one inventory is unsupported, it displays the
 other scope and reports the failing scope explicitly instead of rewriting it.
 Dashboard actions require confirmation and use normal lifecycle checks,

@@ -13,6 +13,10 @@
     "terminal/src/tui/catalog-freshness.mts",
     "terminal/src/tui/action-retry.mts",
     "terminal/src/tui/version-check.mts",
-    "terminal/src/tui/components/detail-fields.mts"
+    "terminal/src/tui/components/detail-fields.mts",
+    "terminal/src/core/inspection/__tests__/model.test.ts",
+    "terminal/src/core/inventory/__tests__/model.test.ts",
+    "terminal/src/core/resources/license.ts",
+    "terminal/src/core/catalogs/model.ts"
   ]
 }

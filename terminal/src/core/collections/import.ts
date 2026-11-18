@@ -7,17 +7,24 @@ const {
   loadUserSourceConfiguration,
   userCatalogDirectory,
   userCatalogIndexDirectory,
+  catalogIndexFileName,
 } = require('../catalogs/config.js');
-const { catalogNameKey, repositoryId, validateSourceConfiguration } = require('../catalogs/model.js');
+const {
+  catalogNameKey,
+  isReservedCatalogName,
+  repositoryId,
+  validateSourceConfiguration,
+} = require('../catalogs/model.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 function publishCollectionFiles(files, io) {
   const staged = [];
+  const retainedBackups = new Set();
   const cleanup = () => {
     for (const entry of staged) {
       for (const temporary of [entry.stagePath, entry.backupPath]) {
-        if (!temporary) continue;
+        if (!temporary || retainedBackups.has(temporary)) continue;
         try {
           if (io.existsSync(temporary)) io.unlinkSync(temporary);
         } catch {}
@@ -33,6 +40,7 @@ function publishCollectionFiles(files, io) {
         backupPath: null,
         existed: io.existsSync(file.target),
         mode: 0o600,
+        published: false,
       };
       staged.push(entry);
       if (entry.existed) {
@@ -54,15 +62,24 @@ function publishCollectionFiles(files, io) {
     throw error;
   }
   try {
-    for (const entry of staged) io.renameSync(entry.stagePath, entry.target);
+    for (const entry of staged) {
+      io.renameSync(entry.stagePath, entry.target);
+      entry.published = true;
+    }
   } catch (error) {
     const rollbackErrors = [];
     for (const entry of [...staged].reverse()) {
+      if (!entry.published) continue;
       try {
         if (entry.existed) io.renameSync(entry.backupPath, entry.target);
         else if (io.existsSync(entry.target)) io.unlinkSync(entry.target);
       } catch (rollbackError) {
-        rollbackErrors.push(rollbackError.message);
+        if (entry.backupPath) retainedBackups.add(entry.backupPath);
+        rollbackErrors.push(
+          entry.backupPath
+            ? `${rollbackError.message}; recovery copy retained at ${entry.backupPath}`
+            : rollbackError.message,
+        );
       }
     }
     cleanup();
@@ -88,6 +105,9 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
   const existingNames = new Set(current.map(({ name }) => catalogNameKey(name)));
   const existingRepositories = new Set(current.map(({ repositoryId: id }) => id));
   for (const { source } of incoming) {
+    if (isReservedCatalogName(source.name)) {
+      throw new CatalogError(`Cannot import collection: catalog name is reserved (${source.name})`);
+    }
     if (existingNames.has(catalogNameKey(source.name)) || existingRepositories.has(repositoryId(source.repository))) {
       throw new CatalogError(
         `Cannot import collection: catalog name or repository is already configured (${source.name})`,
@@ -107,7 +127,17 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
   ];
   validateSourceConfiguration({ catalog_version: 1, sources: combined });
   for (const { source } of incoming) {
-    if (io.existsSync(path.join(indexDirectory, `${source.name}.json`))) {
+    const existingLegacy = io.existsSync(indexDirectory)
+      ? io
+          .readdirSync(indexDirectory)
+          .some(
+            (entry) =>
+              entry.toLowerCase().endsWith('.json') &&
+              entry.toUpperCase() !== 'CATALOGSOURCES.JSON' &&
+              catalogNameKey(entry.slice(0, -5)) === catalogNameKey(source.name),
+          )
+      : false;
+    if (io.existsSync(path.join(indexDirectory, catalogIndexFileName(source.name))) || existingLegacy) {
       throw new CatalogError(
         `Cannot import collection: an unregistered catalog index already exists for ${source.name}`,
       );
@@ -115,9 +145,10 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
   }
   io.mkdirSync(directory, { recursive: true, mode: 0o700 });
   io.mkdirSync(indexDirectory, { recursive: true, mode: 0o700 });
+  if (incoming.length) io.mkdirSync(path.join(indexDirectory, '.kitia-index'), { recursive: true, mode: 0o700 });
   const registry = `${JSON.stringify({ catalog_version: 1, sources: combined }, null, 2)}\n`;
   const files = incoming.map(({ source, index }) => ({
-    target: path.join(indexDirectory, `${source.name}.json`),
+    target: path.join(indexDirectory, catalogIndexFileName(source.name)),
     contents: `${JSON.stringify(index, null, 2)}\n`,
   }));
   files.push(

@@ -49,7 +49,7 @@ test('real CLI collection export and import round-trip a local pinned catalog fi
     }),
   );
   const collectionFile = path.join(temporary, 'team.json');
-  const cli = path.resolve(__dirname, '../bin/kitia.js');
+  const cli = path.resolve(__dirname, '../dist/kitia.js');
   const run = (config, ...args) =>
     execFileSync(process.execPath, [cli, ...args], {
       encoding: 'utf8',
@@ -115,7 +115,7 @@ test('real CLI signs exports and rejects missing, incorrect, or altered approval
   fs.writeFileSync(publicKeyPath, keys.publicKey.export({ format: 'pem', type: 'spki' }));
   fs.writeFileSync(wrongPublicKeyPath, wrongKeys.publicKey.export({ format: 'pem', type: 'spki' }));
 
-  const cli = path.resolve(__dirname, '../bin/kitia.js');
+  const cli = path.resolve(__dirname, '../dist/kitia.js');
   const run = (config, ...args) =>
     execFileSync(process.execPath, [cli, ...args], {
       encoding: 'utf8',

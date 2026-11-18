@@ -7,13 +7,26 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { createDashboardActionHandler } = require('../native-actions.ts');
-const { recordSourceResourceInstallation } = require('../../core/inventory/inventory.ts');
+const { readInstallState, setSourceResourceRecord } = require('../../core/inventory/inventory.ts');
+const {
+  addInventoryStateToPlan,
+  installedFingerprint,
+  writeInstallPlan,
+} = require('../../core/installations/files.ts');
 
 function writeFile(root, relativePath, content) {
   const file = path.join(root, ...relativePath.split('/'));
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
   return file;
+}
+
+function recordFixture(root, resource, relativePath) {
+  const state = readInstallState(root);
+  setSourceResourceRecord(state, resource, { [relativePath]: installedFingerprint(root, relativePath) });
+  const plan = new Map();
+  addInventoryStateToPlan(plan, state);
+  writeInstallPlan(plan, root);
 }
 
 test('native local preview and unmanaged removal tolerate unavailable configured catalogs', async () => {
@@ -47,7 +60,7 @@ test('native local preview and unmanaged removal tolerate unavailable configured
       scope: 'project',
     };
     writeFile(project, trackedPath, trackedContent);
-    recordSourceResourceInstallation(tracked, project, [trackedPath]);
+    recordFixture(project, tracked, trackedPath);
     const unmanagedPath = '.claude/agents/manual.md';
     const unmanagedContent = 'A locally maintained agent.\n';
     const unmanagedFile = writeFile(project, unmanagedPath, unmanagedContent);
@@ -151,6 +164,24 @@ test('native audited failure retains license warnings and audit facts in its typ
     assert.deepEqual(result.errors, []);
     assert.equal(fs.existsSync(path.join(project, '.github/agents/demo.agent.md')), false);
     assert.equal(fs.existsSync(path.join(project, '.kitia-operation.lock')), false);
+
+    const installedPath = '.github/agents/demo.agent.md';
+    const installedBody = 'Already installed fixture.\n';
+    const installedFile = writeFile(project, installedPath, installedBody);
+    const oldRef = 'a'.repeat(40);
+    recordFixture(project, { ...resource, source_ref: oldRef }, installedPath);
+    const replacement = await createDashboardActionHandler()(
+      'install',
+      resource,
+      { target: project, userTarget: user },
+      { sourceResources: [resource] },
+      { ref },
+    );
+    assert.equal(replacement.code, 1);
+    assert.equal(replacement.failure.code, 'AUDIT_BLOCKED');
+    assert.match(replacement.messages.join('\n'), /instruction-override/);
+    assert.equal(fs.readFileSync(installedFile, 'utf8'), installedBody);
+    assert.equal(readInstallState(project).sources.Fixture.agents.demo.source_ref, oldRef);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

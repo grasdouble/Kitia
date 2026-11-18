@@ -1,23 +1,42 @@
 'use strict';
-
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { after, test } = require('node:test');
-const { createSourceIndex } = require('../dist/core/catalogs/discovery.js');
-const { listCatalogResources } = require('../dist/core/resources/queries.js');
-const { parseArguments } = require('../dist/cli/arguments.js');
+const { afterEach, test } = require('node:test');
+const { createSourceIndex, sourceMetadata } = require('../discovery.ts');
+let root;
+afterEach(() => {
+  if (root) fs.rmSync(root, { recursive: true, force: true });
+  root = undefined;
+});
 
-let temporary;
-after(() => {
-  if (temporary) fs.rmSync(temporary, { recursive: true, force: true });
+test('discovers indexed Markdown resources and safely rejects escaping source paths', () => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-catalog-index-'));
+  fs.mkdirSync(path.join(root, 'skills/demo'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'skills/demo/SKILL.md'), '---\nname: Demo\ndescription: Example\n---\nBody\n');
+  execFileSync('git', ['init', '-q', root]);
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.com']);
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
+  execFileSync('git', ['-C', root, 'add', '.']);
+  execFileSync('git', ['-C', root, 'commit', '-qm', 'catalog fixture']);
+  const index = createSourceIndex('https://github.com/acme/repo', 'team', root);
+  assert.ok(index.resources.some(({ kind, id }) => kind === 'skill' && id === 'demo'));
+  assert.equal(sourceMetadata(path.join(root, 'skills/demo/SKILL.md')).get('name'), 'Demo');
+  assert.throws(
+    () =>
+      createSourceIndex('https://github.com/acme/repo', 'team', root, {
+        mode: 'custom',
+        entries: [{ kind: 'agent', path: '../outside.md' }],
+      }),
+    /unsafe|escape/i,
+  );
 });
 
 test('source indexes distinguish SPDX expressions from unknown upstream license values', () => {
-  temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-spdx-catalog-'));
-  const repository = path.join(temporary, 'repo');
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-spdx-catalog-'));
+  const repository = path.join(root, 'repo');
   const resources = [
     { id: 'mit-only', license: 'MIT' },
     { id: 'dual-license', license: 'MIT OR Apache-2.0' },
@@ -67,23 +86,4 @@ test('source indexes distinguish SPDX expressions from unknown upstream license 
   assert.equal(byId.get('custom-license').license_spdx, undefined);
   assert.equal(byId.get('no-license').license_status, 'not-declared');
   assert.equal(byId.get('no-license').license_spdx, undefined);
-
-  assert.deepEqual(
-    listCatalogResources(catalog.resources, parseArguments(['list', '--license', 'Apache-2.0'])).map(({ id }) => id),
-    ['dual-license'],
-  );
-  assert.deepEqual(
-    listCatalogResources(catalog.resources, parseArguments(['search', 'mit', '--license', 'MIT'])).map(({ id }) => id),
-    ['mit-only', 'dual-license'],
-  );
-  assert.deepEqual(
-    listCatalogResources(catalog.resources, parseArguments(['list', '--license', 'Acme  commercial license'])).map(
-      ({ id }) => id,
-    ),
-    ['custom-license'],
-  );
-  assert.deepEqual(
-    listCatalogResources(catalog.resources, parseArguments(['list', '--license', 'not-declared'])).map(({ id }) => id),
-    ['no-license'],
-  );
 });

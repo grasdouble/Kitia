@@ -13,7 +13,7 @@ const {
   migrateInstallations,
   migrateInventory,
   migrateTarget,
-} = require('../migrations/run.js');
+} = require('../dist/migrations/run.js');
 const root = path.resolve(__dirname, '..');
 const schema = JSON.parse(fs.readFileSync(path.join(root, 'schemas/catalog-lock-v1.schema.json'), 'utf8'));
 const validateSchema = new Ajv({ allErrors: true, strict: true }).compile(schema);

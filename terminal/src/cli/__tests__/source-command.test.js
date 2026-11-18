@@ -577,7 +577,7 @@ test('CLI maps exited install status seven to exit one, preserves warnings, and 
     ].join('\n'),
   );
   const preload = path.resolve(__dirname, '../../../test/gh-process-preload.cjs');
-  const cli = path.resolve(__dirname, '../../../bin/kitia.js');
+  const cli = path.resolve(__dirname, '../../../dist/kitia.js');
   const env = {
     ...process.env,
     KITIA_CONFIG_DIR: config,

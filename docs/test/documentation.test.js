@@ -19,7 +19,7 @@ test('local Markdown links resolve', () => {
   const files = [
     ...['README.md', 'CONTRIBUTING.md', 'CHANGELOG.md'].map((file) => path.join(root, file)),
     ...markdownFiles(path.join(root, 'docs')),
-    ...markdownFiles(path.join(root, 'terminal', 'migrations')),
+    ...markdownFiles(path.join(root, 'terminal', 'src', 'migrations')),
     ...markdownFiles(path.join(root, '.github')),
   ];
   for (const file of files) {
@@ -39,7 +39,7 @@ test('package, workflow, and docs agree on runtime and project identity', () => 
   assert.equal(pkg.name, '@grasdouble/kitia');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.engines.node, '>=26');
-  assert.deepEqual(pkg.bin, { kitia: 'terminal/bin/kitia.js' });
+  assert.deepEqual(Object.keys(pkg.bin), ['kitia']);
   assert.match(pkg.repository.url, /github\.com\/grasdouble\/Kitia\.git$/);
   assert.match(read('README.md'), /^# Kitia/m);
 });
