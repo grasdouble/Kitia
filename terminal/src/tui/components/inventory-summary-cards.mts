@@ -33,20 +33,26 @@ export function InventorySummaryCards({
   const current = managed.filter((resource) => dashboardStatus(resource) === 'current').length;
   const updates = managed.filter((resource) => dashboardStatus(resource) === 'update').length;
   const warnings = managed.filter((resource) => dashboardStatus(resource) === 'attention').length;
-  const cards = [
+  type SummaryCard =
+    | { type: 'scope'; title: string; count: number; managed: number; color: string }
+    | { type: 'updates'; title: string; count: number; note: string; color: string };
+  const cards: SummaryCard[] = [
     {
+      type: 'scope',
       title: 'PROJECT',
       count: resources.filter((resource) => resource.scope === 'project').length,
       managed: managed.filter((resource) => resource.scope === 'project').length,
       color: DASHBOARD_THEME.semantic.terminalScope.project,
     },
     {
+      type: 'scope',
       title: 'USER',
       count: resources.filter((resource) => resource.scope === 'user').length,
       managed: managed.filter((resource) => resource.scope === 'user').length,
       color: DASHBOARD_THEME.semantic.terminalScope.user,
     },
     {
+      type: 'updates',
       title: 'UPDATES',
       count: updates,
       note: `${current} current · ${warnings} warning(s)`,
@@ -83,8 +89,8 @@ export function InventorySummaryCards({
     Box,
     { flexDirection: stacked ? 'column' : 'row', width, marginTop, alignItems: 'stretch' },
     ...cards.map((card, index) => {
-      const managedCount = 'managed' in card ? card.managed : 0;
-      const note = 'managed' in card ? `${managedCount} managed · ${card.count - managedCount} unmanaged` : card.note;
+      const note =
+        card.type === 'scope' ? `${card.managed} managed · ${card.count - card.managed} unmanaged` : card.note;
       const cardNode = compact
         ? h(
             Box,

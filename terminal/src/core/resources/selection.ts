@@ -1,7 +1,5 @@
-'use strict';
-
 import type { CatalogResource } from './model.js';
-const { CatalogError } = require('./model.js');
+import { CatalogError } from './model.js';
 async function resolveCatalogResource(
   resources: CatalogResource[],
   id: string,
@@ -27,4 +25,4 @@ async function resolveCatalogResource(
   return selected;
 }
 
-module.exports = { resolveCatalogResource };
+export { resolveCatalogResource };

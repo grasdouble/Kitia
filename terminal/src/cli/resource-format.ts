@@ -1,7 +1,5 @@
-'use strict';
-
+import { sourceCatalogName } from '../core/inventory/inventory.js';
 import type { CatalogResource } from '../core/resources/model.js';
-const { sourceCatalogName } = require('../core/inventory/inventory.js');
 
 function formatSourceResource(resource: CatalogResource): string {
   return [
@@ -14,4 +12,4 @@ function formatSourceResource(resource: CatalogResource): string {
   ].join('\n');
 }
 
-module.exports = { formatSourceResource };
+export { formatSourceResource };

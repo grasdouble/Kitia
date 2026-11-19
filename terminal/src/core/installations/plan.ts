@@ -1,7 +1,5 @@
-'use strict';
-
-const { CatalogError } = require('../resources/model.js');
 import type { FileFingerprint } from '../inventory/model.js';
+import { CatalogError } from '../resources/model.js';
 
 export interface InstallPlanEntry {
   content: Buffer;
@@ -24,4 +22,4 @@ function addPlanEntry(
   plan.set(relativePath, { content, executable });
 }
 
-module.exports = { addPlanEntry };
+export { addPlanEntry };

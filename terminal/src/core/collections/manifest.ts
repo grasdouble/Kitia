@@ -1,26 +1,78 @@
-'use strict';
-
-const { CatalogError } = require('../resources/model.js');
-const { validateCollectionSignatureEnvelope } = require('./signatures.js');
-const { validateSourceConfiguration, catalogNameKey } = require('../catalogs/model.js');
-const { validateSourceCatalog } = require('../resources/manifest.js');
-function collectionData(resources, sources, selectors) {
-  const byKey = new Map(resources.map((resource) => [`${resource.catalog}:${resource.kind}:${resource.id}`, resource]));
+import {
+  validateSourceConfiguration,
+  catalogNameKey,
+  type CatalogEntry,
+  type SourceConfiguration,
+} from '../catalogs/model.js';
+import { validateSourceCatalog } from '../resources/manifest.js';
+import { CatalogError } from '../resources/model.js';
+import type { CatalogResource } from '../resources/model.js';
+import { validateCollectionSignatureEnvelope } from './signatures.js';
+type CollectionResourceReference = {
+  kind: CatalogResource['kind'];
+  id: string;
+  source_path?: string;
+  description?: string;
+  license_status?: string;
+  apply_to?: string[];
+};
+type CollectionSource = {
+  name: string;
+  repository: string;
+  mode: 'basic' | 'custom';
+  entries: CatalogEntry[];
+  repositoryId: string;
+};
+type CollectionDataCatalog = {
+  name: string;
+  repository: string;
+  mode: 'basic' | 'custom';
+  entries?: CatalogEntry[];
+  source_ref: string;
+  resources: CollectionResourceReference[];
+};
+export interface ValidatedCollectionCatalog {
+  source: {
+    name: string;
+    repository: string;
+    mode?: 'basic' | 'custom';
+    entries?: CatalogEntry[];
+  };
+  index: {
+    catalog_version: 1;
+    catalog_name: string;
+    source_repository: string;
+    source_ref: string;
+    resources: unknown[];
+  };
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+function collectionData(resources: CatalogResource[], sources: SourceConfiguration[], selectors: string[]) {
+  const byKey = new Map<string, CatalogResource>(
+    resources.map((resource): [string, CatalogResource] => [
+      `${resource.catalog}:${resource.kind}:${resource.id}`,
+      resource,
+    ]),
+  );
   const selected = selectors.map((selector) => {
     const resource = byKey.get(selector);
     if (!resource) throw new CatalogError(`Collection resource is not available: ${selector}`, 'RESOURCE_NOT_FOUND');
     return resource;
   });
   if (!selected.length) throw new CatalogError('A resource collection must select at least one resource');
+  /** @type {Map<string, CollectionDataCatalog>} */
   const grouped = new Map();
   for (const resource of selected) {
     const source = sources.find(({ name }) => name === resource.catalog);
     if (!source) throw new CatalogError(`Resource catalog is not configured: ${resource.catalog}`);
-    if (!/^[a-f0-9]{40}$/i.test(resource.source_ref || '')) {
+    const sourceRef = resource.source_ref || '';
+    if (!/^[a-f0-9]{40}$/i.test(sourceRef)) {
       throw new CatalogError(`Resource has no full commit pin: ${resource.catalog}:${resource.kind}:${resource.id}`);
     }
     const existing = grouped.get(source.name);
-    if (existing && existing.source_ref.toLowerCase() !== resource.source_ref.toLowerCase()) {
+    if (existing && existing.source_ref.toLowerCase() !== sourceRef.toLowerCase()) {
       throw new CatalogError(`Catalog ${source.name} has resources pinned to different commits`);
     }
     const catalog = existing || {
@@ -28,7 +80,7 @@ function collectionData(resources, sources, selectors) {
       repository: source.repository,
       mode: source.mode,
       ...(source.mode === 'custom' ? { entries: source.entries } : {}),
-      source_ref: resource.source_ref.toLowerCase(),
+      source_ref: sourceRef.toLowerCase(),
       resources: [],
     };
     catalog.resources.push({
@@ -43,28 +95,27 @@ function collectionData(resources, sources, selectors) {
   }
   return { collection_version: 1, catalogs: [...grouped.values()] };
 }
-function validateCollectionManifest(input) {
+/** @param {unknown} input */
+function validateCollectionManifest(input: unknown): ValidatedCollectionCatalog[] {
+  const value = isRecord(input) ? input : undefined;
   const allowedRootKeys = new Set(['collection_version', 'catalogs', 'signature']);
   if (
-    !input ||
-    typeof input !== 'object' ||
-    Array.isArray(input) ||
-    input.collection_version !== 1 ||
-    Object.keys(input).some((key) => !allowedRootKeys.has(key)) ||
-    !Array.isArray(input.catalogs) ||
-    !input.catalogs.length
+    !value ||
+    value.collection_version !== 1 ||
+    Object.keys(value).some((key) => !allowedRootKeys.has(key)) ||
+    !Array.isArray(value.catalogs) ||
+    !value.catalogs.length
   ) {
     throw new CatalogError('Resource collection must have collection_version: 1 and a non-empty catalogs array');
   }
-  if (Object.hasOwn(input, 'signature')) validateCollectionSignatureEnvelope(input.signature);
+  if (Object.hasOwn(value, 'signature')) validateCollectionSignatureEnvelope(value.signature);
   const names = new Set();
   const repositories = new Set();
-  const validated = input.catalogs.map((entry, index) => {
+  const catalogs: unknown[] = value.catalogs;
+  const validated = catalogs.map((entry, index) => {
     const label = `collection catalogs[${index}]`;
     if (
-      !entry ||
-      typeof entry !== 'object' ||
-      Array.isArray(entry) ||
+      !isRecord(entry) ||
       Object.keys(entry).some(
         (key) => !['name', 'repository', 'mode', 'entries', 'source_ref', 'resources'].includes(key),
       )
@@ -81,16 +132,15 @@ function validateCollectionManifest(input) {
     }
     names.add(nameKey);
     repositories.add(source.repositoryId);
-    if (!/^[a-f0-9]{40}$/i.test(entry.source_ref || '')) {
+    const sourceRef = entry.source_ref;
+    if (typeof sourceRef !== 'string' || !/^[a-f0-9]{40}$/i.test(sourceRef)) {
       throw new CatalogError(`${label}.source_ref must be a full 40-character commit SHA`);
     }
     if (
       !Array.isArray(entry.resources) ||
       entry.resources.some(
-        (resource) =>
-          !resource ||
-          typeof resource !== 'object' ||
-          Array.isArray(resource) ||
+        (resource: unknown) =>
+          !isRecord(resource) ||
           Object.keys(resource).some(
             (key) => !['kind', 'id', 'source_path', 'description', 'license_status', 'apply_to'].includes(key),
           ),
@@ -98,11 +148,11 @@ function validateCollectionManifest(input) {
     ) {
       throw new CatalogError(`${label}.resources must contain only resource references and metadata`);
     }
-    const indexData = {
+    const indexData: ValidatedCollectionCatalog['index'] = {
       catalog_version: 1,
       catalog_name: source.name,
       source_repository: source.repositoryId,
-      source_ref: entry.source_ref.toLowerCase(),
+      source_ref: sourceRef.toLowerCase(),
       resources: entry.resources,
     };
     const resources = validateSourceCatalog(indexData, {
@@ -123,6 +173,4 @@ function validateCollectionManifest(input) {
   return validated;
 }
 
-module.exports = { collectionData, validateCollectionManifest };
-
-export {};
+export { collectionData, validateCollectionManifest };

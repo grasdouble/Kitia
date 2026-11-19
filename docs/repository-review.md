@@ -182,15 +182,15 @@ Priority ladder: **P1** release/CI or data-integrity risks; **P2** behavioral/re
 
 **Focused verification:** Confirm the command exists, is reached by `pnpm test` and CI, validates report schemas/baselines, and all contributor paths resolve.
 
-### Strict TypeScript checking is a narrow boundary (proposal)
+### Production TypeScript and type assertions use separate strict projects
 
-**Evidence:** [`tsconfig.strict.json:11–17`](../tsconfig.strict.json#L11) names five roots. Strict checking covers those roots and their import closures, not the entire project; the main config has `strict: false` ([`tsconfig.json:8–12`](../tsconfig.json#L8)).
+**Evidence:** [`tsconfig.json`](../tsconfig.json) applies `strict: true` to production sources. [`tsconfig.type-tests.json`](../tsconfig.type-tests.json) extends that project, sets `noEmit: true`, includes TypeScript test roots, and clears the inherited production-test exclusion.
 
-**Impact:** Strictness regressions outside the configured import closures are not caught by `typecheck:strict`.
+**Impact:** Production sources are checked strictly in the default project; type-only tests are checked separately without producing output.
 
-**Recommendation:** Expand strict coverage incrementally or add focused strict projects for additional areas.
+**Recommendation:** Keep the type-test project focused on test roots and avoid duplicating production compiler options.
 
-**Focused verification:** Inspect the strict project's resolved files and confirm representative additional modules are included as coverage expands.
+**Focused verification:** Run `pnpm run typecheck:tests` for type assertions and `pnpm run cli:build` for production sources.
 
 ### Inventory model test asserts source text rather than type behavior (proposal)
 

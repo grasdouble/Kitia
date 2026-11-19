@@ -904,9 +904,9 @@ export async function runDashboard(
 
   return new Promise((resolve, reject) => {
     const transport = createDashboardInputTransport(input, output);
-    let app;
+    let app: ReturnType<typeof render> | undefined;
     let finished = false;
-    const onFinish = (success) => {
+    const onFinish = (success: boolean) => {
       if (finished) return;
       finished = true;
       input.removeListener('close', onInputClose);

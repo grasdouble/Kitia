@@ -1,16 +1,33 @@
-'use strict';
+import fs from 'node:fs';
+import os from 'node:os';
 
-import type { CatalogResource, ResourceKind } from '../resources/model.js';
-const { CatalogError, USER_INSTALLABLE_KINDS } = require('../resources/model.js');
-const { resolveCatalogResource } = require('../resources/selection.js');
-const { catalogEntries } = require('../resources/queries.js');
-const {
+import type { AuditResult } from '../inspection/audit.js';
+import { auditPreparedSourceFile } from '../inspection/pinned-preview.js';
+import {
   readInstalledSourceSkills,
   readInstalledSourceResources,
   sourceCatalogName,
   recordSourceInstallation,
-} = require('../inventory/inventory.js');
-const {
+} from '../inventory/inventory.js';
+import type { InstalledSourceResource } from '../inventory/inventory.js';
+import { preparePinnedSourceFile } from '../resources/content.js';
+import { resolveSourceVersionPrefix, listSourceVersions } from '../resources/history.js';
+import type { CatalogResource, ResourceKind } from '../resources/model.js';
+import { CatalogError, USER_INSTALLABLE_KINDS } from '../resources/model.js';
+import { catalogEntries } from '../resources/queries.js';
+import { resolveCatalogResource } from '../resources/selection.js';
+import { targetPath } from './files.js';
+import type { GhSkillResult, SourceSkillResource } from './gh-skill.js';
+import {
+  runGhSkill,
+  buildSourceSkillArgs,
+  runGhSkillAsync,
+  formatGhDiagnostics,
+  describeGhFailure,
+} from './gh-skill.js';
+import type { InstallationTool, InstallationScope, PlanAction } from './model.js';
+import { SOURCE_SKILL_DIRECTORIES } from './model.js';
+import {
   uninstallSourceResource,
   validateSourceUpdates,
   updateSourceResourcesAsync,
@@ -18,25 +35,7 @@ const {
   assertSourceResourceCanBeInstalled,
   installSourceFileResource,
   catalogLabel,
-} = require('./mutations.js');
-const { resolveSourceVersionPrefix, listSourceVersions } = require('../resources/history.js');
-import type { AuditResult } from '../inspection/audit.js';
-import type { InstallationTool, InstallationScope, PlanAction } from './model.js';
-const { SOURCE_SKILL_DIRECTORIES } = require('./model.js');
-const { targetPath } = require('./files.js');
-import type { GhSkillResult } from './gh-skill.js';
-const {
-  runGhSkill,
-  buildSourceSkillArgs,
-  runGhSkillAsync,
-  formatGhDiagnostics,
-  describeGhFailure,
-} = require('./gh-skill.js');
-const { auditPreparedSourceFile } = require('../inspection/pinned-preview.js');
-const { preparePinnedSourceFile } = require('../resources/content.js');
-
-const fs = require('node:fs');
-const os = require('node:os');
+} from './mutations.js';
 export interface InstallationMessage {
   level: 'log' | 'error';
   text: string;
@@ -123,7 +122,7 @@ async function executeInstallationOperation(
     resources: CatalogResource[],
     request: InstallationRequest,
   ) => Promise<CatalogResource | null> = async (resources, request) =>
-    request.resource || resolveCatalogResource(resources, request.id, request.kind),
+    request.resource || resolveCatalogResource(resources, request.id!, request.kind),
 ): Promise<InstallationResult> {
   const messages: InstallationResult['messages'] = [];
   const emit = (level: InstallationMessage['level'], text: string) => {
@@ -168,11 +167,11 @@ async function executeInstallationOperation(
   }
   if (options.operation === 'update') {
     const target = fs.realpathSync(options.target);
-    const installed = [
+    const installed: InstalledSourceResource[] = [
       ...readInstalledSourceSkills(target, sourceResources, { catalog: options.catalog }),
       ...readInstalledSourceResources(target, sourceResources, { catalog: options.catalog }),
     ];
-    let sourceToUpdate = options.id
+    let sourceToUpdate: InstalledSourceResource[] = options.id
       ? installed.filter(
           ({ resource }) => resource.id === options.id && (!options.kind || resource.kind === options.kind),
         )
@@ -196,6 +195,7 @@ async function executeInstallationOperation(
       );
     }
     if (options.ref) {
+      const ref = options.ref;
       if (sourceToUpdate.some(({ resource }) => !resource.source_repository || !resource.source_path)) {
         throw new CatalogError('--ref supports only GitHub source resources.');
       }
@@ -203,7 +203,7 @@ async function executeInstallationOperation(
         ...entry,
         resource: {
           ...entry.resource,
-          source_ref: resolveListedSourceRef(entry.resource, options.ref),
+          source_ref: resolveListedSourceRef(entry.resource, ref),
         },
       }));
     }
@@ -219,7 +219,7 @@ async function executeInstallationOperation(
         source: true,
       });
     }
-    const updates = options.nonInteractive
+    const updates: string[] = options.nonInteractive
       ? await updateSourceResourcesAsync(sourceToUpdate, target, options)
       : updateSourceResources(sourceToUpdate, target, options);
     updates.forEach((message) => output.log(message));
@@ -280,7 +280,7 @@ async function executeInstallationOperation(
         validateSourceUpdates([replacement], { ...options, target });
         const preparedSourceFile = prepareSourceOperation(replacement.resource, 'install', options);
         const updateOptions = { ...options, preparedSourceFile };
-        const updates = options.nonInteractive
+        const updates: string[] = options.nonInteractive
           ? await updateSourceResourcesAsync([replacement], target, updateOptions)
           : updateSourceResources([replacement], target, updateOptions);
         updates.forEach((message) => output.log(message));
@@ -344,9 +344,10 @@ function runSourceOperation(
     assertSourceResourceCanBeInstalled(resource, target);
   }
   if (options.action === 'install') {
-    if (resource.license_status.toLocaleLowerCase() === 'proprietary') {
+    const licenseStatus = resource.license_status as string;
+    if (licenseStatus.toLocaleLowerCase() === 'proprietary') {
       output.error(`Warning: ${resource.id} is marked Proprietary; confirm you are authorized before installing.`);
-    } else if (resource.license_status === 'not-declared') {
+    } else if (licenseStatus === 'not-declared') {
       output.error(`Warning: ${resource.id} has no declared license; verify usage rights before installing.`);
     }
   }
@@ -358,7 +359,7 @@ function runSourceOperation(
   );
   if (resource.kind !== 'skill') {
     if (options.action === 'preview') {
-      const content = prepared.content;
+      const content = prepared!.content;
       let markdown;
       try {
         markdown = new TextDecoder('utf-8', { fatal: true }).decode(content);
@@ -380,7 +381,8 @@ function runSourceOperation(
     );
     return finish(0);
   }
-  const agents =
+  const skillResource = resource as SourceSkillResource;
+  const agents: (keyof typeof SOURCE_SKILL_DIRECTORIES)[] =
     options.tool === 'both'
       ? ['github-copilot', 'claude-code']
       : [options.tool === 'claude' ? 'claude-code' : 'github-copilot'];
@@ -394,7 +396,7 @@ function runSourceOperation(
         action: 'delegate_install',
         path: `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`,
         resource: { catalog: sourceCatalogName(resource), kind: 'skill', id: resource.id },
-        command: { program: 'gh', args: buildSourceSkillArgs('install', resource, agent, options) },
+        command: { program: 'gh', args: buildSourceSkillArgs('install', skillResource, agent, options) },
       });
     }
     output.error(
@@ -405,7 +407,7 @@ function runSourceOperation(
   if (options.action === 'preview' || options.dryRun) {
     if (options.dryRun)
       output.error(`Dry run: previewing the ${catalogLabel(resource)} skill; no files will be installed.`);
-    const result = invokeGhSkill(buildSourceSkillArgs('preview', resource), target);
+    const result = invokeGhSkill(buildSourceSkillArgs('preview', skillResource), target);
     if (typeof result !== 'number' && options.captureOutput) {
       if (result.stdout) output.log(String(result.stdout));
       if (result.stderr) output.error(String(result.stderr));
@@ -421,7 +423,7 @@ function runSourceOperation(
         ? ` Already installed for ${completed.join(', ')}. Those installations remain in place.`
         : ' No agents were confirmed installed before this failure.';
       try {
-        result = yield buildSourceSkillArgs('install', resource, agent, options);
+        result = yield buildSourceSkillArgs('install', skillResource, agent, options);
       } catch (error) {
         const code = (error as Error & { code?: string }).code;
         if (code !== 'GH_SPAWN_FAILED' && code !== 'GH_TIMEOUT') throw error;
@@ -464,7 +466,8 @@ function runSourceOperation(
         }
         step = installation.next(result);
       }
-      return step.value;
+      const completedStep = step as IteratorReturnResult<InstallationResult>;
+      return completedStep.value;
     })();
   }
   let step = installation.next();
@@ -478,10 +481,11 @@ function runSourceOperation(
     }
     step = installation.next(result);
   }
-  return step.value;
+  const completedStep = step as IteratorReturnResult<InstallationResult>;
+  return completedStep.value;
 }
 
-function resolveListedSourceRef(resource, ref) {
+function resolveListedSourceRef(resource: CatalogResource, ref: string): string {
   if (!resource.source_repository || !resource.source_path) {
     throw new CatalogError('--ref supports only GitHub source resources.');
   }
@@ -489,14 +493,15 @@ function resolveListedSourceRef(resource, ref) {
   try {
     return resolveSourceVersionPrefix(listSourceVersions(resource), ref);
   } catch (error) {
-    if (error.code === 'RESOURCE_NOT_FOUND' || error.code === 'AMBIGUOUS_RESOURCE') {
+    const historyError = error as Error & { code: string };
+    if (historyError.code === 'RESOURCE_NOT_FOUND' || historyError.code === 'AMBIGUOUS_RESOURCE') {
       throw new CatalogError(
-        `${error.message.replace(/ in source history\.$/, ` for ${resource.catalog}:${resource.kind}:${resource.id}.`)}`,
-        error.code,
+        `${historyError.message.replace(/ in source history\.$/, ` for ${resource.catalog}:${resource.kind}:${resource.id}.`)}`,
+        historyError.code,
       );
     }
     throw error;
   }
 }
 
-module.exports = { executeInstallationOperation, runSourceOperation };
+export { executeInstallationOperation, runSourceOperation };

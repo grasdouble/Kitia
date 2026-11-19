@@ -1,27 +1,36 @@
-'use strict';
+import type { SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 
-const { loadUserSourceConfiguration } = require('../catalogs/config.js');
-const { readInstallState } = require('../inventory/inventory.js');
-const { inspectOperationLock, OPERATION_LOCK } = require('../installations/lock.js');
-
-const fs = require('node:fs');
-const { spawnSync } = require('node:child_process');
+import { loadUserSourceConfiguration } from '../catalogs/config.js';
+import type { SourceConfiguration } from '../catalogs/model.js';
+import { inspectOperationLock, OPERATION_LOCK } from '../installations/lock.js';
+import { readInstallState } from '../inventory/inventory.js';
+type DiagnosticCheck = {
+  id: string;
+  status: 'ok' | 'error' | 'warning' | 'skipped';
+  message: string;
+};
+type ProbeResult = { status: number | null; stdout: string; stderr: string };
+/** @param {{ target?: string; network?: boolean }} [options] @param {(command: string, args: string[], options: SpawnSyncOptionsWithStringEncoding) => ProbeResult} [spawn] */
 function diagnose({ target = '.', network = false } = {}, spawn = spawnSync) {
-  const checks = [];
-  const add = (id, status, message) => checks.push({ id, status, message });
-  let sources = [];
+  /** @type {DiagnosticCheck[]} */
+  const checks: DiagnosticCheck[] = [];
+  const add = (id: string, status: DiagnosticCheck['status'], message: string) => checks.push({ id, status, message });
+  let sources: SourceConfiguration[] = [];
   try {
     sources = loadUserSourceConfiguration();
     add('source-config', 'ok', `Loaded ${sources.length} configured skill source(s).`);
   } catch (error) {
-    add('source-config', 'error', error.message);
+    const { message } = error as { message: string };
+    add('source-config', 'error', message);
   }
   add(
     'node',
     Number(process.versions.node.split('.')[0]) >= 26 ? 'ok' : 'error',
     `Node.js ${process.versions.node}; version 26 or later is required.`,
   );
-  const probe = (command, args) =>
+  const probe = (command: string, args: string[]) =>
     spawn(command, args, {
       encoding: 'utf8',
       timeout: 10000,
@@ -68,7 +77,8 @@ function diagnose({ target = '.', network = false } = {}, spawn = spawnSync) {
           : `An active or unknown operation lock exists (${OPERATION_LOCK}); do not remove it while an operation may be running.`,
     );
   } catch (error) {
-    add('target-inventory', 'error', error.message);
+    const { message } = error as { message: string };
+    add('target-inventory', 'error', message);
   }
   if (network && gh.status === 0) {
     const auth = probe('gh', ['auth', 'status', '--active']);
@@ -80,7 +90,7 @@ function diagnose({ target = '.', network = false } = {}, spawn = spawnSync) {
         : 'Authenticate GitHub CLI with access to the required repositories.',
     );
     if (auth.status === 0) {
-      const repositories = [...new Set(sources.map((source) => source.repositoryId))];
+      const repositories = [...new Set(sources.map((source: SourceConfiguration) => source.repositoryId))];
       for (const repository of repositories) {
         const access = probe('gh', ['api', '--hostname', 'github.com', `repos/${repository}`, '--silent']);
         add(
@@ -107,6 +117,4 @@ function diagnose({ target = '.', network = false } = {}, spawn = spawnSync) {
   };
 }
 
-module.exports = { diagnose };
-
-export {};
+export { diagnose };

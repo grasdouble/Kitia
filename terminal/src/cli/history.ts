@@ -1,11 +1,14 @@
-'use strict';
+import { uniqueSourceVersionPrefixes } from '../core/resources/history.js';
+import { adaptiveColumnWidths } from '../table-layout.js';
+import type { SourceVersionOption } from '../tui/contracts.js';
 
-const { uniqueSourceVersionPrefixes } = require('../core/resources/history.js');
-const { adaptiveColumnWidths } = require('../table-layout.js');
-function formatSourceVersionTable(versions, terminalWidth) {
-  const prefixes = uniqueSourceVersionPrefixes(versions);
+function formatSourceVersionTable(
+  versions: Pick<SourceVersionOption, 'sha' | 'date' | 'subject'>[],
+  terminalWidth?: number,
+) {
+  const prefixes: string[] = uniqueSourceVersionPrefixes(versions);
   const interactive = Number.isFinite(terminalWidth);
-  const shaContentWidth = Math.max(3, ...prefixes.map((prefix) => prefix.length));
+  const shaContentWidth = Math.max(3, ...prefixes.map((prefix: string) => prefix.length));
   const dates = versions.map(({ date }) => (interactive ? date.slice(0, 10) : date));
   const dateContentWidth = Math.max(10, ...dates.map((date) => date.length));
   const subjectContentWidth = Math.max(7, ...versions.map(({ subject }) => subject.length));
@@ -24,7 +27,7 @@ function formatSourceVersionTable(versions, terminalWidth) {
     ],
     2,
   );
-  const fit = (value, width) => {
+  const fit = (value: string, width: number) => {
     const text = String(value);
     return text.length > width ? `${text.slice(0, Math.max(0, width - 3))}...` : text.padEnd(width);
   };
@@ -40,4 +43,4 @@ function formatSourceVersionTable(versions, terminalWidth) {
   return rows;
 }
 
-module.exports = { formatSourceVersionTable };
+export { formatSourceVersionTable };

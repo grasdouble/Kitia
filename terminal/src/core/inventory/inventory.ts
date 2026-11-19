@@ -1,25 +1,23 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-import type { CatalogResource } from '../resources/model.js';
-const { CatalogError, rejectUnsupportedVersion, RESOURCE_ID } = require('../resources/model.js');
-import type { InstallState, SourceResourceInventoryRecord, FileFingerprint } from './model.js';
-const {
+import {
   installedFingerprint,
   sameFingerprint,
   addInventoryStateToPlan,
   writeInstallPlan,
   targetPath,
-} = require('../installations/files.js');
+} from '../installations/files.js';
+import { SOURCE_SKILL_DIRECTORIES } from '../installations/model.js';
 import type { InstallPlanEntry } from '../installations/plan.js';
-const { SOURCE_SKILL_DIRECTORIES } = require('../installations/model.js');
-const { LOCK_PATH } = require('./model.js');
-const { CURRENT_INVENTORY_VERSION } = require('./version.js');
+import { readUtf8 } from '../resources/content.js';
+import { parseFrontmatter } from '../resources/frontmatter.js';
 import { isJsonObject } from '../resources/json.js';
-const { parseFrontmatter } = require('../resources/frontmatter.js');
-const { readUtf8 } = require('../resources/content.js');
-
-const fs = require('node:fs');
-const path = require('node:path');
+import type { CatalogResource } from '../resources/model.js';
+import { CatalogError, rejectUnsupportedVersion, RESOURCE_ID } from '../resources/model.js';
+import type { InstallState, SourceResourceInventoryRecord, FileFingerprint } from './model.js';
+import { LOCK_PATH } from './model.js';
+import { CURRENT_INVENTORY_VERSION } from './version.js';
 const CATALOG_NAME = 'grasdouble/Kitia';
 
 function isFileFingerprint(value: unknown): value is FileFingerprint {
@@ -51,7 +49,7 @@ function readInstallState(targetRoot: string): InstallState {
   try {
     parsed = JSON.parse(readUtf8(lockFile, 'Installation state'));
   } catch (error) {
-    throw new CatalogError(`Cannot read ${LOCK_PATH}: ${error.message}`);
+    throw new CatalogError(`Cannot read ${LOCK_PATH}: ${(error as Error).message}`);
   }
   const fail = (): never => {
     throw new CatalogError(
@@ -80,24 +78,27 @@ function readInstallState(targetRoot: string): InstallState {
       'UNSUPPORTED_INVENTORY_VERSION',
     );
   }
+  const sourcesValue = state.sources;
   if (
     Object.keys(state).some((key) => !['lock_version', 'catalog', 'sources'].includes(key)) ||
-    !isJsonObject(state.sources)
+    !isJsonObject(sourcesValue)
   )
-    fail();
-  const sources = state.sources;
+    return fail();
+  const sources = sourcesValue;
   for (const [catalog, collectionsValue] of Object.entries(sources)) {
-    if (!validSourceCatalogName(catalog) || !isJsonObject(collectionsValue)) fail();
-    for (const [collection, recordsValue] of Object.entries(collectionsValue)) {
+    if (!validSourceCatalogName(catalog) || !isJsonObject(collectionsValue)) return fail();
+    const collections = collectionsValue;
+    for (const [collection, recordsValue] of Object.entries(collections)) {
       if (!['skills', 'agents', 'instructions'].includes(collection)) {
         throw new CatalogError(
           `Source inventory contains unsupported resource collection '${collection}'. Use a compatible CLI version; do not rewrite the inventory.`,
           'UNSUPPORTED_RESOURCE_KIND',
         );
       }
-      if (!isJsonObject(recordsValue)) fail();
+      if (!isJsonObject(recordsValue)) return fail();
+      const records = recordsValue;
       const kind = collection.slice(0, -1);
-      for (const [id, recordValue] of Object.entries(recordsValue)) {
+      for (const [id, recordValue] of Object.entries(records)) {
         const record = isJsonObject(recordValue) ? recordValue : fail();
         if (Object.keys(record).some((field) => !SOURCE_RECORD_FIELDS.has(field))) fail();
         const sourcePath = record.source_path;
@@ -140,7 +141,7 @@ function readInstallState(targetRoot: string): InstallState {
                 relativePath.split('/').every((part) => part && part !== '.' && part !== '..')
               );
             });
-          if ((kind === 'skill' ? !validSkillFile : !allowedPaths.has(relativePath)) || !isFileFingerprint(file))
+          if ((kind === 'skill' ? !validSkillFile : !allowedPaths?.has(relativePath)) || !isFileFingerprint(file))
             fail();
           if (
             kind === 'skill' &&
@@ -305,7 +306,7 @@ function readInstalledSourceResources(
       try {
         current = installedFingerprint(targetRoot, relativePath);
       } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       installations.push({
         agent: relativePath.includes('.claude/') ? 'claude' : 'copilot',
@@ -331,9 +332,9 @@ function setSourceResourceRecord(
   state.sources[sourceCatalogName(resource)] ||= {};
   state.sources[sourceCatalogName(resource)][collectionName] ||= {};
   state.sources[sourceCatalogName(resource)][collectionName][resource.id] = {
-    source_repository: resource.source_repository,
-    source_path: resource.source_path,
-    source_ref: resource.source_ref,
+    source_repository: resource.source_repository!,
+    source_path: resource.source_path!,
+    source_ref: resource.source_ref!,
     ...(resource.apply_to ? { apply_to: resource.apply_to } : {}),
     license_status: resource.license_status,
     files,
@@ -388,7 +389,7 @@ function readInstalledSourceSkills(
       try {
         stat = fs.lstatSync(skillFile);
       } catch (error) {
-        if (error.code === 'ENOENT') {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
           if (trackedFiles.length) {
             installations.push({
               agent,
@@ -414,7 +415,7 @@ function readInstalledSourceSkills(
       }
       const provenanceMatches =
         metadata instanceof Map &&
-        matchesSourceRepository(metadata.get('github-repo'), resource.source_repository) &&
+        matchesSourceRepository(metadata.get('github-repo'), resource.source_repository!) &&
         metadata.get('github-path') === resource.source_path;
       if (!(metadata instanceof Map)) metadata = undefined;
       if (!provenanceMatches && !trackedFiles.length) continue;
@@ -427,7 +428,7 @@ function readInstalledSourceSkills(
         try {
           current = installedFingerprint(targetRoot, trackedPath);
         } catch (error) {
-          if (error.code !== 'ENOENT') throw error;
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         }
         if (!current) missing = true;
         else if (!sameFingerprint(current, expectedFingerprint)) modified = true;
@@ -484,7 +485,7 @@ function recordSourceInstallation(resource: CatalogResource, target: string, age
     !installation ||
     installation.missing ||
     !installation.provenanceMatches ||
-    installation.ref?.toLowerCase() !== resource.source_ref.toLowerCase()
+    installation.ref?.toLowerCase() !== resource.source_ref!.toLowerCase()
   ) {
     throw new CatalogError(
       `GitHub CLI reported a successful ${agent} installation for ${resource.id}, but no provenance-matched SKILL.md at the requested commit was found.`,
@@ -498,15 +499,17 @@ function recordSourceInstallation(resource: CatalogResource, target: string, age
   const runtimePrefix = `${skillDirectory}/`;
   for (const filePath of Object.keys(files)) if (filePath.startsWith(runtimePrefix)) delete files[filePath];
   for (const filePath of installedSkillFiles(targetRoot, skillDirectory)) {
-    files[filePath] = installedFingerprint(targetRoot, filePath);
+    const fingerprint = installedFingerprint(targetRoot, filePath);
+    if (!fingerprint) throw new CatalogError(`Installed source file disappeared: ${filePath}`);
+    files[filePath] = fingerprint;
   }
   state.sources ||= {};
   state.sources[sourceCatalogName(resource)] ||= {};
   state.sources[sourceCatalogName(resource)].skills ||= {};
   state.sources[sourceCatalogName(resource)].skills[resource.id] = {
-    source_repository: resource.source_repository,
-    source_path: resource.source_path,
-    source_ref: resource.source_ref,
+    source_repository: resource.source_repository!,
+    source_path: resource.source_path!,
+    source_ref: resource.source_ref!,
     files,
   };
   const plan = new Map<string, InstallPlanEntry>();
@@ -514,12 +517,12 @@ function recordSourceInstallation(resource: CatalogResource, target: string, age
   writeInstallPlan(plan, targetRoot, { force: true });
 }
 
-function sourceResourcesFromInventory(state) {
+function sourceResourcesFromInventory(state: InstallState): CatalogResource[] {
   return [...sourceResourceRecords(state)].map(([key, record]) => {
     const [catalog, kind, id] = key.split(':');
     return {
       id,
-      kind,
+      kind: kind as CatalogResource['kind'],
       catalog,
       source_repository: record.source_repository,
       source_path: record.source_path,
@@ -560,12 +563,12 @@ function prepareTrackedResources(
     installedCatalogs,
     resources: sourceResourcesFromInventory(state).filter(
       (resource) =>
-        names.includes(resource.catalog) && (!id || resource.id === id) && (!kind || resource.kind === kind),
+        names.includes(resource.catalog!) && (!id || resource.id === id) && (!kind || resource.kind === kind),
     ),
   };
 }
 
-module.exports = {
+export {
   readInstallState,
   sourceResourcesFromInventory,
   prepareTrackedResources,

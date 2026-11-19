@@ -1,36 +1,54 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const {
-  loadUserSourceConfiguration,
+import type { CatalogResource } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
+import {
   userCatalogIndexDirectory,
   userCatalogSourcesFile,
   userCatalogDirectory,
   catalogIndexFileName,
-} = require('./config.js');
-const {
-  isValidCatalogName,
-  isReservedCatalogName,
-  repositoryId,
+  loadUserSourceConfiguration,
+} from './config.js';
+import type { CatalogEntry, SourceConfiguration, UserCatalog } from './model.js';
+import {
   catalogNameKey,
+  isReservedCatalogName,
+  isValidCatalogName,
+  repositoryId,
   validateSourceConfiguration,
-} = require('./model.js');
-const { CatalogError } = require('../resources/model.js');
-const { fetchSourceIndex, remoteHead } = require('./repository.js');
+} from './model.js';
+import { fetchSourceIndex, remoteHead } from './repository.js';
 
-const fs = require('node:fs');
-const path = require('node:path');
-function writeJson(file, value) {
+type CatalogConfiguration = { mode?: 'basic' | 'custom'; entries?: CatalogEntry[] };
+type SourceIndex = {
+  catalog_version: 1;
+  catalog_name: string;
+  source_repository: string;
+  source_ref: string;
+  resources: CatalogResource[];
+};
+type CatalogImportResult = {
+  added: string[];
+  ignored: { name: string; reason: string }[];
+  refreshed: { name: string; count: number }[];
+  refreshFailures: { name: string; message: string }[];
+};
+function readUserSources(): SourceConfiguration[] {
+  return loadUserSourceConfiguration();
+}
+function writeJson(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temporary, file);
 }
-function writeCatalogIndex(directory, name, index) {
+function writeCatalogIndex(directory: string, name: string, index: unknown): void {
   const canonical = path.join(directory, catalogIndexFileName(name));
   writeJson(canonical, index);
   removeLegacyCatalogIndexes(directory, name, canonical);
 }
-function removeLegacyCatalogIndexes(directory, name, canonicalPath) {
+function removeLegacyCatalogIndexes(directory: string, name: string, canonicalPath: string): void {
   if (!fs.existsSync(directory)) return;
   const legacyNames = fs
     .readdirSync(directory)
@@ -42,7 +60,7 @@ function removeLegacyCatalogIndexes(directory, name, canonicalPath) {
   }
 }
 
-function catalogIndexPath(directory, name) {
+function catalogIndexPath(directory: string, name: string): string {
   const canonical = path.join(directory, catalogIndexFileName(name));
   if (fs.existsSync(canonical)) return canonical;
   const legacyNames = fs
@@ -53,13 +71,17 @@ function catalogIndexPath(directory, name) {
   return path.join(directory, legacyNames[0] || `${name}.json`);
 }
 
-function removeCatalogIndexes(directory, name) {
+function removeCatalogIndexes(directory: string, name: string): void {
   const canonical = path.join(directory, catalogIndexFileName(name));
   if (fs.existsSync(canonical)) fs.rmSync(canonical);
   removeLegacyCatalogIndexes(directory, name, canonical);
 }
 
-function addCatalog(name, repository, configuration = { mode: 'basic', entries: [] }) {
+function addCatalog(
+  name: string,
+  repository: string,
+  configuration: CatalogConfiguration = { mode: 'basic', entries: [] },
+): SourceIndex {
   name = typeof name === 'string' ? name.trim() : name;
   if (!isValidCatalogName(name) || isReservedCatalogName(name)) {
     throw new CatalogError('Catalog name must be valid and cannot use the reserved catalogSources registry name');
@@ -76,7 +98,7 @@ function addCatalog(name, repository, configuration = { mode: 'basic', entries: 
   ) {
     throw new CatalogError('Catalog configuration must use basic mode or custom mode with explicit entries');
   }
-  const current = loadUserSourceConfiguration();
+  const current = readUserSources();
   if (current.some((source) => catalogNameKey(source.name) === catalogNameKey(name))) {
     throw new CatalogError(`Catalog already exists: ${name}`);
   }
@@ -90,7 +112,7 @@ function addCatalog(name, repository, configuration = { mode: 'basic', entries: 
     mode,
     entries: configuration.entries || [],
   };
-  const priorUserSources = require('./config.js').loadUserSourceConfiguration();
+  const priorUserSources = readUserSources();
   const validated = validateSourceConfiguration({
     catalog_version: 1,
     sources: [
@@ -103,6 +125,7 @@ function addCatalog(name, repository, configuration = { mode: 'basic', entries: 
     ],
   });
   const normalized = validated.at(-1);
+  if (!normalized) throw new CatalogError('Catalog source validation returned no source.');
   const index = fetchSourceIndex(normalized);
   const userSources = [...priorUserSources, source].map(
     ({ name: sourceName, repository: sourceRepository, mode: sourceMode, entries }) => ({
@@ -123,7 +146,12 @@ function addCatalog(name, repository, configuration = { mode: 'basic', entries: 
   return index;
 }
 
-function updateCatalog(originalName, name, repository, configuration = { mode: 'basic', entries: [] }) {
+function updateCatalog(
+  originalName: string,
+  name: string,
+  repository: string,
+  configuration: CatalogConfiguration = { mode: 'basic', entries: [] },
+): SourceIndex {
   name = typeof name === 'string' ? name.trim() : name;
   if (!isValidCatalogName(name) || isReservedCatalogName(name)) {
     throw new CatalogError('Catalog name must be valid and cannot use the reserved catalogSources registry name');
@@ -141,7 +169,7 @@ function updateCatalog(originalName, name, repository, configuration = { mode: '
     throw new CatalogError('Catalog configuration must use basic mode or custom mode with explicit entries');
   }
 
-  const userSources = require('./config.js').loadUserSourceConfiguration();
+  const userSources = readUserSources();
   const original = userSources.find(
     ({ name: sourceName }) => catalogNameKey(sourceName) === catalogNameKey(originalName),
   );
@@ -188,8 +216,11 @@ function updateCatalog(originalName, name, repository, configuration = { mode: '
   return index;
 }
 
-function refreshCatalogs(names) {
-  const userSources = require('./config.js').loadUserSourceConfiguration();
+function refreshCatalogs(names?: string[]): {
+  refreshed: { name: string; count: number }[];
+  failures: { name: string; message: string }[];
+} {
+  const userSources = readUserSources();
   const selected =
     names === undefined
       ? userSources
@@ -199,8 +230,8 @@ function refreshCatalogs(names) {
           return source;
         });
   if (!selected.length) throw new CatalogError('No user catalogs are configured to refresh');
-  const refreshed = [];
-  const failures = [];
+  const refreshed: { name: string; count: number }[] = [];
+  const failures: { name: string; message: string }[] = [];
   for (const source of selected) {
     try {
       const index = fetchSourceIndex(source);
@@ -218,8 +249,11 @@ function refreshCatalogs(names) {
   return { refreshed, failures };
 }
 
-async function checkCatalogFreshness(run = undefined, names) {
-  const sources = require('./config.js').loadUserSourceConfiguration();
+async function checkCatalogFreshness(
+  run: Parameters<typeof remoteHead>[1] | undefined = undefined,
+  names?: string[],
+): Promise<{ name: string; status: 'unknown' | 'current' | 'outdated' }[]> {
+  const sources = readUserSources();
   const selected =
     names === undefined
       ? sources
@@ -231,11 +265,14 @@ async function checkCatalogFreshness(run = undefined, names) {
         const indexFile = catalogIndexPath(directory, source.name);
         const stat = fs.lstatSync(indexFile);
         if (!stat.isFile() || stat.isSymbolicLink()) return { name: source.name, status: 'unknown' };
-        const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
+        const index: { catalog_name?: string; source_repository?: string; source_ref?: string } = JSON.parse(
+          fs.readFileSync(indexFile, 'utf8'),
+        );
         if (
           index.catalog_name !== source.name ||
           index.source_repository !== source.repositoryId ||
-          !/^[a-f0-9]{40}$/i.test(index.source_ref || '')
+          typeof index.source_ref !== 'string' ||
+          !/^[a-f0-9]{40}$/i.test(index.source_ref)
         ) {
           return { name: source.name, status: 'unknown' };
         }
@@ -251,8 +288,8 @@ async function checkCatalogFreshness(run = undefined, names) {
   );
 }
 
-function removeCatalog(name) {
-  const userSources = require('./config.js').loadUserSourceConfiguration();
+function removeCatalog(name: string): void {
+  const userSources = readUserSources();
   const source = userSources.find((entry) => catalogNameKey(entry.name) === catalogNameKey(name));
   if (!source) throw new CatalogError(`User catalog not found: ${name}`);
   const remaining = userSources.filter((entry) => entry !== source);
@@ -272,8 +309,8 @@ function removeCatalog(name) {
   }
 }
 
-function exportCatalogConfigurationData() {
-  const sources = loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
+function exportCatalogConfigurationData(): { catalog_version: 1; sources: UserCatalog[] } {
+  const sources = readUserSources().map(({ name, repository, mode, entries }) => ({
     name,
     repository,
     ...(mode ? { mode, entries } : {}),
@@ -281,21 +318,24 @@ function exportCatalogConfigurationData() {
   return { catalog_version: 1, sources };
 }
 
-function exportCatalogConfiguration(file) {
+function exportCatalogConfiguration(file: string): void {
   writeJson(path.resolve(file), exportCatalogConfigurationData());
 }
 
-function importCatalogConfigurationText(contents, refresh = refreshCatalogs) {
+function importCatalogConfigurationText(
+  contents: string,
+  refresh: typeof refreshCatalogs = refreshCatalogs,
+): CatalogImportResult {
   const manifest = JSON.parse(contents);
   validateSourceConfiguration({ catalog_version: manifest?.catalog_version, sources: [] });
   if (!Array.isArray(manifest.sources)) {
     throw new CatalogError('catalogSources.json must have catalog_version: 1 and a sources array');
   }
-  const current = loadUserSourceConfiguration();
+  const current = readUserSources();
   const names = new Set(current.map(({ name }) => catalogNameKey(name)));
   const repositories = new Set(current.map(({ repositoryId: repository }) => repository));
-  const added = [];
-  const ignored = [];
+  const added: UserCatalog[] = [];
+  const ignored: { name: string; reason: string }[] = [];
   for (const rawSource of manifest.sources) {
     const [source] = validateSourceConfiguration({ catalog_version: 1, sources: [rawSource] });
     if (isReservedCatalogName(source.name)) {
@@ -346,7 +386,7 @@ function importCatalogConfigurationText(contents, refresh = refreshCatalogs) {
   };
 }
 
-module.exports = {
+export {
   addCatalog,
   updateCatalog,
   refreshCatalogs,
@@ -356,4 +396,3 @@ module.exports = {
   exportCatalogConfigurationData,
   importCatalogConfigurationText,
 };
-export {};

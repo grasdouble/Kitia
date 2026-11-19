@@ -1,18 +1,20 @@
-'use strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import type { InstallState, FileFingerprint } from '../inventory/model.js';
+import { LOCK_PATH } from '../inventory/model.js';
+import { isWithin } from '../resources/content.js';
+import { CatalogError } from '../resources/model.js';
 import type { InstallPlanOptions } from './model.js';
 import type { InstallPlanEntry } from './plan.js';
-const { addPlanEntry } = require('./plan.js');
-const { CatalogError } = require('../resources/model.js');
-const { isWithin } = require('../resources/content.js');
-const { LOCK_PATH } = require('../inventory/model.js');
+import { addPlanEntry } from './plan.js';
 
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
-
-function targetPath(targetRoot, relativePath, { allowFinalDirectorySymlink = false } = {}) {
+function targetPath(
+  targetRoot: string,
+  relativePath: string,
+  { allowFinalDirectorySymlink = false }: { allowFinalDirectorySymlink?: boolean } = {},
+): string {
   const parts = relativePath.split('/');
   if (
     path.posix.isAbsolute(relativePath) ||
@@ -24,11 +26,12 @@ function targetPath(targetRoot, relativePath, { allowFinalDirectorySymlink = fal
   let current = targetRoot;
   for (let index = 0; index < parts.length; index += 1) {
     current = path.join(current, parts[index]);
-    let stat;
+    let stat: fs.Stats;
     try {
       stat = fs.lstatSync(current);
     } catch (error) {
-      if (error.code === 'ENOENT') {
+      const filesystemError = error as NodeJS.ErrnoException;
+      if (filesystemError.code === 'ENOENT') {
         current = path.join(current, ...parts.slice(index + 1));
         break;
       }
@@ -46,7 +49,8 @@ function targetPath(targetRoot, relativePath, { allowFinalDirectorySymlink = fal
         current = fs.realpathSync(current);
         stat = fs.statSync(current);
       } catch (error) {
-        throw new CatalogError(`Cannot resolve installation symlink ${current}: ${error.message}`);
+        const filesystemError = error as Error;
+        throw new CatalogError(`Cannot resolve installation symlink ${current}: ${filesystemError.message}`);
       }
       if (!isWithin(current, targetRoot)) {
         throw new CatalogError(`Installation symlink escapes target directory: ${relativePath}`);
@@ -71,11 +75,12 @@ function fileFingerprint(content: Buffer, executable: boolean): FileFingerprint 
 
 function installedFingerprint(targetRoot: string, relativePath: string): FileFingerprint | null {
   const absolutePath = targetPath(targetRoot, relativePath);
-  let stat;
+  let stat: fs.Stats;
   try {
     stat = fs.lstatSync(absolutePath);
   } catch (error) {
-    if (error.code === 'ENOENT') {
+    const filesystemError = error as NodeJS.ErrnoException;
+    if (filesystemError.code === 'ENOENT') {
       return null;
     }
     throw error;
@@ -95,9 +100,12 @@ function sameFingerprint(left: FileFingerprint | null, right: FileFingerprint | 
   );
 }
 
-function inspectInstalledFiles(targetRoot: string, record: { files: Record<string, FileFingerprint> }) {
-  const missing = [];
-  const modified = [];
+function inspectInstalledFiles(
+  targetRoot: string,
+  record: { files: Record<string, FileFingerprint> },
+): { missing: string[]; modified: string[] } {
+  const missing: string[] = [];
+  const modified: string[] = [];
   for (const [relativePath, expected] of Object.entries(record.files)) {
     const actual = installedFingerprint(targetRoot, relativePath);
     if (!actual) {
@@ -119,24 +127,41 @@ function trackedPaths(state: InstallState) {
   );
 }
 
+type StagedOperation =
+  | {
+      action: 'remove';
+      destination: string;
+      previous: { content: Buffer; mode: number } | null;
+      temporaryPath?: undefined;
+    }
+  | {
+      action: 'install' | 'overwrite';
+      destination: string;
+      previous: { content: Buffer; mode: number } | null;
+      temporaryPath: string;
+    };
 function writeInstallPlan(
   plan: Map<string, InstallPlanEntry>,
   target: string,
   { force = false, dryRun = false, remove = [], expectedRemovals, onAction = () => {} }: InstallPlanOptions = {},
-) {
+): string[] {
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
     throw new CatalogError(`Target must be an existing directory: ${target}`);
   }
   const targetRoot = fs.realpathSync(target);
-  const actions: Array<['install' | 'overwrite' | 'unchanged' | 'remove', string, InstallPlanEntry | null]> = [];
-  const conflicts = [];
+  const actions: Array<['install' | 'overwrite' | 'unchanged', string, InstallPlanEntry] | ['remove', string, null]> =
+    [];
+  const conflicts: string[] = [];
 
   for (const relativePath of remove) {
     if (plan.has(relativePath)) {
       throw new CatalogError(`Cannot both install and remove ${relativePath}`);
     }
     const actual = installedFingerprint(targetRoot, relativePath);
-    if (expectedRemovals?.has(relativePath) && !equalOptionalFingerprint(actual, expectedRemovals.get(relativePath))) {
+    if (
+      expectedRemovals?.has(relativePath) &&
+      !equalOptionalFingerprint(actual, expectedRemovals.get(relativePath) ?? null)
+    ) {
       throw new CatalogError(
         `File changed while preparing removal: ${relativePath}. Retry after reviewing it.`,
         'LOCAL_CONFLICT',
@@ -156,7 +181,7 @@ function writeInstallPlan(
     const destination = targetPath(targetRoot, relativePath);
     const current = installedFingerprint(targetRoot, relativePath);
     const hasExpected = Object.hasOwn(file, 'expected');
-    if (hasExpected && !equalOptionalFingerprint(current, file.expected)) {
+    if (hasExpected && !equalOptionalFingerprint(current, file.expected ?? null)) {
       throw new CatalogError(
         `File changed while preparing the operation: ${relativePath}. Retry after reviewing it.`,
         'LOCAL_CONFLICT',
@@ -167,11 +192,12 @@ function writeInstallPlan(
         },
       );
     }
-    let stat;
+    let stat: fs.Stats | undefined;
     try {
       stat = fs.lstatSync(destination);
     } catch (error) {
-      if (error.code !== 'ENOENT') {
+      const filesystemError = error as NodeJS.ErrnoException;
+      if (filesystemError.code !== 'ENOENT') {
         throw error;
       }
     }
@@ -227,8 +253,8 @@ function writeInstallPlan(
       (left === LOCK_PATH ? 2 : leftAction === 'remove' ? 1 : 0) -
       (right === LOCK_PATH ? 2 : rightAction === 'remove' ? 1 : 0),
   );
-  const staged = [];
-  const changed = [];
+  const staged: StagedOperation[] = [];
+  const changed: StagedOperation[] = [];
   try {
     for (const [action, relativePath, file] of actions) {
       if (action === 'unchanged') continue;
@@ -287,7 +313,8 @@ function writeInstallPlan(
       try {
         fs.unlinkSync(item.temporaryPath);
       } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
+        const filesystemError = error as NodeJS.ErrnoException;
+        if (filesystemError.code !== 'ENOENT') throw error;
       }
     }
   }
@@ -304,7 +331,7 @@ function addInventoryStateToPlan(plan: Map<string, InstallPlanEntry>, state: Ins
   addPlanEntry(plan, LOCK_PATH, Buffer.from(`${JSON.stringify(state, null, 2)}\n`));
 }
 
-module.exports = {
+export {
   targetPath,
   fileFingerprint,
   installedFingerprint,

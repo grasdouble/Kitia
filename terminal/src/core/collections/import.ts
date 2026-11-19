@@ -1,26 +1,40 @@
-'use strict';
+import crypto, { KeyObject } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const { CatalogError } = require('../resources/model.js');
-const { verifyCollectionSignature } = require('./signatures.js');
-const { validateCollectionManifest } = require('./manifest.js');
-const {
+import {
   loadUserSourceConfiguration,
   userCatalogDirectory,
   userCatalogIndexDirectory,
   catalogIndexFileName,
-} = require('../catalogs/config.js');
-const {
-  catalogNameKey,
-  isReservedCatalogName,
-  repositoryId,
-  validateSourceConfiguration,
-} = require('../catalogs/model.js');
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
-function publishCollectionFiles(files, io) {
-  const staged = [];
-  const retainedBackups = new Set();
+} from '../catalogs/config.js';
+import { catalogNameKey, isReservedCatalogName, repositoryId, validateSourceConfiguration } from '../catalogs/model.js';
+import { CatalogError } from '../resources/model.js';
+import { validateCollectionManifest, type ValidatedCollectionCatalog } from './manifest.js';
+import { verifyCollectionSignature } from './signatures.js';
+type CollectionFile = { target: string; contents: string };
+type CollectionIO = Pick<
+  typeof fs,
+  | 'existsSync'
+  | 'unlinkSync'
+  | 'lstatSync'
+  | 'writeFileSync'
+  | 'readFileSync'
+  | 'renameSync'
+  | 'mkdirSync'
+  | 'readdirSync'
+>;
+type StagedFile = {
+  target: string;
+  stagePath: string;
+  backupPath: string | null;
+  existed: boolean;
+  mode: number;
+  published: boolean;
+};
+function publishCollectionFiles(files: CollectionFile[], io: CollectionIO) {
+  const staged: StagedFile[] = [];
+  const retainedBackups = new Set<string>();
   const cleanup = () => {
     for (const entry of staged) {
       for (const temporary of [entry.stagePath, entry.backupPath]) {
@@ -34,7 +48,7 @@ function publishCollectionFiles(files, io) {
   try {
     for (const file of files) {
       const suffix = `${process.pid}-${crypto.randomUUID()}`;
-      const entry = {
+      const entry: StagedFile = {
         target: file.target,
         stagePath: `${file.target}.${suffix}.stage`,
         backupPath: null,
@@ -67,32 +81,41 @@ function publishCollectionFiles(files, io) {
       entry.published = true;
     }
   } catch (error) {
-    const rollbackErrors = [];
+    const rollbackErrors: string[] = [];
     for (const entry of [...staged].reverse()) {
       if (!entry.published) continue;
       try {
-        if (entry.existed) io.renameSync(entry.backupPath, entry.target);
-        else if (io.existsSync(entry.target)) io.unlinkSync(entry.target);
+        if (entry.existed) {
+          const backupPath = entry.backupPath as string;
+          io.renameSync(backupPath, entry.target);
+        } else if (io.existsSync(entry.target)) io.unlinkSync(entry.target);
       } catch (rollbackError) {
         if (entry.backupPath) retainedBackups.add(entry.backupPath);
         rollbackErrors.push(
           entry.backupPath
-            ? `${rollbackError.message}; recovery copy retained at ${entry.backupPath}`
-            : rollbackError.message,
+            ? `${(rollbackError as { message: string }).message}; recovery copy retained at ${entry.backupPath}`
+            : (rollbackError as { message: string }).message,
         );
       }
     }
     cleanup();
     const rollback = rollbackErrors.length ? ` Rollback failed: ${rollbackErrors.join('; ')}` : '';
-    throw new CatalogError(`Cannot publish resource collection: ${error.message}.${rollback}`);
+    const { message } = error as { message: string };
+    throw new CatalogError(`Cannot publish resource collection: ${message}.${rollback}`);
   }
   cleanup();
 }
 
-function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: unknown } = {}) {
+/** @param {unknown} contents @param {CollectionIO} [io] @param {{ trustedKey?: string | Buffer | KeyObject }} [options] */
+function importCollectionText(
+  contents: unknown,
+  io: CollectionIO = fs,
+  { trustedKey }: { trustedKey?: string | Buffer | KeyObject } = {},
+) {
   if (typeof contents !== 'string' || Buffer.byteLength(contents, 'utf8') > 2 * 1024 * 1024) {
     throw new CatalogError('Resource collection must be a JSON file no larger than 2 MiB');
   }
+  /** @type {unknown} */
   let manifest;
   try {
     manifest = JSON.parse(contents);
@@ -147,7 +170,7 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
   io.mkdirSync(indexDirectory, { recursive: true, mode: 0o700 });
   if (incoming.length) io.mkdirSync(path.join(indexDirectory, '.kitia-index'), { recursive: true, mode: 0o700 });
   const registry = `${JSON.stringify({ catalog_version: 1, sources: combined }, null, 2)}\n`;
-  const files = incoming.map(({ source, index }) => ({
+  const files: CollectionFile[] = incoming.map(({ source, index }) => ({
     target: path.join(indexDirectory, catalogIndexFileName(source.name)),
     contents: `${JSON.stringify(index, null, 2)}\n`,
   }));
@@ -159,4 +182,4 @@ function importCollectionText(contents, io = fs, { trustedKey }: { trustedKey?: 
   return incoming.map(({ source }) => source.name);
 }
 
-module.exports = { publishCollectionFiles, importCollectionText };
+export { publishCollectionFiles, importCollectionText };

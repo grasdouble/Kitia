@@ -9,26 +9,80 @@ import { Panel } from './components/panel.mjs';
 import { categorizedShortcutLines, wrappedShortcutLines } from './components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel } from './components/shortcuts/shortcuts-panel.mjs';
 import { fitColumn, fitText, wrapText } from './helpers.mjs';
-import { DashboardMouseRegions, type DashboardMouseRegion } from './input-transport.mjs';
+import { DashboardMouseRegions, type DashboardMouseRegion, type DashboardMouseTarget } from './input-transport.mjs';
+
+type ModalOption = { label: string; color?: string };
+type ModalContentLine = {
+  text: string;
+  type?: 'choice-group' | 'selectable-option';
+  label?: string;
+  options?: ModalOption[];
+  selectedIndex?: number;
+  focused?: boolean;
+  selected?: boolean;
+  color?: string;
+  borderColor?: string;
+  bold?: boolean;
+  dimColor?: boolean;
+  preserveSpacing?: boolean;
+};
+type ModalContentEntry = string | ModalContentLine;
+type ModalRenderedLine = ModalContentLine & { bodyText?: string; component?: 'choice-group' | 'selectable-option' };
+type ChoiceGroupLine = ModalRenderedLine & {
+  component: 'choice-group';
+  label: string;
+  options: ModalOption[];
+  selectedIndex: number;
+  focused: boolean;
+};
+type SelectableOptionLine = ModalRenderedLine & {
+  component: 'selectable-option';
+  label: string;
+  bodyText: string;
+  selected: boolean;
+};
+type ChoiceGroupEntry = ModalContentLine & {
+  type: 'choice-group';
+  label: string;
+  options: ModalOption[];
+  selectedIndex: number;
+  focused: boolean;
+};
+type SelectableOptionEntry = ModalContentLine & { type: 'selectable-option'; label: string; selected: boolean };
+type ModalFrameResult = {
+  width: number;
+  accent: string;
+  panelTitle?: string;
+  headerLines: Array<{ text: string }>;
+  lines: ModalRenderedLine[];
+  shortcuts: string[];
+};
+type ModalElementRef = React.RefObject<DOMElement | null>;
+type ChoiceGroupRefs = { row: ModalElementRef; options: ModalElementRef[] };
 
 const h = React.createElement;
 const MODAL_BACKGROUND = DASHBOARD_THEME.semantic.modal.background;
 const MODAL_FOREGROUND = DASHBOARD_THEME.semantic.modal.foreground;
 
 const { semantic } = DASHBOARD_THEME;
-function choiceLabel(choice) {
+function choiceLabel(choice: string): string {
   return choice.toUpperCase();
 }
 
-function choiceButtonWidth(choice) {
+function choiceButtonWidth(choice: string): number {
   return choiceLabel(choice).length + 4;
 }
 
-function choiceOutline(choice) {
+function choiceOutline(choice: string): string {
   return `╭${'─'.repeat(choiceButtonWidth(choice) - 2)}╮`;
 }
 
-export function choiceGroup(label, choices, selectedIndex, focused = true) {
+export function choiceGroup(
+  label: string,
+  choices: Array<string | ModalOption>,
+  selectedIndex: number,
+  focused = true,
+): ChoiceGroupEntry {
   const options = choices.map((choice) => (typeof choice === 'string' ? { label: choice } : choice));
   const prefix = label ? `${label.padEnd(8)} ` : '';
   const text = `${prefix}${options.map((choice) => choiceOutline(choice.label)).join(' ')}`;
@@ -63,7 +117,7 @@ export function categorizeShortcutHint(hint: string) {
   return categorizedShortcutLines(groups);
 }
 
-export function selectableOption(label, selected) {
+export function selectableOption(label: string, selected: boolean): SelectableOptionEntry {
   return {
     type: 'selectable-option',
     text: `${selected ? '› ' : '  '}${label}`,
@@ -72,7 +126,14 @@ export function selectableOption(label, selected) {
   };
 }
 
-export function modalFrame(title, content, columns, accent, maxWidth = 64, headerContent?: string[]) {
+export function modalFrame(
+  title: string,
+  content: ModalContentEntry[],
+  columns: number,
+  accent: string,
+  maxWidth = 64,
+  headerContent?: string[],
+): ModalFrameResult {
   const separateHeader = headerContent !== undefined;
   const width = Math.max(20, Math.min(maxWidth, columns - 4));
   const innerWidth = width - 4;
@@ -85,8 +146,8 @@ export function modalFrame(title, content, columns, accent, maxWidth = 64, heade
   const modalContent = shortcutHint ? content.slice(0, -1) : content;
   const label = separateHeader ? '' : ` ${fitText(title, width - 5)} `;
   const top = separateHeader ? '' : `┌─${label}${'─'.repeat(Math.max(0, width - label.length - 3))}┐`;
-  const body = modalContent.flatMap((entry) => {
-    const row = typeof entry === 'string' ? { text: entry } : entry;
+  const body: ModalRenderedLine[] = modalContent.flatMap((entry) => {
+    const row: ModalContentLine = typeof entry === 'string' ? { text: entry } : entry;
     const wrapped = row.preserveSpacing ? [row.text] : wrapText(row.text, innerWidth);
     return wrapped.map((line) => ({
       text: separateHeader ? line : `│ ${fitColumn(line, innerWidth)} │`,
@@ -119,7 +180,15 @@ export function modalFrame(title, content, columns, accent, maxWidth = 64, heade
   };
 }
 
-export function loadingModal({ message, frame, columns }: { message: string; frame: string; columns: number }) {
+export function loadingModal({
+  message,
+  frame,
+  columns,
+}: {
+  message: string;
+  frame: string;
+  columns: number;
+}): ModalFrameResult {
   return modalFrame(
     'LOADING',
     [
@@ -133,11 +202,19 @@ export function loadingModal({ message, frame, columns }: { message: string; fra
   );
 }
 
-function fixedModalText(text, props, ref = undefined) {
+function fixedModalText(text: string, props: React.ComponentProps<typeof Text>, ref?: ModalElementRef) {
   return h(Box, { flexShrink: 0, ref }, h(Text, props, text));
 }
 
-function ChoiceGroup({ line, rowRef, optionRefs = [] }) {
+function ChoiceGroup({
+  line,
+  rowRef,
+  optionRefs = [],
+}: {
+  line: ChoiceGroupLine;
+  rowRef?: ModalElementRef;
+  optionRefs?: ModalElementRef[];
+}) {
   const width = line.text.length;
   const borderColor = line.borderColor || semantic.accents.muted;
   const contentWidth = Math.max(0, width - 3);
@@ -146,7 +223,7 @@ function ChoiceGroup({ line, rowRef, optionRefs = [] }) {
     line.label.length +
     buttonWidths.reduce((length, buttonWidth, index) => length + buttonWidth + Number(index > 0), 0);
   const padding = Math.max(0, contentWidth - contentLength);
-  const vertical = (values, textProps, cellWidth) =>
+  const vertical = (values: string[], textProps: React.ComponentProps<typeof Text>, cellWidth: number) =>
     h(
       Box,
       {
@@ -214,7 +291,7 @@ function ChoiceGroup({ line, rowRef, optionRefs = [] }) {
   );
 }
 
-function SelectableOption({ line }) {
+function SelectableOption({ line }: { line: SelectableOptionLine }) {
   return h(
     Box,
     { width: line.text.length, flexDirection: 'row' },
@@ -237,17 +314,35 @@ function SelectableOption({ line }) {
   );
 }
 
-function ModalLine({ line, choiceRefs = undefined }) {
+function isChoiceGroupLine(line: ModalRenderedLine): line is ChoiceGroupLine {
+  return (
+    line.component === 'choice-group' &&
+    typeof line.label === 'string' &&
+    line.options !== undefined &&
+    typeof line.selectedIndex === 'number' &&
+    typeof line.focused === 'boolean'
+  );
+}
+
+function isSelectableOptionLine(line: ModalRenderedLine): line is SelectableOptionLine {
+  return (
+    line.component === 'selectable-option' &&
+    typeof line.label === 'string' &&
+    typeof line.selected === 'boolean' &&
+    typeof line.bodyText === 'string'
+  );
+}
+function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?: ChoiceGroupRefs | null }) {
   const commonProps = {
     color: line.color || MODAL_FOREGROUND,
     backgroundColor: MODAL_BACKGROUND,
     bold: line.bold,
     dimColor: line.dimColor,
   };
-  if (line.component === 'choice-group') {
+  if (isChoiceGroupLine(line)) {
     return h(ChoiceGroup, { line, rowRef: choiceRefs?.row, optionRefs: choiceRefs?.options });
   }
-  if (line.component === 'selectable-option') {
+  if (isSelectableOptionLine(line)) {
     return h(SelectableOption, { line });
   }
   const content =
@@ -271,7 +366,7 @@ export function ModalOverlay({
   rows,
   mouse,
 }: {
-  modal: ReturnType<typeof modalFrame>;
+  modal: ModalFrameResult;
   columns: number;
   rows: number;
   mouse?: DashboardMouseRegions;
@@ -286,12 +381,7 @@ export function ModalOverlay({
     (shortcutsRows ? shortcutsRows + 1 : 0);
   const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
-  const choiceRefs = React.useRef<
-    Array<{
-      row: React.RefObject<DOMElement>;
-      options: React.RefObject<DOMElement>[];
-    } | null>
-  >([]);
+  const choiceRefs = React.useRef<Array<ChoiceGroupRefs | null>>([]);
   choiceRefs.current.length = modal.lines.length;
   for (const [lineIndex, line] of modal.lines.entries()) {
     if (!modal.panelTitle && line.options?.length && typeof line.bodyText === 'string') {
@@ -322,10 +412,11 @@ export function ModalOverlay({
         const rowLayout = measureElement(row);
         const bodyOffset = typeof line.text === 'string' ? line.text.indexOf(line.bodyText) : -1;
         for (const [index, option] of line.options.entries()) {
-          const label = typeof option === 'string' ? option : option.label;
-          const target = group
-            ? { type: 'modal-option' as const, group: group as 'scope' | 'client', index }
-            : { type: 'modal-choice' as const, index };
+          const label = option.label;
+          const target: DashboardMouseTarget =
+            group === 'scope' || group === 'client'
+              ? { type: 'modal-option', group, index }
+              : { type: 'modal-choice', index };
           const node = refs?.options[index]?.current;
           if (node) {
             const optionLayout = measureElement(node);

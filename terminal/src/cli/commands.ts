@@ -1,68 +1,93 @@
-'use strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 
-const { resolveCatalogResource } = require('../core/resources/selection.js');
-const { CatalogError } = require('../core/resources/model.js');
-const {
-  selectCatalogResource,
-  formatCatalogTable,
+import { loadUserSourceConfiguration, userCatalogDirectory } from '../core/catalogs/config.js';
+import type { CatalogLoadWarning } from '../core/catalogs/indexes.js';
+import { checkCatalogFreshness } from '../core/catalogs/manage.js';
+import type { SourceConfiguration, UserCatalog } from '../core/catalogs/model.js';
+import { importCollectionText } from '../core/collections/import.js';
+import { collectionData } from '../core/collections/manifest.js';
+import { signCollectionManifest } from '../core/collections/signatures.js';
+import { diagnose } from '../core/diagnostics/doctor.js';
+import type { AuditResult } from '../core/inspection/audit.js';
+import { executeInstallationOperation, type InstallationMessage } from '../core/installations/lifecycle.js';
+import { checkInstalledResources, collectInstalledScopes } from '../core/inventory/checks.js';
+import { listSourceVersions, listSourceVersionsAsync, uniqueSourceVersionPrefixes } from '../core/resources/history.js';
+import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import { catalogEntries, enrichInstalledResources, listCatalogResources } from '../core/resources/queries.js';
+import { resolveCatalogResource } from '../core/resources/selection.js';
+import type { DashboardActionResult } from '../tui/action-result.js';
+import type { CatalogActionResult, CatalogMutationResult, DashboardActions } from '../tui/contracts.js';
+import {
   browseInstalledResources,
+  formatCatalogTable,
   renderInstalledResources,
-} = require('../tui/terminal.js');
-const { userCatalogDirectory, loadUserSourceConfiguration } = require('../core/catalogs/config.js');
-const { printHelp, parseArguments } = require('./arguments.js');
-const { loadCommandCatalogs } = require('./loading.js');
-const { collectionData } = require('../core/collections/manifest.js');
-const { signCollectionManifest } = require('../core/collections/signatures.js');
-const { importCollectionText } = require('../core/collections/import.js');
-const { manageCatalogCommand } = require('./catalog-command.js');
-const { formatSourceVersionTable } = require('./history.js');
-const { diagnose } = require('../core/diagnostics/doctor.js');
-const { catalogEntries, listCatalogResources, enrichInstalledResources } = require('../core/resources/queries.js');
-const { checkInstalledResources, collectInstalledScopes } = require('../core/inventory/checks.js');
-const { checkCatalogFreshness } = require('../core/catalogs/manage.js');
-const { formatSourceResource } = require('./resource-format.js');
-const { executeInstallationOperation } = require('../core/installations/lifecycle.js');
-const { formatAuditLines } = require('./inspection-format.js');
+  selectCatalogResource,
+} from '../tui/terminal.js';
+import { parseArguments, printHelp, type ParsedCliOptions } from './arguments.js';
+import { manageCatalogCommand } from './catalog-command.js';
+import { formatSourceVersionTable } from './history.js';
+import { formatAuditLines } from './inspection-format.js';
+import { loadCommandCatalogs } from './loading.js';
+import type { CliReport } from './report.js';
+import { formatSourceResource } from './resource-format.js';
 
-const fs = require('node:fs');
-const path = require('node:path');
-const { Worker } = require('node:worker_threads');
-const { execFileSync } = require('node:child_process');
-const os = require('node:os');
-const sourceHistoryApi = require('../core/resources/history.js');
+type LoadedCatalogs = { sourceResources: CatalogResource[]; unavailable: string[] };
+type DashboardWorkerMessage<Result> =
+  | { progress: string; ok?: never }
+  | { progress?: string; ok: true; result: Result }
+  | {
+      progress?: string;
+      ok: false;
+      error: {
+        name: string;
+        message: string;
+        code?: string;
+        category?: string;
+        paths?: string[];
+        recoverable?: boolean;
+        userMessage?: string;
+        agent?: string;
+      };
+    };
 
-function runDashboardWorker(
-  data,
+function runDashboardWorker<Result>(
+  data: Record<string, unknown>,
   onProgress: (message: string) => void = () => {},
   { execArgv }: { execArgv?: string[] } = {},
-) {
-  return new Promise((resolve, reject) => {
+): Promise<Result> {
+  return new Promise<Result>((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, 'dashboard-worker.js'), {
       workerData: data,
       execArgv,
     });
     let settled = false;
-    worker.on('message', (message) => {
-      if (typeof message?.progress === 'string') {
+    worker.on('message', (message: DashboardWorkerMessage<Result>) => {
+      if (typeof message.progress === 'string') {
         onProgress(message.progress);
         return;
       }
-      if (settled) return;
+      if (settled || !('ok' in message)) return;
       settled = true;
       if (message.ok) {
         resolve(message.result);
         return;
       }
-      const error = Object.assign(new Error(message.error.message), message.error);
-      error.name = message.error.name;
-      reject(error);
+      if ('error' in message) {
+        const error = Object.assign(new Error(message.error.message), message.error);
+        error.name = message.error.name;
+        reject(error);
+      }
     });
-    worker.once('error', (error) => {
+    worker.once('error', (error: Error) => {
       if (settled) return;
       settled = true;
       reject(error);
     });
-    worker.once('exit', (code) => {
+    worker.once('exit', (code: number) => {
       if (settled) return;
       settled = true;
       reject(new Error(`Dashboard worker exited before returning a result (exit ${code}).`));
@@ -70,7 +95,7 @@ function runDashboardWorker(
   });
 }
 
-function copyTextToClipboard(text) {
+function copyTextToClipboard(text: string): void {
   if (process.platform === 'darwin') {
     execFileSync('pbcopy', [], { input: text });
     return;
@@ -82,7 +107,7 @@ function copyTextToClipboard(text) {
   for (const [program, args] of [
     ['wl-copy', []],
     ['xclip', ['-selection', 'clipboard']],
-  ]) {
+  ] satisfies [string, string[]][]) {
     try {
       execFileSync(program, args, { input: text });
       return;
@@ -90,13 +115,16 @@ function copyTextToClipboard(text) {
   }
   throw new Error('Clipboard access requires wl-copy or xclip on Linux.');
 }
-function selectedSourceResource(resources, options) {
+function selectedSourceResource(
+  resources: CatalogResource[],
+  options: Pick<ParsedCliOptions, 'id' | 'kind' | 'nonInteractive'>,
+): Promise<CatalogResource | null> {
   return resolveCatalogResource(
     resources,
-    options.id,
+    options.id!,
     options.kind,
     options.nonInteractive
-      ? (candidates) => {
+      ? (candidates: CatalogResource[]) => {
           throw new CatalogError(
             `Resource '${options.id}' is ambiguous: ${candidates.map((entry) => `${entry.catalog}:${entry.kind}:${entry.id}`).join(', ')}. Specify a kind and source catalog where needed.`,
             'AMBIGUOUS_RESOURCE',
@@ -110,17 +138,17 @@ function shouldShowOnboarding() {
   return (
     process.stdin.isTTY &&
     process.stdout.isTTY &&
-    !fs.existsSync(require('node:path').join(userCatalogDirectory(), 'onboarding-complete'))
+    !fs.existsSync(path.join(userCatalogDirectory(), 'onboarding-complete'))
   );
 }
 
 function markOnboardingComplete() {
   const directory = userCatalogDirectory();
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(require('node:path').join(directory, 'onboarding-complete'), '1\n');
+  fs.writeFileSync(path.join(directory, 'onboarding-complete'), '1\n');
 }
 
-async function executeCommand(options, report) {
+async function executeCommand(options: ParsedCliOptions, report?: CliReport): Promise<number> {
   const output = options.output || console;
   if (options.command === 'onboarding') {
     options.command = 'dashboard';
@@ -143,20 +171,19 @@ async function executeCommand(options, report) {
 
   if (options.command === 'collection') {
     if (options.action === 'export') {
-      const { sourceResources } = loadCommandCatalogs({ command: 'list' });
-      let manifest = collectionData(sourceResources, loadUserSourceConfiguration(), options.resourceSelectors);
-      if (options.signingKey) {
-        const privateKey = fs.readFileSync(path.resolve(options.signingKey));
-        manifest = signCollectionManifest(manifest, privateKey);
-      }
-      fs.writeFileSync(path.resolve(options.file), `${JSON.stringify(manifest, null, 2)}\n`, {
+      const { sourceResources }: LoadedCatalogs = loadCommandCatalogs({ command: 'list' });
+      const unsigned = collectionData(sourceResources, loadUserSourceConfiguration(), options.resourceSelectors!);
+      const signed = options.signingKey
+        ? signCollectionManifest(unsigned, fs.readFileSync(path.resolve(options.signingKey)))
+        : undefined;
+      fs.writeFileSync(path.resolve(options.file!), `${JSON.stringify(signed ?? unsigned, null, 2)}\n`, {
         flag: 'w',
       });
       output.log(`Exported resource collection to ${options.file}.`);
-      if (manifest.signature) output.log(`Signature key fingerprint: ${manifest.signature.key_id}`);
+      if (signed) output.log(`Signature key fingerprint: ${signed.signature.key_id}`);
       return 0;
     }
-    const contents = fs.readFileSync(path.resolve(options.file), 'utf8');
+    const contents = fs.readFileSync(path.resolve(options.file!), 'utf8');
     const trustedKey = options.trustedKey ? fs.readFileSync(path.resolve(options.trustedKey)) : undefined;
     const names = importCollectionText(contents, undefined, { trustedKey });
     output.log(`Imported resource collection: ${names.length} catalog${names.length === 1 ? '' : 's'} registered.`);
@@ -166,7 +193,7 @@ async function executeCommand(options, report) {
   }
   if (options.command === 'catalog') return manageCatalogCommand(options);
   if (options.command === 'versions') {
-    const { sourceResources } = loadCommandCatalogs({ ...options, command: 'list' });
+    const { sourceResources }: LoadedCatalogs = loadCommandCatalogs({ ...options, command: 'list' });
     const candidates = sourceResources.filter(
       (entry) =>
         entry.kind === options.kind &&
@@ -185,7 +212,7 @@ async function executeCommand(options, report) {
       );
     }
     const [resource] = candidates;
-    const versions = sourceHistoryApi.listSourceVersions(resource);
+    const versions = listSourceVersions(resource);
     output.log(
       `Commit history for ${resource.catalog}:${resource.kind}:${resource.id} (up to 500 newest commits; date is commit committer date):`,
     );
@@ -204,14 +231,17 @@ async function executeCommand(options, report) {
     return result.attention ? (report ? 2 : 1) : 0;
   }
 
-  const catalogWarnings = [];
-  const { sourceResources, unavailable } = loadCommandCatalogs(options, (warning) => {
-    catalogWarnings.push(warning);
-    if (options.command === 'dashboard') return;
-    if (report) report.warnings.push(warning);
-    else if (options.json) console.error(JSON.stringify(warning));
-    else output.error(`Warning: ${warning.message}`);
-  });
+  const catalogWarnings: CatalogLoadWarning[] = [];
+  const { sourceResources, unavailable }: LoadedCatalogs = loadCommandCatalogs(
+    options,
+    (warning: CatalogLoadWarning) => {
+      catalogWarnings.push(warning);
+      if (options.command === 'dashboard') return;
+      if (report) report.warnings.push(warning);
+      else if (options.json) console.error(JSON.stringify(warning));
+      else output.error(`Warning: ${warning.message}`);
+    },
+  );
   const allResources = catalogEntries(sourceResources);
 
   if (options.command === 'validate') {
@@ -219,11 +249,11 @@ async function executeCommand(options, report) {
     return unavailable.length ? 1 : 0;
   }
   if (options.command === 'list' || options.command === 'search') {
-    const matches = listCatalogResources(sourceResources, options);
+    const matches: CatalogResource[] = listCatalogResources(sourceResources, options);
     if (options.json) {
       console.log(
         JSON.stringify(
-          matches.map(({ source, applyTo, ...entry }) => entry),
+          matches.map(({ source, applyTo, ...entry }: CatalogResource & { source?: unknown }) => entry),
           null,
           2,
         ),
@@ -235,7 +265,7 @@ async function executeCommand(options, report) {
     return unavailable.length ? 1 : 0;
   }
   if (options.command === 'check') {
-    const result = checkInstalledResources(options.target, sourceResources, options);
+    const result = checkInstalledResources(options.target!, sourceResources, options);
     if (report) {
       report.resources = result.resources;
       report.messages = result.messages;
@@ -246,7 +276,7 @@ async function executeCommand(options, report) {
     return result.updateAvailable || unavailable.length ? 1 : 0;
   }
   if (options.command === 'dashboard') {
-    const result = collectInstalledScopes({ project: options.target, user: os.homedir() }, sourceResources);
+    const result = collectInstalledScopes({ project: options.target!, user: os.homedir() }, sourceResources);
     result.errors.push(...catalogWarnings.map((warning) => ({ ...warning, scope: 'catalog' })));
     const rows = enrichInstalledResources(result.resources, allResources);
     if (
@@ -255,26 +285,25 @@ async function executeCommand(options, report) {
       process.stdout.isTTY &&
       typeof process.stdin.setRawMode === 'function'
     ) {
-      const userCatalogState = () =>
-        loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
-          name,
-          repository,
-          mode,
-          entries,
-        }));
-      const completed = await browseInstalledResources(rows, process.stdin, process.stdout, result.errors, {
+      const userCatalogState: () => UserCatalog[] = () => {
+        const catalogs: SourceConfiguration[] = loadUserSourceConfiguration();
+        return catalogs.map(({ name, repository, mode, entries }) => ({ name, repository, mode, entries }));
+      };
+      const dashboardActions: DashboardActions = {
         showOnboarding: options.showOnboarding,
         catalogResources: sourceResources,
-        addCatalog: (request) => runDashboardWorker({ task: 'catalog-add', request }),
-        updateCatalog: (originalName, request) => runDashboardWorker({ task: 'catalog-update', originalName, request }),
+        addCatalog: (request) => runDashboardWorker<CatalogMutationResult>({ task: 'catalog-add', request }),
+        updateCatalog: (originalName, request) =>
+          runDashboardWorker<CatalogMutationResult>({ task: 'catalog-update', originalName, request }),
         userCatalogs: userCatalogState(),
         checkCatalogFreshness: (names) => checkCatalogFreshness(undefined, names),
-        removeCatalog: (name) => runDashboardWorker({ task: 'catalog-remove', name }),
-        refreshCatalog: (name) => runDashboardWorker({ task: 'catalog-refresh', name }),
-        transferCatalogs: (action, content) => runDashboardWorker({ task: 'catalog-transfer', action, content }),
+        removeCatalog: (name) => runDashboardWorker<CatalogActionResult>({ task: 'catalog-remove', name }),
+        refreshCatalog: (name) => runDashboardWorker<CatalogActionResult>({ task: 'catalog-refresh', name }),
+        transferCatalogs: (action, content) =>
+          runDashboardWorker<CatalogActionResult>({ task: 'catalog-transfer', action, content }),
         execute: (operation, resource, installOptions) => {
           const { onProgress, ...workerOptions } = installOptions;
-          return runDashboardWorker(
+          return runDashboardWorker<DashboardActionResult>(
             {
               task: 'resource-action',
               action: operation,
@@ -290,11 +319,18 @@ async function executeCommand(options, report) {
           );
         },
         listSourceVersions: async (resource) => {
-          const versions = await sourceHistoryApi.listSourceVersionsAsync(resource);
-          const prefixes = sourceHistoryApi.uniqueSourceVersionPrefixes(versions);
+          const versions = await listSourceVersionsAsync(resource);
+          const prefixes = uniqueSourceVersionPrefixes(versions);
           return versions.map((version, index) => ({ ...version, prefix: prefixes[index] }));
         },
-      });
+      };
+      const completed = await browseInstalledResources(
+        rows,
+        process.stdin,
+        process.stdout,
+        result.errors,
+        dashboardActions,
+      );
       return unavailable.length || result.errors.length || !completed ? 1 : 0;
     }
     console.log(renderInstalledResources(rows, process.stdout, result.errors));
@@ -305,27 +341,30 @@ async function executeCommand(options, report) {
     if (resource) output.log(formatSourceResource(resource));
     return 0;
   }
-  if (['install', 'preview', 'update', 'uninstall'].includes(options.command)) {
+  const operation = options.command;
+  if (operation === 'install' || operation === 'preview' || operation === 'update' || operation === 'uninstall') {
     const result = await executeInstallationOperation(
       {
         ...options,
+        target: options.target!, // Only mutations use the target, and their parser always sets it.
+        tool: options.tool ?? undefined,
         planOnly: options.json,
-        operation: options.command,
-        onMessage: ({ level, text }) => output[level](text),
-        onAudit: (audit) => {
+        operation,
+        onMessage: ({ level, text }: InstallationMessage) => output[level](text),
+        onAudit: (audit: AuditResult) => {
           for (const line of formatAuditLines(audit)) output.log(line);
         },
       },
       sourceResources,
       selectedSourceResource,
     );
-    if (result.preview !== undefined) output.log(`${formatSourceResource(result.resource)}\n\n${result.preview}`);
+    if (result.preview !== undefined) output.log(`${formatSourceResource(result.resource!)}\n\n${result.preview}`);
     return result.status;
   }
-  throw new CatalogError(`Unsupported command: ${options.command || 'unknown'}`);
+  throw new CatalogError(`Unsupported command: ${options.command}`);
 }
 
-module.exports = {
+export {
   parseArguments,
   printHelp,
   catalogEntries,

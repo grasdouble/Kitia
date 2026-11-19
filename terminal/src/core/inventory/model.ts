@@ -20,4 +20,4 @@ export interface InstallState {
   sources: Record<string, Record<string, Record<string, SourceResourceInventoryRecord>>>;
 }
 
-module.exports = { LOCK_PATH };
+export { LOCK_PATH };

@@ -1,15 +1,16 @@
-'use strict';
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import type { CatalogResource } from './model.js';
-const { CatalogError } = require('./model.js');
-const fs = require('node:fs');
-const path = require('node:path');
-function isWithin(candidate, parent) {
+import { CatalogError } from './model.js';
+function isWithin(candidate: string, parent: string): boolean {
   const relative = path.relative(parent, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-function readUtf8(filePath, label = 'file') {
+function readUtf8(filePath: string, label = 'file'): string {
   const content = fs.readFileSync(filePath);
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(content);
@@ -18,8 +19,6 @@ function readUtf8(filePath, label = 'file') {
   }
 }
 
-const os = require('node:os');
-const { execFileSync } = require('node:child_process');
 class PreparedPinnedSourceFile {
   private constructor(
     readonly resource: Readonly<CatalogResource>,
@@ -79,7 +78,7 @@ class PinnedSourceAcquisition {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    };
+    } satisfies ExecFileSyncOptionsWithStringEncoding;
     execFileSync('git', ['clone', '--quiet', '--no-checkout', `https://github.com/${repository}.git`, checkout], {
       ...options,
       timeout: 120000,
@@ -116,7 +115,8 @@ class PinnedSourceAcquisition {
       return fs.readFileSync(current);
     } catch (error) {
       if (error instanceof CatalogError) throw error;
-      throw new CatalogError(`Cannot retrieve pinned source file ${repository}/${relative}@${ref}: ${error.message}`);
+      const detail = error && typeof error === 'object' && 'message' in error ? error.message : undefined;
+      throw new CatalogError(`Cannot retrieve pinned source file ${repository}/${relative}@${ref}: ${String(detail)}`);
     }
   }
 
@@ -125,6 +125,6 @@ class PinnedSourceAcquisition {
   }
 }
 
-module.exports = { isWithin, readUtf8, preparePinnedSourceFile, isPreparedPinnedSourceFile, withPinnedSourceFiles };
+export { isWithin, readUtf8, preparePinnedSourceFile };
 
 export type { PreparedPinnedSourceFile };

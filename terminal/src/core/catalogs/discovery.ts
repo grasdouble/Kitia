@@ -1,21 +1,39 @@
-'use strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const { parseFrontmatter, parseInstruction } = require('../resources/frontmatter.js');
-const { CatalogError } = require('../resources/model.js');
-const { repositoryId } = require('./model.js');
-const { spdxExpression } = require('../resources/license.js');
-const { validateSourceCatalog } = require('../resources/manifest.js');
-const fs = require('node:fs');
-const path = require('node:path');
-const { execFileSync } = require('node:child_process');
-function sourceMetadata(file) {
+import { parseFrontmatter, parseInstruction } from '../resources/frontmatter.js';
+import { spdxExpression } from '../resources/license.js';
+import { validateSourceCatalog } from '../resources/manifest.js';
+import type { CatalogResource, ResourceKind } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
+import type { SourceConfiguration } from './model.js';
+import { repositoryId } from './model.js';
+
+interface DiscoveredResource {
+  id: string | undefined;
+  kind: ResourceKind;
+  sourcePath: string;
+  file: string;
+  directory: string;
+}
+
+export interface SourceCatalogIndex {
+  catalog_version: 1;
+  catalog_name: string;
+  source_repository: string;
+  source_ref: string;
+  resources: CatalogResource[];
+}
+
+function sourceMetadata(file: string): Map<string, unknown> {
   try {
     return parseFrontmatter(fs.readFileSync(file, 'utf8'), file);
   } catch (error) {
     const text = fs.readFileSync(file, 'utf8');
     const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
     if (!frontmatter) throw error;
-    const metadata = new Map();
+    const metadata = new Map<string, unknown>();
     for (const key of ['name', 'description', 'license']) {
       const match = frontmatter[1].match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
       if (match) metadata.set(key, match[1].trim().replace(/^(['"])(.*)\1$/, '$2'));
@@ -25,14 +43,14 @@ function sourceMetadata(file) {
   }
 }
 
-function normalizeResourceId(value) {
+function normalizeResourceId(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 }
 
-function safeRepositoryPath(checkout, sourcePath) {
+function safeRepositoryPath(checkout: string, sourcePath: string): string {
   if (
     typeof sourcePath !== 'string' ||
     !sourcePath ||
@@ -56,14 +74,19 @@ function safeRepositoryPath(checkout, sourcePath) {
   return file;
 }
 
-function discoverBasicMarkdownResources(checkout, kind, roots, suffix) {
-  const resources = [];
+function discoverBasicMarkdownResources(
+  checkout: string,
+  kind: ResourceKind,
+  roots: string[],
+  suffix: RegExp,
+): DiscoveredResource[] {
+  const resources: DiscoveredResource[] = [];
   for (const sourceRoot of roots) {
     const rootPath = path.join(checkout, ...sourceRoot.split('/'));
     if (!fs.existsSync(rootPath)) continue;
     const root = safeRepositoryPath(checkout, sourceRoot);
     if (!fs.statSync(root).isDirectory()) throw new CatalogError(`${sourceRoot} must be a directory`);
-    function visit(directory, segments) {
+    function visit(directory: string, segments: string[]): void {
       for (const entry of fs
         .readdirSync(directory, { withFileTypes: true })
         .sort((a, b) => a.name.localeCompare(b.name))) {
@@ -90,10 +113,10 @@ function discoverBasicMarkdownResources(checkout, kind, roots, suffix) {
   return resources;
 }
 
-function discoverCustomSkills(checkout, sourceRoot) {
+function discoverCustomSkills(checkout: string, sourceRoot: string): DiscoveredResource[] {
   const root = safeRepositoryPath(checkout, sourceRoot);
-  const resources = [];
-  function visit(directory, segments) {
+  const resources: DiscoveredResource[] = [];
+  function visit(directory: string, segments: string[]): void {
     const skillFile = path.join(directory, 'SKILL.md');
     if (fs.existsSync(skillFile)) {
       const sourcePath = path.posix.join(sourceRoot, ...segments);
@@ -124,7 +147,12 @@ const BASIC_AGENT_DIRECTORIES = ['agents', '.agents/agents', '.claude/agents', '
 
 const BASIC_INSTRUCTION_DIRECTORIES = ['instructions', '.agents/instructions', '.claude/rules', '.github/instructions'];
 
-function createSourceIndex(repository, name, checkout, configuration = { mode: 'basic', entries: [] }) {
+function createSourceIndex(
+  repository: string,
+  name: string,
+  checkout: string,
+  configuration: Pick<SourceConfiguration, 'mode' | 'entries'> = { mode: 'basic', entries: [] },
+): SourceCatalogIndex {
   const sourceRepository = repositoryId(repository);
   const sourceRef = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
@@ -132,7 +160,7 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
   const mappings = configuration.mode === 'custom' ? configuration.entries : null;
-  const resourceDirectories = [];
+  const resourceDirectories: DiscoveredResource[] = [];
   if (mappings) {
     for (const mapping of mappings) {
       let sourcePath = mapping.path;
@@ -140,7 +168,7 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
       const target = safeRepositoryPath(checkout, sourcePath);
       const stat = fs.lstatSync(target);
       if (stat.isDirectory()) {
-        let discovered;
+        let discovered: DiscoveredResource[];
         if (mapping.kind === 'skill') {
           const skillFile = path.join(target, 'SKILL.md');
           if (fs.existsSync(skillFile)) {
@@ -188,7 +216,7 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
     if (fs.existsSync(skillsRootPath)) {
       const skillsRoot = safeRepositoryPath(checkout, 'skills');
       if (!fs.statSync(skillsRoot).isDirectory()) throw new CatalogError('skills must be a directory');
-      function visit(directory, segments) {
+      function visit(directory: string, segments: string[]): void {
         const skill = path.join(directory, 'SKILL.md');
         if (fs.existsSync(skill)) {
           safeRepositoryPath(checkout, path.posix.join('skills', ...segments, 'SKILL.md'));
@@ -219,9 +247,12 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
       throw new CatalogError(`${sourceRepository} contains no supported skills, agents, or instructions`);
     }
   }
-  const resources = [];
+  const resources: CatalogResource[] = [];
   for (const resource of resourceDirectories) {
     const { kind, sourcePath, file } = resource;
+    if (typeof resource.id !== 'string') {
+      throw new CatalogError(`Invalid resource id in ${name}: ${resource.id}`);
+    }
     const id = kind === 'skill' ? resource.id : normalizeResourceId(resource.id);
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || id.length > 64 || id.includes('--')) {
       throw new CatalogError(`Invalid resource id in ${name}: ${id}`);
@@ -229,22 +260,24 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
     const instruction =
       kind === 'instruction' ? parseInstruction(fs.readFileSync(file), `${sourceRepository}:${sourcePath}`) : undefined;
     const metadata = instruction?.values ?? sourceMetadata(file);
+    const resourceName = metadata.get('name');
+    const descriptionValue = metadata.get('description');
     if (
       kind !== 'instruction' &&
-      (typeof metadata.get('name') !== 'string' ||
-        !metadata.get('name').trim() ||
+      (typeof resourceName !== 'string' ||
+        !resourceName.trim() ||
         (kind === 'skill' &&
-          (normalizeResourceId(metadata.get('name')) !== id ||
-            typeof metadata.get('description') !== 'string' ||
-            !metadata.get('description').trim())))
+          (normalizeResourceId(resourceName) !== id ||
+            typeof descriptionValue !== 'string' ||
+            !descriptionValue.trim())))
     ) {
       throw new CatalogError(
         `${file} must define a non-empty name${kind === 'skill' ? ' matching its id and a non-empty description' : ''}`,
       );
     }
     const description =
-      typeof metadata.get('description') === 'string' && metadata.get('description').trim()
-        ? metadata.get('description').trim().replace(/\s+/g, ' ')
+      typeof descriptionValue === 'string' && descriptionValue.trim()
+        ? descriptionValue.trim().replace(/\s+/g, ' ')
         : (instruction?.body ?? fs.readFileSync(file, 'utf8').replace(/^---[\s\S]*?---\s*/, ''))
             .trim()
             .split('\n')[0]
@@ -262,7 +295,7 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
       license_spdx: spdxExpression(licenseStatus),
     });
   }
-  const catalog = {
+  const catalog: SourceCatalogIndex = {
     catalog_version: 1,
     catalog_name: name,
     source_repository: sourceRepository,
@@ -273,6 +306,4 @@ function createSourceIndex(repository, name, checkout, configuration = { mode: '
   return catalog;
 }
 
-module.exports = { sourceMetadata, createSourceIndex };
-
-export {};
+export { sourceMetadata, createSourceIndex };

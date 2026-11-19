@@ -1,24 +1,10 @@
-'use strict';
+import type { spawn } from 'node:child_process';
+import type { Dirent, Stats } from 'node:fs';
+import fs from 'node:fs';
+import path from 'node:path';
 
-import type { CatalogResource } from '../resources/model.js';
-const { CatalogError } = require('../resources/model.js');
-import type { InstallState, FileFingerprint } from '../inventory/model.js';
-import type { PlanAction } from './model.js';
-const {
-  targetPath,
-  fileFingerprint,
-  installedFingerprint,
-  sameFingerprint,
-  writeInstallPlan,
-  addInventoryStateToPlan,
-} = require('./files.js');
-const { preparePinnedSourceFile } = require('../resources/content.js');
-import { isPreparedPinnedSourceFile, withPinnedSourceFiles } from '../resources/content.js';
-import type { PreparedPinnedSourceFile } from '../resources/content.js';
-const { parseInstruction } = require('../resources/frontmatter.js');
-import type { InstallPlanEntry } from './plan.js';
-const { addPlanEntry } = require('./plan.js');
-const {
+import type { InstalledSourceResource } from '../inventory/inventory.js';
+import {
   readInstallState,
   sourceCatalogName,
   setSourceResourceRecord,
@@ -30,32 +16,47 @@ const {
   removeSourceResourceRecord,
   readInstalledSourceSkills,
   removeSourceSkillRecord,
-} = require('../inventory/inventory.js');
-import type { InstalledSourceResource } from '../inventory/inventory.js';
-import type { GhSkillResult } from './gh-skill.js';
-const {
+} from '../inventory/inventory.js';
+import type { InstallState, FileFingerprint } from '../inventory/model.js';
+import { LOCK_PATH } from '../inventory/model.js';
+import { preparePinnedSourceFile, isPreparedPinnedSourceFile, withPinnedSourceFiles } from '../resources/content.js';
+import type { PreparedPinnedSourceFile } from '../resources/content.js';
+import { parseInstruction } from '../resources/frontmatter.js';
+import type { CatalogResource } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
+import {
+  addInventoryStateToPlan,
+  fileFingerprint,
+  installedFingerprint,
+  sameFingerprint,
+  targetPath,
+  writeInstallPlan,
+} from './files.js';
+import type { GhSkillResult, SourceSkillResource } from './gh-skill.js';
+import {
   runGhSkill,
   buildSourceSkillArgs,
   formatGhDiagnostics,
   describeGhFailure,
   runGhSkillAsync,
-} = require('./gh-skill.js');
-const { LOCK_PATH } = require('../inventory/model.js');
-
-const fs = require('node:fs');
-const path = require('node:path');
-import type { spawn } from 'node:child_process';
+} from './gh-skill.js';
+import type { InstallationScope, InstallationTool, PlanAction } from './model.js';
+import type { InstallPlanEntry } from './plan.js';
 
 function catalogLabel(resource: CatalogResource): string {
   return `${resource.catalog || 'source'} catalog`;
 }
-function sourceFileDestinations(resource, tool, scope = 'project') {
+function sourceFileDestinations(
+  resource: CatalogResource,
+  tool: InstallationTool,
+  scope: InstallationScope = 'project',
+): string[] {
   if (!['claude', 'copilot', 'both'].includes(tool)) throw new CatalogError('Tool must be claude, copilot or both');
   if (!['project', 'user'].includes(scope)) throw new CatalogError('Scope must be project or user');
   if (resource.kind === 'instruction' && scope === 'user') {
     throw new CatalogError('--scope user does not support source instructions', 'INVALID_ARGUMENT');
   }
-  const paths = [];
+  const paths: string[] = [];
   for (const runtime of tool === 'both' ? ['claude', 'copilot'] : [tool]) {
     if (resource.kind === 'agent') {
       paths.push(
@@ -82,7 +83,7 @@ interface SourceFileInstallPlan {
 }
 
 interface SourceFileInstallOptions {
-  scope?: string;
+  scope?: InstallationScope;
   force?: boolean;
   dryRun?: boolean;
   onAction?: (action: PlanAction) => void;
@@ -101,14 +102,14 @@ function createSourceFileInstallPlan(target: string, dryRun: boolean): SourceFil
 function publishSourceFileInstallPlan({ target, state, inventory, files }: SourceFileInstallPlan): void {
   if (!files.size) return;
   addInventoryStateToPlan(files, state);
-  files.get(LOCK_PATH).expected = inventory;
+  files.get(LOCK_PATH)!.expected = inventory;
   writeInstallPlan(files, target);
 }
 
 function installSourceFileResource(
   source: CatalogResource | PreparedPinnedSourceFile,
   target: string,
-  tool: string,
+  tool: InstallationTool,
   options: SourceFileInstallOptions = {},
 ): string[] {
   const resource = isPreparedPinnedSourceFile(source) ? source.resource : source;
@@ -183,7 +184,7 @@ function stageSourceFileInstallation(
           { category: 'tracked-modification', paths: [relativePath], recoverable: true },
         );
       }
-      const unchanged = sameFingerprint(actual, fingerprint);
+      const unchanged = actual && sameFingerprint(actual, fingerprint);
       if (!expected && actual && !unchanged && !force) {
         throw new CatalogError(`Refusing to overwrite existing file ${relativePath}; pass --force.`, 'LOCAL_CONFLICT', {
           category: 'untracked-destination',
@@ -247,7 +248,7 @@ function assertSourceResourceCanBeInstalled(resource: CatalogResource, target: s
 
 function validateSourceUpdates(
   installed: InstalledSourceResource[],
-  { force = false, target, scope = 'project' }: { force?: boolean; target?: string; scope?: string } = {},
+  { force = false, target, scope = 'project' }: { force?: boolean; target?: string; scope?: InstallationScope } = {},
 ): void {
   const targetRoot = target ? fs.realpathSync(target) : undefined;
   const state = targetRoot ? readInstallState(targetRoot) : undefined;
@@ -394,17 +395,22 @@ function* sourceUpdates(
       (installation) =>
         installation.missing ||
         installation.modified ||
-        installation.ref?.toLowerCase() !== resource.source_ref.toLowerCase(),
+        installation.ref?.toLowerCase() !== resource.source_ref!.toLowerCase(),
     );
     if (!stale.length) continue;
     hasUpdates = true;
     const completed: string[] = [];
     for (const installation of stale) {
-      const args = buildSourceSkillArgs('install', resource, installation.agent, {
-        scope,
-        target: targetRoot,
-        force: force || (ghForce && installation.agent === ghForceAgent),
-      });
+      const args = buildSourceSkillArgs(
+        'install',
+        resource as SourceSkillResource,
+        installation.agent as 'github-copilot' | 'claude-code',
+        {
+          scope,
+          target: targetRoot,
+          force: force || (ghForce && installation.agent === ghForceAgent),
+        },
+      );
       if (dryRun) {
         onAction({
           action: 'delegate_install',
@@ -419,7 +425,10 @@ function* sourceUpdates(
       try {
         result = yield { args, target: targetRoot };
       } catch (error) {
-        const code = (error as Error & { code?: string }).code;
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+            ? error.code
+            : undefined;
         if (code !== 'GH_SPAWN_FAILED' && code !== 'GH_TIMEOUT') throw error;
         const partial = [...messages, ...(completed.length ? [`Updated agents: ${completed.join(', ')}`] : [])];
         const cause =
@@ -459,7 +468,7 @@ function* sourceUpdates(
     if (dryRun) {
       const refs = [...new Set(stale.map(({ ref }) => ref?.slice(0, 7) || 'unknown'))];
       messages.push(
-        `Would update ${catalogLabel(resource)} skill: ${resource.id} (installed at ${refs.join(', ')}, catalog ${resource.source_ref.slice(0, 7)})`,
+        `Would update ${catalogLabel(resource)} skill: ${resource.id} (installed at ${refs.join(', ')}, catalog ${resource.source_ref!.slice(0, 7)})`,
       );
     } else {
       messages.push(`Updated ${catalogLabel(resource)} skill: ${resource.id}`);
@@ -482,7 +491,8 @@ function updateSourceResources(
 ): string[] {
   const updates = sourceUpdates(installed, target, options);
   let step = updates.next();
-  while (step.done === false) {
+  while (true) {
+    if (step.done) return step.value;
     let result: number | GhSkillResult;
     try {
       result = invokeGhSkill(step.value.args, step.value.target);
@@ -492,7 +502,6 @@ function updateSourceResources(
     }
     step = updates.next(result);
   }
-  return step.value;
 }
 
 async function updateSourceResourcesAsync(
@@ -503,7 +512,8 @@ async function updateSourceResourcesAsync(
   const transportOptions = { ...options, nonInteractive: options.nonInteractive ?? true };
   const updates = sourceUpdates(installed, target, transportOptions);
   let step = updates.next();
-  while (step.done === false) {
+  while (true) {
+    if (step.done) return step.value;
     let result: number | GhSkillResult;
     try {
       result = transportOptions.nonInteractive
@@ -515,7 +525,6 @@ async function updateSourceResourcesAsync(
     }
     step = updates.next(result);
   }
-  return step.value;
 }
 
 function uninstallSourceFileResource(
@@ -578,22 +587,31 @@ function uninstallSourceFileResource(
 }
 
 function pruneEmptySkillDirectory(targetRoot: string, relativeDirectory: string): void {
-  let absolute;
+  let absolute: string;
   try {
     absolute = targetPath(targetRoot, relativeDirectory);
   } catch (error) {
-    if (/symbolic link/i.test(error.message)) return;
+    const message =
+      typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+        ? error.message
+        : '';
+    if (/symbolic link/i.test(message)) return;
     throw error;
   }
-  let stat;
+  let stat: Stats;
   try {
     stat = fs.lstatSync(absolute);
   } catch (error) {
-    if (error.code === 'ENOENT') return;
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : undefined;
+    if (code === 'ENOENT') return;
     throw error;
   }
   if (!stat.isDirectory() || stat.isSymbolicLink()) return;
-  for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+  const entries: Dirent[] = fs.readdirSync(absolute, { withFileTypes: true });
+  for (const entry of entries) {
     if (entry.isDirectory() && !entry.isSymbolicLink()) {
       pruneEmptySkillDirectory(targetRoot, path.posix.join(relativeDirectory, entry.name));
     }
@@ -604,7 +622,8 @@ function pruneEmptySkillDirectory(targetRoot: string, relativeDirectory: string)
 function untrackedSkillPaths(targetRoot: string, relativeDirectory: string, managedPaths: Set<string>): string[] {
   const paths: string[] = [];
   const absolute = targetPath(targetRoot, relativeDirectory);
-  for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+  const entries: Dirent[] = fs.readdirSync(absolute, { withFileTypes: true });
+  for (const entry of entries) {
     const relative = path.posix.join(relativeDirectory, entry.name);
     if (entry.isSymbolicLink()) paths.push(relative);
     else if (entry.isDirectory()) paths.push(...untrackedSkillPaths(targetRoot, relative, managedPaths));
@@ -615,7 +634,8 @@ function untrackedSkillPaths(targetRoot: string, relativeDirectory: string, mana
 
 function hasUntrackedSkillContent(targetRoot: string, relativeDirectory: string, managedPaths: Set<string>): boolean {
   const absolute = targetPath(targetRoot, relativeDirectory);
-  for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+  const entries: Dirent[] = fs.readdirSync(absolute, { withFileTypes: true });
+  for (const entry of entries) {
     const relative = path.posix.join(relativeDirectory, entry.name);
     if (entry.isSymbolicLink()) return true;
     if (entry.isDirectory()) {
@@ -672,7 +692,7 @@ function uninstallSourceResource(
     return expected && !sameFingerprint(installedFingerprint(targetRoot, relativePath), expected);
   });
   if (dryRun) {
-    const messages = [];
+    const messages: string[] = [];
     if (!paths.length) {
       messages.push(`Would forget missing ${catalogLabel(resource)} skill: ${resource.id}`);
       onAction({
@@ -732,7 +752,7 @@ function uninstallSourceResource(
     remove: paths,
     ...(force ? {} : { expectedRemovals }),
   });
-  const messages = [];
+  const messages: string[] = [];
   if (!paths.length) messages.push(`Forgot missing ${catalogLabel(resource)} skill: ${resource.id}`);
   for (const relativePath of paths) {
     messages.push(
@@ -751,7 +771,7 @@ function uninstallSourceResource(
   return messages;
 }
 
-module.exports = {
+export {
   assertSourceResourceCanBeInstalled,
   catalogLabel,
   installSourceFileResource,

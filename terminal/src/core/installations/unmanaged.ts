@@ -1,12 +1,10 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
+import { findUnmanagedArtifacts } from '../inventory/discovery.js';
 import type { InstallState } from '../inventory/model.js';
-const { trackedPaths } = require('./files.js');
 import type { CatalogResource } from '../resources/model.js';
-const { findUnmanagedArtifacts } = require('../inventory/discovery.js');
-
-const fs = require('node:fs');
-const path = require('node:path');
+import { trackedPaths } from './files.js';
 // Native-only operations; the caller holds the target's operation lock.
 function removeUnmanagedResource(targetRoot: string, state: InstallState, resource: CatalogResource): string[] {
   const scope = resource.scope;
@@ -14,14 +12,13 @@ function removeUnmanagedResource(targetRoot: string, state: InstallState, resour
   if (scope !== 'project' && scope !== 'user') {
     throw new Error(`Cannot remove an unmanaged artifact from scope '${scope}'.`);
   }
-  const current = findUnmanagedArtifacts(targetRoot, trackedPaths(state)).find(
-    (entry) => entry.kind === resource.kind && entry.id === resource.id,
-  );
-  if (!current?.paths?.length) {
+  const artifacts: CatalogResource[] = findUnmanagedArtifacts(targetRoot, trackedPaths(state));
+  const current = artifacts.find((entry) => entry.kind === resource.kind && entry.id === resource.id);
+  if (!current || !current.paths?.length) {
     throw new Error(`${resource.kind}:${resource.id} is no longer detected as unmanaged; nothing was removed.`);
   }
   const protectedPaths = trackedPaths(state);
-  const assertSafePath = (absolutePath, directory) => {
+  const assertSafePath = (absolutePath: string, directory: boolean): void => {
     let ancestor = absolutePath;
     while (ancestor !== targetRoot) {
       const stat = fs.lstatSync(ancestor);
@@ -69,7 +66,11 @@ function removeUnmanagedResource(targetRoot: string, state: InstallState, resour
     assertSafePath(directoryPath, true);
     return { absolutePath: directoryPath, relativePath: skillDirectory };
   });
-  const uniqueTargets = [...new Map(targets.map((target) => [target.absolutePath, target])).values()];
+  const uniqueTargets = [
+    ...new Map<string, (typeof targets)[number]>(
+      targets.map((target): [string, (typeof targets)[number]] => [target.absolutePath, target]),
+    ).values(),
+  ];
   for (const { absolutePath, relativePath } of uniqueTargets) {
     if (resource.kind === 'skill') fs.rmSync(absolutePath, { recursive: true });
     else fs.unlinkSync(absolutePath);
@@ -78,4 +79,4 @@ function removeUnmanagedResource(targetRoot: string, state: InstallState, resour
   return messages;
 }
 
-module.exports = { removeUnmanagedResource };
+export { removeUnmanagedResource };

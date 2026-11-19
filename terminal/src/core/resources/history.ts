@@ -1,9 +1,30 @@
-'use strict';
+import { execFileSync, execFile } from 'node:child_process';
 
-import type { CatalogResource } from './model.js';
-const { CatalogError } = require('./model.js');
+import { CatalogError } from './model.js';
+import type { CatalogError as CatalogErrorType, CatalogResource } from './model.js';
 
-const { execFileSync, execFile } = require('node:child_process');
+interface SourceVersion {
+  sha: string;
+  date: string;
+  subject: string;
+}
+interface SourceVersionCommitInput {
+  sha?: unknown;
+  commit?: {
+    committer?: { date?: unknown } | null;
+    message?: unknown;
+  } | null;
+}
+interface HistoryProcessError {
+  stderr?: unknown;
+  message?: unknown;
+}
+function errorDetail(error: unknown): string {
+  const details = error as HistoryProcessError;
+  return String(details.stderr || details.message || 'unknown error')
+    .trim()
+    .slice(0, 500);
+}
 const SOURCE_VERSION_PAGE_SIZE = 100;
 const SOURCE_VERSION_MAX = 500;
 function sourceHistoryPath(resource: CatalogResource): string | null {
@@ -26,7 +47,11 @@ function sourceHistoryPath(resource: CatalogResource): string | null {
   }
   return null;
 }
-function latestSourceVersionAtRef(resource: CatalogResource, ref: string, run = execFileSync): string | null {
+function latestSourceVersionAtRef(
+  resource: CatalogResource,
+  ref: string,
+  run: typeof execFileSync = execFileSync,
+): string | null {
   const historyPath = sourceHistoryPath(resource);
   if (!historyPath) return null;
   let response: string;
@@ -52,23 +77,28 @@ function latestSourceVersionAtRef(resource: CatalogResource, ref: string, run = 
       },
     );
   } catch (error) {
-    const detail = String(error.stderr || error.message || 'unknown error')
-      .trim()
-      .slice(0, 500);
+    const detail = errorDetail(error);
     throw new CatalogError(
       `Cannot check GitHub source history for ${resource.source_repository}/${historyPath}: ${detail}`,
     );
   }
-  let commits;
+  let commits: unknown;
   try {
     commits = JSON.parse(response);
   } catch {
     throw new CatalogError('GitHub CLI returned invalid JSON while checking source history.');
   }
-  if (!Array.isArray(commits) || commits.length !== 1 || !/^[a-f0-9]{40}$/i.test(commits[0]?.sha || '')) {
+  const latestCommit: unknown = Array.isArray(commits) && commits.length === 1 ? commits[0] : undefined;
+  if (
+    !latestCommit ||
+    typeof latestCommit !== 'object' ||
+    !('sha' in latestCommit) ||
+    typeof latestCommit.sha !== 'string' ||
+    !/^[a-f0-9]{40}$/i.test(latestCommit.sha)
+  ) {
     throw new CatalogError('GitHub CLI returned an invalid source-history response.');
   }
-  return commits[0].sha.toLowerCase();
+  return latestCommit.sha.toLowerCase();
 }
 function validateSourceVersionResource(resource: CatalogResource): void {
   if (!resource.source_repository || !sourceHistoryPath(resource)) {
@@ -94,8 +124,8 @@ function sourceVersionArguments(resource: CatalogResource, page: number): string
     `page=${page}`,
   ];
 }
-function parseSourceVersionPage(response: string) {
-  let commits;
+function parseSourceVersionPage(response: string): { commits: unknown[]; versions: SourceVersion[] } {
+  let commits: unknown;
   try {
     commits = JSON.parse(response);
   } catch {
@@ -104,14 +134,15 @@ function parseSourceVersionPage(response: string) {
   if (!Array.isArray(commits)) {
     throw new CatalogError('GitHub CLI returned an invalid commit-history response.');
   }
-  const versions = [];
-  for (const entry of commits) {
+  const versions: SourceVersion[] = [];
+  for (const rawEntry of commits as unknown[]) {
+    const entry = rawEntry as SourceVersionCommitInput | null | undefined;
     const sha = entry?.sha;
     const commit = entry?.commit;
     const date = commit?.committer?.date;
     const message = commit?.message;
     if (
-      !/^[a-f0-9]{40}$/i.test(sha || '') ||
+      !/^[a-f0-9]{40}$/i.test((sha || '') as string) ||
       typeof date !== 'string' ||
       !Number.isFinite(Date.parse(date)) ||
       typeof message !== 'string' ||
@@ -119,19 +150,25 @@ function parseSourceVersionPage(response: string) {
     ) {
       throw new CatalogError('GitHub CLI returned an invalid commit in source history.');
     }
-    versions.push({ sha: sha.toLowerCase(), date, subject: message.split(/\r?\n/, 1)[0] });
+    versions.push({
+      sha: (sha as string).toLowerCase(),
+      date,
+      subject: message.split(/\r?\n/, 1)[0],
+    });
   }
   return { commits, versions };
 }
-function sourceHistoryFailure(resource: CatalogResource, error) {
-  const detail = String(error.stderr || error.message || 'unknown error')
-    .trim()
-    .slice(0, 500);
+function sourceHistoryFailure(resource: CatalogResource, error: unknown): CatalogErrorType {
+  const detail = errorDetail(error);
   return new CatalogError(
     `Cannot list GitHub commit history for ${resource.source_repository}/${sourceHistoryPath(resource) || resource.source_path}: ${detail}`,
   );
 }
-const runExecFile = (program, args, options) => {
+const runExecFile = (
+  program: string,
+  args: string[],
+  options: { encoding: 'utf8'; timeout: number },
+): Promise<string> => {
   const { promise, resolve, reject } = (
     Promise as PromiseConstructor & {
       withResolvers<T>(): {
@@ -143,7 +180,8 @@ const runExecFile = (program, args, options) => {
   ).withResolvers<string>();
   execFile(program, args, options, (error, stdout, stderr) => {
     if (error) {
-      error.stderr = stderr;
+      const processError = error as NodeJS.ErrnoException & { stderr?: string };
+      processError.stderr = stderr;
       reject(error);
     } else {
       resolve(stdout);
@@ -151,12 +189,9 @@ const runExecFile = (program, args, options) => {
   });
   return promise;
 };
-function listSourceVersions(
-  resource: CatalogResource,
-  run = execFileSync,
-): Array<{ sha: string; date: string; subject: string }> {
+function listSourceVersions(resource: CatalogResource, run = execFileSync): SourceVersion[] {
   validateSourceVersionResource(resource);
-  const versions = [];
+  const versions: SourceVersion[] = [];
   for (let page = 1; page <= SOURCE_VERSION_MAX / SOURCE_VERSION_PAGE_SIZE; page += 1) {
     let response: string;
     try {
@@ -174,19 +209,15 @@ function listSourceVersions(
   }
   return versions;
 }
-async function listSourceVersionsAsync(
-  resource: CatalogResource,
-  run = runExecFile,
-): Promise<Array<{ sha: string; date: string; subject: string }>> {
+async function listSourceVersionsAsync(resource: CatalogResource, run = runExecFile): Promise<SourceVersion[]> {
   validateSourceVersionResource(resource);
-  const versions = [];
+  const versions: SourceVersion[] = [];
   for (let page = 1; page <= SOURCE_VERSION_MAX / SOURCE_VERSION_PAGE_SIZE; page += 1) {
     let response: string;
     try {
       response = await run('gh', sourceVersionArguments(resource, page), {
         encoding: 'utf8',
         timeout: 30000,
-        stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
       throw sourceHistoryFailure(resource, error);
@@ -197,7 +228,7 @@ async function listSourceVersionsAsync(
   }
   return versions;
 }
-function uniqueSourceVersionPrefixes(versions): string[] {
+function uniqueSourceVersionPrefixes(versions: SourceVersion[]): string[] {
   return versions.map(({ sha }) => {
     let length = 7;
     while (
@@ -209,7 +240,7 @@ function uniqueSourceVersionPrefixes(versions): string[] {
     return sha.slice(0, length);
   });
 }
-function resolveSourceVersionPrefix(versions, prefix: string): string {
+function resolveSourceVersionPrefix(versions: SourceVersion[], prefix: string): string {
   const matches = versions.filter(({ sha }) => sha.startsWith(prefix.toLowerCase()));
   if (matches.length !== 1) {
     throw new CatalogError(
@@ -222,7 +253,7 @@ function resolveSourceVersionPrefix(versions, prefix: string): string {
   return matches[0].sha;
 }
 
-module.exports = {
+export {
   listSourceVersions,
   listSourceVersionsAsync,
   latestSourceVersionAtRef,

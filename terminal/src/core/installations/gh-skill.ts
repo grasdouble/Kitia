@@ -1,10 +1,9 @@
-'use strict';
+import { spawn, spawnSync } from 'node:child_process';
+import path from 'node:path';
 
 import type { CatalogResource } from '../resources/model.js';
-const { CatalogError } = require('../resources/model.js');
-const { SOURCE_SKILL_DIRECTORIES } = require('./model.js');
-const path = require('node:path');
-const { spawnSync, spawn } = require('node:child_process');
+import { CatalogError } from '../resources/model.js';
+import { SOURCE_SKILL_DIRECTORIES } from './model.js';
 const DEFAULT_GH_SKILL_TIMEOUT_MS = 120_000;
 
 export type GhSkillResult = {
@@ -12,16 +11,21 @@ export type GhSkillResult = {
   stdout?: string | Buffer | null;
   stderr?: string | Buffer | null;
 };
+export type SourceSkillResource = CatalogResource & {
+  source_repository: string;
+  source_path: string;
+  source_ref: string;
+};
 function buildSourceSkillArgs(
   action: string,
-  resource: CatalogResource,
-  agent?: string,
+  resource: SourceSkillResource,
+  agent?: 'claude-code' | 'github-copilot',
   { force = false, scope = 'project', target }: { force?: boolean; scope?: string; target?: string } = {},
 ): string[] {
   if (action === 'preview') {
     return ['skill', 'preview', resource.source_repository, `${resource.source_path}@${resource.source_ref}`];
   }
-  if (action === 'install' && ['claude-code', 'github-copilot'].includes(agent)) {
+  if (action === 'install' && (agent === 'claude-code' || agent === 'github-copilot')) {
     if (scope === 'user' && (!target || !path.isAbsolute(target))) {
       throw new CatalogError('User-scope source installation requires an absolute home directory');
     }
@@ -36,7 +40,7 @@ function buildSourceSkillArgs(
       scope,
       '--pin',
       resource.source_ref,
-      ...(scope === 'user' ? ['--dir', path.join(target, SOURCE_SKILL_DIRECTORIES[agent])] : []),
+      ...(scope === 'user' ? ['--dir', path.join(target!, SOURCE_SKILL_DIRECTORIES[agent])] : []),
       ...(force ? ['--force'] : []),
     ];
   }
@@ -195,8 +199,9 @@ function runGhSkillAsync(
   });
 }
 
-function ghSpawnError(error: Error & { code?: string }): Error {
-  const code = error.code || 'process launch failed';
+function ghSpawnError(error: unknown): Error {
+  const spawnError = error as Error & { code?: string };
+  const code = spawnError.code || 'process launch failed';
   return new CatalogError(
     `Could not start GitHub CLI for source skill update: ${code}. Check that gh is installed and available on PATH.`,
     'GH_SPAWN_FAILED',
@@ -235,8 +240,9 @@ function runGhSkill(
     );
   }
   if (result.error) {
+    const spawnError = result.error as NodeJS.ErrnoException;
     throw new CatalogError(
-      `Could not start GitHub CLI for source skill update: ${result.error.code || 'process launch failed'}. Check that gh is installed and available on PATH.`,
+      `Could not start GitHub CLI for source skill update: ${spawnError.code || 'process launch failed'}. Check that gh is installed and available on PATH.`,
       'GH_SPAWN_FAILED',
       {
         category: 'github-cli',
@@ -285,10 +291,4 @@ function describeGhFailure(diagnostic: string): string {
   return 'gh did not provide a recognized cause. Check GitHub CLI authentication, repository access, network connectivity, and the pinned resource, then retry.';
 }
 
-module.exports = {
-  buildSourceSkillArgs,
-  runGhSkill,
-  runGhSkillAsync,
-  formatGhDiagnostics,
-  describeGhFailure,
-};
+export { buildSourceSkillArgs, runGhSkill, runGhSkillAsync, formatGhDiagnostics, describeGhFailure };

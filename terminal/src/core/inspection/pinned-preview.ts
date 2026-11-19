@@ -1,8 +1,6 @@
 import type { PreparedPinnedSourceFile } from '../resources/content.js';
 import type { AuditResult } from './audit.js';
-('use strict');
-
-const { auditTextResources } = require('./audit.js');
+import { auditTextResources } from './audit.js';
 function auditPreparedSourceFile(prepared: PreparedPinnedSourceFile): AuditResult {
   return auditTextResources([
     {
@@ -13,4 +11,4 @@ function auditPreparedSourceFile(prepared: PreparedPinnedSourceFile): AuditResul
   ]);
 }
 
-module.exports = { auditPreparedSourceFile };
+export { auditPreparedSourceFile };

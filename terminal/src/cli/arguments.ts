@@ -1,10 +1,19 @@
-'use strict';
-
 import type { spawn } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 
+import { loadUserSourceConfiguration } from '../core/catalogs/config.js';
+import { catalogNameKey, type SourceConfiguration } from '../core/catalogs/model.js';
 import { CATALOG_PRESETS } from '../core/catalogs/presets.js';
 import type { PlanAction, InstallationTool, InstallationScope } from '../core/installations/model.js';
-import type { CatalogResource, ResourceKind } from '../core/resources/model.js';
+import {
+  CatalogError,
+  RESOURCE_ID,
+  USER_INSTALLABLE_KINDS,
+  type CatalogResource,
+  type ResourceKind,
+} from '../core/resources/model.js';
+
 export interface CliOptions {
   command?: string;
   action?: string;
@@ -42,12 +51,15 @@ export interface CliOptions {
   onResource?: (resource: { catalog: string; kind: string; id: string; status?: string; source?: boolean }) => void;
   onProgress?: (message: string) => void;
   spawnProcess?: typeof spawn;
+  showOnboarding?: boolean;
+  output?: CliOutput;
 }
-const os = require('node:os');
-const path = require('node:path');
-const { CatalogError, RESOURCE_ID, USER_INSTALLABLE_KINDS } = require('../core/resources/model.js');
-const { loadUserSourceConfiguration } = require('../core/catalogs/config.js');
-const { catalogNameKey } = require('../core/catalogs/model.js');
+export interface CliOutput {
+  log(message?: string): void;
+  error(message?: string): void;
+}
+export type ParsedCliOptions = CliOptions & { command: string };
+
 function isResourceKind(value: unknown): value is ResourceKind {
   return value === 'skill' || value === 'agent' || value === 'instruction';
 }
@@ -58,20 +70,20 @@ function isInstallationTool(value: string): value is InstallationTool {
 }
 
 function catalogNames(): string[] {
-  return loadUserSourceConfiguration().map((source) => source.name);
+  return loadUserSourceConfiguration().map((source: SourceConfiguration) => source.name);
 }
 
 function resolveCatalogName(value: string): string | undefined {
   return catalogNames().find((name) => catalogNameKey(name) === catalogNameKey(value));
 }
 
-function parseArguments(args: string[]): CliOptions {
+function parseArguments(args: string[]): ParsedCliOptions {
   if (args.length === 1 && ['--help', '-h'].includes(args[0])) return { command: 'help' };
   if (args.length === 0) args = ['dashboard'];
   const extras: CliOptions = {};
-  const command = args[0];
+  const command = args[0] ?? 'dashboard';
   const discovery = ['list', 'search'].includes(command);
-  const remaining = [];
+  const remaining: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--non-interactive') extras.nonInteractive = true;
@@ -145,8 +157,10 @@ function parseArguments(args: string[]): CliOptions {
   }
 }
 
-function parseCommandArguments(args: string[]): CliOptions {
-  const [command, ...remaining] = args;
+function parseCommandArguments(args: string[]): ParsedCliOptions {
+  const [firstArgument, ...remaining] = args;
+  if (firstArgument === undefined) throw new CatalogError(`Unknown command: ${firstArgument}`);
+  const command = firstArgument;
   if (command === 'collection') {
     const [action, file, ...arguments_] = remaining;
     const usage =
@@ -231,7 +245,7 @@ function parseCommandArguments(args: string[]): CliOptions {
     return { command, target: '.' };
   }
   if (command === 'list' || command === 'search') {
-    const options: CliOptions = { command, query: '' };
+    const options: ParsedCliOptions = { command, query: '' };
     if (command === 'search') {
       if (!remaining[0] || remaining[0].startsWith('--')) {
         throw new CatalogError(
@@ -328,7 +342,7 @@ function parseCommandArguments(args: string[]): CliOptions {
   if (!updateAll && (typeof id !== 'string' || !RESOURCE_ID.test(id))) {
     throw new CatalogError(`Usage: kitia ${command} [<kind>] <id> [--target <dir>]`);
   }
-  const result: CliOptions = {
+  const result: ParsedCliOptions = {
     command,
     kind,
     id,
@@ -417,4 +431,4 @@ Options:
   -h, --help                    Show this help`);
 }
 
-module.exports = { parseArguments, parseCommandArguments, printHelp };
+export { parseArguments, parseCommandArguments, printHelp };

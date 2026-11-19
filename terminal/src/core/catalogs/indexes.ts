@@ -1,18 +1,24 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
+import { readUtf8 } from '../resources/content.js';
+import { validateSourceCatalog } from '../resources/manifest.js';
 import type { CatalogResource } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
+import { loadUserSourceConfiguration, userCatalogIndexDirectory, catalogIndexFileName } from './config.js';
 import type { SourceConfiguration } from './model.js';
-const { CatalogError } = require('../resources/model.js');
-const { readUtf8 } = require('../resources/content.js');
-const { validateSourceCatalog } = require('../resources/manifest.js');
-const { catalogNameKey, validateSourceConfiguration } = require('./model.js');
-const { loadUserSourceConfiguration, userCatalogIndexDirectory, catalogIndexFileName } = require('./config.js');
-
-const fs = require('node:fs');
-const path = require('node:path');
+import { catalogNameKey, validateSourceConfiguration } from './model.js';
 const MAX_INDEX_BYTES = 2 * 1024 * 1024;
 
-function readIndex(file) {
+interface SourceDirectorySnapshot {
+  entries: string[];
+  error: unknown;
+  legacyIndexes: Map<string, string[]>;
+}
+function catalogErrorCode(error: Error): string | undefined {
+  return 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
+function readIndex(file: string): unknown {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.size > MAX_INDEX_BYTES) {
     throw new CatalogError(`Catalog index must be a regular JSON file of at most ${MAX_INDEX_BYTES} bytes`);
@@ -21,11 +27,12 @@ function readIndex(file) {
     return JSON.parse(readUtf8(file, 'Catalog index'));
   } catch (error) {
     if (error instanceof CatalogError) throw error;
-    throw new CatalogError(`Cannot read catalog index: ${error.message}`);
+    const caughtError = error as Error;
+    throw new CatalogError(`Cannot read catalog index: ${caughtError.message}`);
   }
 }
 
-function sameSources(left, right) {
+function sameSources(left: SourceConfiguration[], right: SourceConfiguration[]): boolean {
   return (
     left.length === right.length &&
     left.every(
@@ -34,15 +41,15 @@ function sameSources(left, right) {
   );
 }
 
-function sourceDirectorySnapshot(directory) {
-  let entries = [];
-  let error;
+function sourceDirectorySnapshot(directory: string): SourceDirectorySnapshot {
+  let entries: string[] = [];
+  let error: unknown;
   try {
     if (fs.existsSync(directory)) entries = fs.readdirSync(directory);
   } catch (caught) {
     error = caught;
   }
-  const legacyIndexes = new Map();
+  const legacyIndexes = new Map<string, string[]>();
   for (const entry of entries) {
     if (!entry.toLowerCase().endsWith('.json') || entry.toUpperCase() === 'CATALOGSOURCES.JSON') continue;
     const key = catalogNameKey(entry.slice(0, -5));
@@ -53,7 +60,11 @@ function sourceDirectorySnapshot(directory) {
   return { entries, error, legacyIndexes };
 }
 
-function indexPaths(directory, source, snapshot = sourceDirectorySnapshot(directory)) {
+function indexPaths(
+  directory: string,
+  source: SourceConfiguration,
+  snapshot: SourceDirectorySnapshot = sourceDirectorySnapshot(directory),
+) {
   if (snapshot.error) throw snapshot.error;
   const canonical = path.join(directory, catalogIndexFileName(source.name));
   const legacyNames = snapshot.legacyIndexes.get(catalogNameKey(source.name)) || [];
@@ -66,23 +77,32 @@ function indexPaths(directory, source, snapshot = sourceDirectorySnapshot(direct
   };
 }
 
-function loadSourceCatalogFromDirectory(directory, source, snapshot = sourceDirectorySnapshot(directory)) {
+function loadSourceCatalogFromDirectory(
+  directory: string,
+  source: SourceConfiguration,
+  snapshot: SourceDirectorySnapshot = sourceDirectorySnapshot(directory),
+): CatalogResource[] {
   const { canonical, legacy, selected } = indexPaths(directory, source, snapshot);
   if (!fs.existsSync(selected)) throw new CatalogError(`Catalog index not found for ${source.name}`);
   if (canonical !== legacy && fs.existsSync(canonical) && fs.existsSync(legacy)) {
     throw new CatalogError(`Catalog ${source.name} has both canonical and legacy index files`);
   }
-  return validateSourceCatalog(readIndex(selected), {
+  const resources = validateSourceCatalog(readIndex(selected), {
     ...source,
     label: path.relative(directory, selected),
-  }).map((resource) => ({ ...resource, catalog: source.name }));
+  }) as CatalogResource[];
+  return resources.map((resource) => ({ ...resource, catalog: source.name }));
 }
 
-function validateCatalogSet(entries, sources, sourceDirectory = '') {
+function validateCatalogSet(
+  entries: { name: string; catalog: unknown }[],
+  sources: SourceConfiguration[],
+  sourceDirectory = '',
+): CatalogResource[] {
   if (!Array.isArray(entries) || entries.length !== sources.length) {
     throw new CatalogError('User source catalog set does not match its registry');
   }
-  const byName = new Map();
+  const byName = new Map<string, unknown>();
   for (const entry of entries) {
     if (!entry || typeof entry.name !== 'string' || byName.has(entry.name)) {
       throw new CatalogError('User source catalog set contains an invalid or duplicate catalog name');
@@ -93,17 +113,22 @@ function validateCatalogSet(entries, sources, sourceDirectory = '') {
     if (!byName.has(source.name)) {
       throw new CatalogError(`User source catalog set is missing ${source.name}`);
     }
-    return validateSourceCatalog(byName.get(source.name), {
+    const resources = validateSourceCatalog(byName.get(source.name), {
       ...source,
       label: `${sourceDirectory ? `${sourceDirectory}/` : ''}${source.name}.json`,
-    }).map((resource) => ({ ...resource, catalog: source.name }));
+    }) as CatalogResource[];
+    return resources.map((resource) => ({ ...resource, catalog: source.name }));
   });
 }
 
-function loadSourceCatalogsFromDirectory(directory, sources, snapshot = sourceDirectorySnapshot(directory)) {
+function loadSourceCatalogsFromDirectory(
+  directory: string,
+  sources: SourceConfiguration[],
+  snapshot = sourceDirectorySnapshot(directory),
+): CatalogResource[] {
   if (snapshot.error) throw snapshot.error;
-  const expectedLegacyFiles = [];
-  const expectedCanonicalFiles = [];
+  const expectedLegacyFiles: string[] = [];
+  const expectedCanonicalFiles: string[] = [];
   for (const source of sources) {
     const { canonical, legacy, selected } = indexPaths(directory, source, snapshot);
     if (canonical !== legacy && fs.existsSync(canonical) && fs.existsSync(legacy)) {
@@ -171,12 +196,15 @@ function loadCatalogs(
     strictAggregate = false,
   }: CatalogLoadRequest = {},
   warn: (warning: CatalogLoadWarning) => void = () => {},
-) {
-  names ||= sources.map(({ name }) => name);
-  const loaded = { sourceResources: [], unavailable: [] };
+): { sourceResources: CatalogResource[]; unavailable: string[] } {
+  const selectedNames = names ?? sources.map(({ name }) => name);
+  const loaded: { sourceResources: CatalogResource[]; unavailable: string[] } = {
+    sourceResources: [],
+    unavailable: [],
+  };
   const directory = userCatalogIndexDirectory();
   const snapshot =
-    !suppliedResources && (strictAggregate ? sources.length > 0 : names.length > 0)
+    !suppliedResources && (strictAggregate ? sources.length > 0 : selectedNames.length > 0)
       ? sourceDirectorySnapshot(directory)
       : undefined;
   if (strictAggregate) {
@@ -186,7 +214,7 @@ function loadCatalogs(
       return loaded;
     } catch (error) {
       if (!(error instanceof Error)) throw error;
-      const errorCode = (error as Error & { code?: string }).code;
+      const errorCode = catalogErrorCode(error);
       const code =
         errorCode &&
         ['UNSUPPORTED_CATALOG_VERSION', 'UNSUPPORTED_RESOURCE_KIND', 'INVALID_ARGUMENT'].includes(errorCode)
@@ -196,7 +224,7 @@ function loadCatalogs(
     }
   }
   const sourceByName = new Map(sources.map((source) => [source.name, source]));
-  for (const name of names) {
+  for (const name of selectedNames) {
     const source = sourceByName.get(name);
     if (!source) throw new CatalogError(`Unknown catalog: ${name}`, 'INVALID_ARGUMENT');
     try {
@@ -208,7 +236,7 @@ function loadCatalogs(
     } catch (error) {
       if (!(error instanceof Error)) throw error;
       const message = `${name} catalog unavailable: ${error.message}`;
-      const errorCode = (error as Error & { code?: string }).code;
+      const errorCode = catalogErrorCode(error);
       const code =
         errorCode &&
         ['UNSUPPORTED_CATALOG_VERSION', 'UNSUPPORTED_RESOURCE_KIND', 'INVALID_ARGUMENT'].includes(errorCode)
@@ -221,11 +249,4 @@ function loadCatalogs(
   }
   return loaded;
 }
-module.exports = {
-  MAX_INDEX_BYTES,
-  validateCatalogSet,
-  loadSourceCatalogsFromDirectory,
-  loadCatalogs,
-};
-
-export {};
+export { MAX_INDEX_BYTES, validateCatalogSet, loadSourceCatalogsFromDirectory, loadCatalogs };

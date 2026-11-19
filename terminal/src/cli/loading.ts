@@ -1,25 +1,27 @@
-'use strict';
+import { loadUserSourceConfiguration } from '../core/catalogs/config.js';
+import { loadCatalogs, type CatalogLoadRequest, type CatalogLoadWarning } from '../core/catalogs/indexes.js';
+import { catalogNameKey, type SourceConfiguration } from '../core/catalogs/model.js';
+import { prepareTrackedResources } from '../core/inventory/inventory.js';
+import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import type { ParsedCliOptions } from './arguments.js';
 
-const { CatalogError } = require('../core/resources/model.js');
-const { prepareTrackedResources } = require('../core/inventory/inventory.js');
-const { loadUserSourceConfiguration } = require('../core/catalogs/config.js');
-const { catalogNameKey } = require('../core/catalogs/model.js');
-const { loadCatalogs } = require('../core/catalogs/indexes.js');
-
-function loadCommandCatalogs(options, warn = (_warning) => {}) {
+function loadCommandCatalogs(
+  options: ParsedCliOptions,
+  warn: (warning: CatalogLoadWarning) => void = () => {},
+): { sourceResources: CatalogResource[]; unavailable: string[] } {
   const { command, catalog, kind, id } = options;
-  const sources = loadUserSourceConfiguration();
+  const sources: SourceConfiguration[] = loadUserSourceConfiguration();
   const sourceNames = sources.map(({ name }) => name);
   const tracked =
     command === 'update' && id
-      ? prepareTrackedResources(options.target, {
+      ? prepareTrackedResources(options.target!, {
           kind,
           id,
           registeredCatalogs: sourceNames,
           includeRemovedCatalogs: false,
         })
       : command === 'uninstall' && !catalog
-        ? prepareTrackedResources(options.target, {
+        ? prepareTrackedResources(options.target!, {
             kind,
             id,
             registeredCatalogs: sourceNames,
@@ -28,15 +30,15 @@ function loadCommandCatalogs(options, warn = (_warning) => {}) {
         : undefined;
   const names = catalog ? [catalog] : tracked ? tracked.names : sourceNames;
   if (command === 'uninstall' && catalog) {
-    const selectedInventory = prepareTrackedResources(options.target, {
+    const selectedInventory = prepareTrackedResources(options.target!, {
       kind,
       id,
       registeredCatalogs: sourceNames,
       includeRemovedCatalogs: true,
     });
     const installedCatalog =
-      selectedInventory.installedCatalogs.find((name) => name === catalog) ||
-      selectedInventory.installedCatalogs.find((name) => catalogNameKey(name) === catalogNameKey(catalog));
+      selectedInventory.installedCatalogs.find((name: string) => name === catalog) ||
+      selectedInventory.installedCatalogs.find((name: string) => catalogNameKey(name) === catalogNameKey(catalog));
     const registeredCatalog =
       sources.find((source) => source.name === catalog)?.name ||
       sources.find((source) => catalogNameKey(source.name) === catalogNameKey(catalog))?.name;
@@ -45,7 +47,9 @@ function loadCommandCatalogs(options, warn = (_warning) => {}) {
     }
     const selectedCatalog = installedCatalog || registeredCatalog;
     options.catalog = selectedCatalog;
-    const trackedResources = selectedInventory.resources.filter((resource) => resource.catalog === selectedCatalog);
+    const trackedResources = selectedInventory.resources.filter(
+      (resource: CatalogResource) => resource.catalog === selectedCatalog,
+    );
     if (trackedResources.length || !registeredCatalog) {
       return { sourceResources: trackedResources, unavailable: [] };
     }
@@ -53,19 +57,17 @@ function loadCommandCatalogs(options, warn = (_warning) => {}) {
   }
   if (command === 'uninstall' && tracked) return { sourceResources: tracked.resources, unavailable: [] };
 
-  const loaded = loadCatalogs(
-    {
-      names: command === 'validate' ? sourceNames : names,
-      sources,
-      sourceResources: options.sourceResources,
-      allowUnavailable: ['list', 'search', 'dashboard'].includes(command),
-      strictAggregate: command === 'validate',
-    },
-    warn,
-  );
+  const request: CatalogLoadRequest = {
+    names: command === 'validate' ? sourceNames : names,
+    sources,
+    sourceResources: options.sourceResources,
+    allowUnavailable: ['list', 'search', 'dashboard'].includes(command),
+    strictAggregate: command === 'validate',
+  };
+  const loaded = loadCatalogs(request, warn);
   if (command === 'validate' && catalog) {
-    loaded.sourceResources = loaded.sourceResources.filter((resource) => resource.catalog === catalog);
+    loaded.sourceResources = loaded.sourceResources.filter((resource: CatalogResource) => resource.catalog === catalog);
   }
   return loaded;
 }
-module.exports = { loadCommandCatalogs };
+export { loadCommandCatalogs };

@@ -22,7 +22,7 @@ export function ResourceTableRow({
   row,
   selected,
 }: {
-  row: { key: string; color: string; text: string };
+  row: { key: string; color: string | undefined; text: string };
   selected: boolean;
 }) {
   return h(
@@ -51,7 +51,7 @@ export function resourceTableRows<T>({
     absoluteIndex: number,
   ) => {
     key: string;
-    color: string;
+    color: string | undefined;
     text: string;
   };
 }): ReactNode[] {

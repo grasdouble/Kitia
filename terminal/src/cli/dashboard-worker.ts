@@ -1,22 +1,45 @@
-'use strict';
+import { parentPort, workerData } from 'node:worker_threads';
 
-const { loadUserSourceConfiguration } = require('../core/catalogs/config.js');
-const { loadCommandCatalogs } = require('./loading.js');
-const { catalogEntries } = require('../core/resources/queries.js');
-const { createDashboardActionHandler } = require('../tui/native-actions.js');
-const {
+import { loadUserSourceConfiguration } from '../core/catalogs/config.js';
+import {
   addCatalog,
   updateCatalog,
   removeCatalog,
   refreshCatalogs,
   importCatalogConfigurationText,
   exportCatalogConfigurationData,
-} = require('../core/catalogs/manage.js');
-const { copyTextToClipboard } = require('./commands.js');
-import { parentPort, workerData } from 'node:worker_threads';
+} from '../core/catalogs/manage.js';
+import type { AddCatalogRequest, SourceConfiguration, UserCatalog } from '../core/catalogs/model.js';
+import type { CatalogResource } from '../core/resources/model.js';
+import { catalogEntries } from '../core/resources/queries.js';
+import {
+  createDashboardActionHandler,
+  type NativeDashboardAction,
+  type NativeDashboardCatalogs,
+  type NativeDashboardOptions,
+  type NativeInstallOptions,
+} from '../tui/native-actions.js';
+import { copyTextToClipboard } from './commands.js';
+import { loadCommandCatalogs } from './loading.js';
 
-function catalogState() {
-  return loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
+type DashboardWorkerTask =
+  | {
+      task: 'resource-action';
+      action: NativeDashboardAction;
+      resource: CatalogResource;
+      dashboardOptions: NativeDashboardOptions;
+      catalogs: NativeDashboardCatalogs;
+      installOptions: NativeInstallOptions;
+    }
+  | { task: 'catalog-add'; request: AddCatalogRequest }
+  | { task: 'catalog-update'; originalName: string; request: AddCatalogRequest }
+  | { task: 'catalog-remove'; name: string }
+  | { task: 'catalog-refresh'; name?: string }
+  | { task: 'catalog-transfer'; action: 'import' | 'export'; content: string };
+
+function catalogState(): UserCatalog[] {
+  const catalogs: SourceConfiguration[] = loadUserSourceConfiguration();
+  return catalogs.map(({ name, repository, mode, entries }) => ({
     name,
     repository,
     mode,
@@ -29,9 +52,10 @@ function refreshDashboardCatalogs() {
   return { catalogs: catalogState(), resources: catalogEntries(refreshed.sourceResources) };
 }
 
-async function execute(data) {
+async function execute(data: DashboardWorkerTask) {
+  const taskName = data.task;
   if (data.task === 'resource-action') {
-    const handler = createDashboardActionHandler((message) => parentPort?.postMessage({ progress: message }));
+    const handler = createDashboardActionHandler((message: string) => parentPort?.postMessage({ progress: message }));
     return handler(data.action, data.resource, data.dashboardOptions, data.catalogs, data.installOptions);
   }
   if (data.task === 'catalog-add') {
@@ -73,7 +97,7 @@ async function execute(data) {
     }
     return { ...refreshDashboardCatalogs(), importSummary };
   }
-  throw new Error(`Unsupported dashboard worker task: ${data.task}`);
+  throw new Error(`Unsupported dashboard worker task: ${taskName}`);
 }
 
 execute(workerData).then(

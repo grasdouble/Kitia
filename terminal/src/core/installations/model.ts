@@ -25,4 +25,4 @@ export interface InstallPlanOptions {
   onAction?: (action: PlanAction) => void;
 }
 
-module.exports = { SOURCE_SKILL_DIRECTORIES };
+export { SOURCE_SKILL_DIRECTORIES };

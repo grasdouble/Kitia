@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 
 import { JSDOM } from 'jsdom';
 import { createServer } from 'vite';
-import commonjs from 'vite-plugin-commonjs';
 
 import { createComponentRouter } from '../../../test/router-fixture.mjs';
 
@@ -115,7 +114,6 @@ const vite = await createServer({
         return name === 'style' ? 'export {}' : `export const ${name} = globalThis.kitiaLifecycleTestModules.${name};`;
       },
     },
-    commonjs({ filter: (id) => id.includes('/terminal/src/') }),
   ],
 });
 after(async () => {

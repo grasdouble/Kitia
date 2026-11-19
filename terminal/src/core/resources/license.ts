@@ -1,15 +1,4 @@
-'use strict';
-
-const parseExpression = require('spdx-expression-parse');
-
-type SpdxNode = {
-  license?: string;
-  left?: SpdxNode;
-  right?: SpdxNode;
-  conjunction?: string;
-  exception?: string;
-  plus?: boolean;
-};
+import parseExpression, { type SpdxNode } from 'spdx-expression-parse';
 
 function parsedSpdxExpression(value: unknown): SpdxNode | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
@@ -39,6 +28,4 @@ function matchesLicense(resource: { license_status?: string; license_spdx?: stri
   return resource.license_status === filter.trim();
 }
 
-module.exports = { spdxExpression, matchesLicense };
-
-export {};
+export { spdxExpression, matchesLicense };

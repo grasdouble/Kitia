@@ -79,7 +79,7 @@ class CatalogError extends Error {
   }
 }
 
-function rejectUnsupportedVersion(version: unknown, supported: number, label: string, code: string) {
+function rejectUnsupportedVersion(version: unknown, supported: number, label: string, code: string): void {
   if (typeof version === 'number' && Number.isSafeInteger(version) && version > 0 && version !== supported) {
     throw new CatalogError(
       `${label} version ${version} is not supported by this CLI (supported: ${supported}). Use a compatible CLI version; do not rewrite or delete the data to change its version.`,
@@ -88,11 +88,4 @@ function rejectUnsupportedVersion(version: unknown, supported: number, label: st
   }
 }
 
-module.exports = {
-  CatalogError,
-  INSTALLABLE_KINDS,
-  USER_INSTALLABLE_KINDS,
-  TOOLS,
-  RESOURCE_ID,
-  rejectUnsupportedVersion,
-};
+export { CatalogError, INSTALLABLE_KINDS, USER_INSTALLABLE_KINDS, TOOLS, RESOURCE_ID, rejectUnsupportedVersion };

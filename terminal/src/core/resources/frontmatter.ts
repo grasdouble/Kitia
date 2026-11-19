@@ -1,8 +1,12 @@
-'use strict';
+import type { Document } from 'yaml';
+import YAML from 'yaml';
 
-const { CatalogError } = require('./model.js');
-const YAML = require('yaml');
-function frontmatterParts(text, filePath, allowEmpty = false) {
+import { CatalogError } from './model.js';
+function frontmatterParts(
+  text: string,
+  filePath: string,
+  allowEmpty = false,
+): { document: Document; values: Map<string, unknown>; body: string } {
   const lines = text.split('\n');
   if (!lines.length || lines[0].trim() !== '---') {
     throw new CatalogError(`${filePath} must start with YAML frontmatter`);
@@ -24,16 +28,17 @@ function frontmatterParts(text, filePath, allowEmpty = false) {
   if (!YAML.isMap(document.contents)) {
     throw new CatalogError(`${filePath} frontmatter must be a YAML mapping`);
   }
-  let values;
+  let values: Map<string, unknown>;
   try {
     values = document.toJS({ maxAliasCount: 20, mapAsMap: true });
   } catch (error) {
-    throw new CatalogError(`Invalid YAML in ${filePath}: ${error.message}`);
+    const detail = (error as { message?: unknown }).message;
+    throw new CatalogError(`Invalid YAML in ${filePath}: ${String(detail)}`);
   }
   return { document, values, body: lines.slice(end + 1).join('\n') };
 }
 
-function parseFrontmatter(text, filePath) {
+function parseFrontmatter(text: string, filePath: string): Map<string, unknown> {
   return frontmatterParts(text, filePath).values;
 }
 
@@ -62,6 +67,4 @@ function parseInstruction(
   return { values, body, applyTo };
 }
 
-module.exports = { frontmatterParts, parseFrontmatter, parseInstruction };
-
-export {};
+export { frontmatterParts, parseFrontmatter, parseInstruction };

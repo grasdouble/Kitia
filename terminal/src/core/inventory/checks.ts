@@ -1,14 +1,14 @@
-'use strict';
-
-import type { CatalogResource } from '../resources/model.js';
-const { CatalogError } = require('../resources/model.js');
-const { readInstallState, readInstalledSourceSkills, readInstalledSourceResources } = require('./inventory.js');
-const { latestSourceVersionAtRef } = require('../resources/history.js');
-const { findUnmanagedArtifacts } = require('./discovery.js');
-const { trackedPaths } = require('../installations/files.js');
-
-const fs = require('node:fs');
 import type { execFileSync as ExecFileSync } from 'node:child_process';
+import fs from 'node:fs';
+
+import { trackedPaths } from '../installations/files.js';
+import { latestSourceVersionAtRef } from '../resources/history.js';
+import type { CatalogResource } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
+import { findUnmanagedArtifacts } from './discovery.js';
+import type { InstalledSourceResource } from './inventory.js';
+import { readInstallState, readInstalledSourceSkills, readInstalledSourceResources } from './inventory.js';
+import type { InstallState } from './model.js';
 export interface ScanError {
   scope: string;
   code: string;
@@ -76,8 +76,10 @@ function checkInstalledResources(
     for (const [flag, label] of [
       ['missing', 'Missing installed files'],
       ['modified', 'Locally modified'],
-    ]) {
-      const affected = installations.filter((installation) => installation[flag]);
+    ] as const) {
+      const affected = installations.filter(
+        (installation: InstalledSourceResource['installations'][number]) => installation[flag],
+      );
       if (affected.length) {
         issue(
           result,
@@ -96,7 +98,7 @@ function checkInstalledResources(
       );
       continue;
     }
-    const stale = installations.filter((installation) => {
+    const stale = installations.filter((installation: InstalledSourceResource['installations'][number]) => {
       if (installation.missing || installation.ref?.toLowerCase() === resource.source_ref?.toLowerCase()) return false;
       if (!/^[a-f0-9]{40}$/i.test(installation.ref || '') || !/^[a-f0-9]{40}$/i.test(resource.source_ref || ''))
         return true;
@@ -121,7 +123,11 @@ function checkInstalledResources(
         'UPDATE_AVAILABLE',
         stale.map((entry) => entry.path),
       );
-      const installedRefs = [...new Set(stale.map(({ ref }) => ref?.slice(0, 7) || 'unknown'))];
+      const installedRefs = [
+        ...new Set(
+          stale.map(({ ref }: InstalledSourceResource['installations'][number]) => ref?.slice(0, 7) || 'unknown'),
+        ),
+      ];
       messages.push(
         `Update available: ${resource.catalog || 'source'} ${resource.kind} ${resource.id} (installed at ${installedRefs.join(', ')}, catalog ${resource.source_ref?.slice(0, 7) || 'unknown'})`,
       );
@@ -174,4 +180,4 @@ function collectInstalledScopes(
   return result;
 }
 
-module.exports = { checkInstalledResources, collectInstalledScopes };
+export { checkInstalledResources, collectInstalledScopes };

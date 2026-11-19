@@ -170,7 +170,7 @@ export function CatalogScreen({
         key: `${resource.catalog}:${resource.kind}:${resource.id}`,
         color: resolveRowColor(
           resource.kind,
-          false,
+          selectedRow,
           resource.license_status === 'Proprietary' ? DASHBOARD_THEME.semantic.inventoryStatus.attention : undefined,
         ),
         text: row,

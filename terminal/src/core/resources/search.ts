@@ -1,16 +1,30 @@
-'use strict';
-
-function searchTerms(query = '') {
+function searchTerms(query = ''): string[] {
   return query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
 }
 
-function matchesSearchText(query = '', values = []) {
+function matchesSearchText(query = '', values: unknown[] = []): boolean {
   const words = searchTerms(query);
   const searchable = values.filter(Boolean).join(' ').toLocaleLowerCase();
   return words.every((word) => searchable.includes(word));
 }
 
-function searchRelevance(resource, query = '') {
+function searchRelevance(
+  resource: {
+    id: string;
+    tags?: string[];
+    category?: string;
+    owner?: string;
+    description?: string;
+    use_when?: string;
+    catalog?: string;
+    kind?: string;
+    status?: string;
+    license_status?: string;
+    source_repository?: string;
+    source_path?: string;
+  },
+  query = '',
+): number {
   const words = searchTerms(query);
   if (!words.length) return 0;
   let score = 0;
@@ -34,7 +48,7 @@ function searchRelevance(resource, query = '') {
   return score;
 }
 
-function scoreValue(value, word, weight) {
+function scoreValue(value: unknown, word: string, weight: number): number {
   if (!value) return 0;
   const text = String(value).toLocaleLowerCase();
   if (text === word) return weight * 3;
@@ -42,14 +56,8 @@ function scoreValue(value, word, weight) {
   return text.includes(word) ? weight : 0;
 }
 
-function matchesSearch(resource, query = '') {
+function matchesSearch(resource: Parameters<typeof searchRelevance>[0], query = ''): boolean {
   return !query.trim() || searchRelevance(resource, query) > 0;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { matchesSearch, matchesSearchText, searchRelevance };
-} else {
-  globalThis.CatalogSearch = { matchesSearch, matchesSearchText, searchRelevance };
-}
-
-export {};
+export { matchesSearch, matchesSearchText, searchRelevance };

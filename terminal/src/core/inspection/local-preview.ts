@@ -1,13 +1,11 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
+import { targetPath } from '../installations/files.js';
 import type { InstallState } from '../inventory/model.js';
-import type { ResourceInspection } from './model.js';
-const { targetPath } = require('../installations/files.js');
 import type { CatalogResource } from '../resources/model.js';
-const { auditTextResources } = require('./audit.js');
-
-const fs = require('node:fs');
-const path = require('node:path');
+import { auditTextResources } from './audit.js';
+import type { ResourceInspection } from './model.js';
 // Native filesystem inspection; browser fixtures provide their own in-memory inspection facts.
 function localPreviewFiles(targetRoot: string, state: InstallState, resource: CatalogResource): ResourceInspection {
   const record =
@@ -35,7 +33,8 @@ function localPreviewFiles(targetRoot: string, state: InstallState, resource: Ca
       try {
         stat = fs.lstatSync(current);
       } catch (error) {
-        if (error.code === 'ENOENT') throw new Error(`Local preview file is missing: ${relativePath}.`);
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+          throw new Error(`Local preview file is missing: ${relativePath}.`);
         throw error;
       }
       if (stat.isSymbolicLink()) throw new Error(`Refusing symbolic link in local preview path: ${relativePath}.`);
@@ -53,11 +52,11 @@ function localPreviewFiles(targetRoot: string, state: InstallState, resource: Ca
     try {
       bytes = fs.readFileSync(regularFilePath(relativePath));
     } catch (error) {
-      if (['EACCES', 'EPERM', 'EIO'].includes(error.code)) {
+      if (['EACCES', 'EPERM', 'EIO'].includes((error as NodeJS.ErrnoException).code!)) {
         return {
           path: relativePath,
-          content: `[Unreadable file: ${error.code}.]`,
-          auditSkipReason: `could not be read (${error.code})`,
+          content: `[Unreadable file: ${(error as NodeJS.ErrnoException).code}.]`,
+          auditSkipReason: `could not be read (${(error as NodeJS.ErrnoException).code})`,
         };
       }
       throw error;
@@ -90,7 +89,8 @@ function localPreviewFiles(targetRoot: string, state: InstallState, resource: Ca
       try {
         stat = fs.lstatSync(current);
       } catch (error) {
-        if (error.code === 'ENOENT') throw new Error(`Local preview directory is missing: ${relativePath}.`);
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+          throw new Error(`Local preview directory is missing: ${relativePath}.`);
         throw error;
       }
       if (stat.isSymbolicLink()) throw new Error(`Refusing symbolic link in local preview path: ${relativePath}.`);
@@ -155,4 +155,4 @@ function localPreviewFiles(targetRoot: string, state: InstallState, resource: Ca
   };
 }
 
-module.exports = { localPreviewFiles };
+export { localPreviewFiles };

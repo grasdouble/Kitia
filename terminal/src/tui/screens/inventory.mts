@@ -209,7 +209,7 @@ export function InventoryScreen({
           ]);
       return {
         key: `${resource.managed === false ? 'unmanaged' : resource.catalog}:${resource.scope}:${resource.kind}:${resource.id}`,
-        color: resolveRowColor(resource.kind, false, colorForStatus(status)),
+        color: resolveRowColor(resource.kind, selectedRow, colorForStatus(dashboardStatus(resource))),
         text: row,
       };
     },

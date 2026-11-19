@@ -1,9 +1,11 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const { targetPath } = require('../installations/files.js');
-const { CatalogError } = require('../resources/model.js');
-const { parseFrontmatter } = require('../resources/frontmatter.js');
-const { readUtf8 } = require('../resources/content.js');
+import { targetPath } from '../installations/files.js';
+import { readUtf8 } from '../resources/content.js';
+import { parseFrontmatter } from '../resources/frontmatter.js';
+import type { ResourceKind } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
 const INSTALL_SCAN_DIRECTORIES = {
   claude: ['.claude/skills', '.claude/agents', '.claude/rules'],
   copilot: ['.agents/skills', '.agents/agents', '.agents/instructions', '.github/agents', '.github/instructions'],
@@ -14,10 +16,12 @@ const USER_INSTALL_SCAN_DIRECTORIES = {
   copilot: ['.agents/skills', '.copilot/agents'],
 };
 
-const fs = require('node:fs');
-const path = require('node:path');
-
-function collectMarkdownFiles(targetRoot, relativeDirectory, output, mode = 'markdown') {
+function collectMarkdownFiles(
+  targetRoot: string,
+  relativeDirectory: string,
+  output: string[],
+  mode: 'markdown' | 'skills' | 'skill' = 'markdown',
+): void {
   const directory = targetPath(targetRoot, relativeDirectory, {
     allowFinalDirectorySymlink: true,
   });
@@ -25,7 +29,7 @@ function collectMarkdownFiles(targetRoot, relativeDirectory, output, mode = 'mar
   try {
     stat = fs.lstatSync(directory);
   } catch (error) {
-    if (error.code === 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return;
     }
     throw error;
@@ -45,7 +49,7 @@ function collectMarkdownFiles(targetRoot, relativeDirectory, output, mode = 'mar
       throw new CatalogError(`Refusing to inspect symbolic link: ${childPath}`);
     }
     const childRelative = path.posix.join(relativeDirectory, entry.name);
-    const childPath = targetPath(targetRoot, childRelative);
+    targetPath(targetRoot, childRelative);
     if (entry.isDirectory() && mode !== 'skill') {
       collectMarkdownFiles(targetRoot, childRelative, output, mode === 'skills' ? 'skill' : 'markdown');
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
@@ -53,13 +57,13 @@ function collectMarkdownFiles(targetRoot, relativeDirectory, output, mode = 'mar
     }
   }
 }
-function collectUnmanagedSkillFiles(targetRoot, relativeDirectory, output) {
+function collectUnmanagedSkillFiles(targetRoot: string, relativeDirectory: string, output: string[]): void {
   const directory = targetPath(targetRoot, relativeDirectory);
   let stat;
   try {
     stat = fs.lstatSync(directory);
   } catch (error) {
-    if (error.code === 'ENOENT') return;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
   if (stat.isSymbolicLink()) {
@@ -76,7 +80,7 @@ function collectUnmanagedSkillFiles(targetRoot, relativeDirectory, output) {
       return;
     }
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
@@ -84,8 +88,8 @@ function collectUnmanagedSkillFiles(targetRoot, relativeDirectory, output) {
   }
 }
 
-function unmanagedArtifact(relativePath) {
-  const roots: Array<[string, string[], RegExp]> = [
+function unmanagedArtifact(relativePath: string): { kind: ResourceKind; id: string } | null {
+  const roots: Array<[ResourceKind, string[], RegExp]> = [
     ['skill', ['.agents/skills/', '.claude/skills/'], /\/SKILL\.md$/i],
     ['agent', ['.agents/agents/', '.claude/agents/', '.github/agents/', '.copilot/agents/'], /(?:\.agent)?\.md$/i],
     ['instruction', ['.agents/instructions/', '.claude/rules/', '.github/instructions/'], /(?:\.instructions)?\.md$/i],
@@ -117,7 +121,7 @@ function unmanagedArtifactDescription(targetRoot: string, paths: string[]): stri
   return paths.sort().join(', ');
 }
 
-function findUnmanagedArtifacts(targetRoot, excludedPaths: Set<string> = new Set()) {
+function findUnmanagedArtifacts(targetRoot: string, excludedPaths: Set<string> = new Set()) {
   const scanDirectories = [...Object.values(INSTALL_SCAN_DIRECTORIES), ...Object.values(USER_INSTALL_SCAN_DIRECTORIES)];
   const directories = [
     ...new Set(
@@ -126,7 +130,7 @@ function findUnmanagedArtifacts(targetRoot, excludedPaths: Set<string> = new Set
       ),
     ),
   ];
-  const files = [];
+  const files: string[] = [];
   for (const directory of directories) {
     if (directory.endsWith('/skills')) {
       collectUnmanagedSkillFiles(targetRoot, directory, files);
@@ -134,7 +138,7 @@ function findUnmanagedArtifacts(targetRoot, excludedPaths: Set<string> = new Set
       collectMarkdownFiles(targetRoot, directory, files);
     }
   }
-  const artifacts = new Map<string, { kind: string; id: string; paths: string[] }>();
+  const artifacts = new Map<string, { kind: ResourceKind; id: string; paths: string[] }>();
   for (const relativePath of files) {
     if (excludedPaths.has(relativePath)) continue;
     const artifact = unmanagedArtifact(relativePath);
@@ -151,4 +155,4 @@ function findUnmanagedArtifacts(targetRoot, excludedPaths: Set<string> = new Set
   }));
 }
 
-module.exports = { findUnmanagedArtifacts };
+export { findUnmanagedArtifacts };

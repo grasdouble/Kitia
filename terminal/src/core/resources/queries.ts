@@ -1,8 +1,6 @@
-'use strict';
-
+import { matchesLicense } from './license.js';
 import type { CatalogResource } from './model.js';
-const { matchesLicense } = require('./license.js');
-const { matchesSearch, searchRelevance } = require('./search.js');
+import { matchesSearch, searchRelevance } from './search.js';
 
 export interface ResourceQuery {
   catalog?: string;
@@ -12,14 +10,14 @@ export interface ResourceQuery {
   license?: string;
   query?: string;
 }
-function catalogEntries(sourceResources) {
+function catalogEntries(sourceResources: CatalogResource[]): CatalogResource[] {
   return sourceResources.map((resource) => ({
     ...resource,
     catalog: resource.catalog || 'source',
   }));
 }
 
-function listCatalogResources(sourceResources, options: ResourceQuery): CatalogResource[] {
+function listCatalogResources(sourceResources: CatalogResource[], options: ResourceQuery): CatalogResource[] {
   const resources = catalogEntries(sourceResources).filter((resource) => {
     const tags = resource.tags || [];
     return (
@@ -58,11 +56,11 @@ function enrichInstalledResources(installed: CatalogResource[], allResources: Ca
     })
     .sort(
       (left, right) =>
-        left.scope.localeCompare(right.scope) ||
-        left.catalog.localeCompare(right.catalog) ||
+        left.scope!.localeCompare(right.scope!) ||
+        left.catalog!.localeCompare(right.catalog!) ||
         left.kind.localeCompare(right.kind) ||
         left.id.localeCompare(right.id),
     );
 }
 
-module.exports = { catalogEntries, listCatalogResources, enrichInstalledResources };
+export { catalogEntries, listCatalogResources, enrichInstalledResources };

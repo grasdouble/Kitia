@@ -1,39 +1,53 @@
-'use strict';
+import fs from 'node:fs';
+import os from 'node:os';
 
-import type { CatalogResource } from '../core/resources/model.js';
-const { CatalogError } = require('../core/resources/model.js');
-import type { InstallationRequest } from '../core/installations/lifecycle.js';
-import type { ScanError } from '../core/inventory/checks.js';
-const { collectInstalledScopes } = require('../core/inventory/checks.js');
+import { formatAuditLines } from '../cli/inspection-format.js';
+import { formatSourceResource } from '../cli/resource-format.js';
+import { loadCatalogs, type CatalogLoadWarning } from '../core/catalogs/indexes.js';
+import type { AuditResult } from '../core/inspection/audit.js';
+import { localPreviewFiles } from '../core/inspection/local-preview.js';
+import type { ResourceInspection } from '../core/inspection/model.js';
+import {
+  executeInstallationOperation,
+  type InstallationMessage,
+  type InstallationRequest,
+} from '../core/installations/lifecycle.js';
+import { acquireOperationLock } from '../core/installations/lock.js';
+import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
+import { collectInstalledScopes } from '../core/inventory/checks.js';
+import { readInstallState } from '../core/inventory/inventory.js';
+import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import { catalogEntries, enrichInstalledResources } from '../core/resources/queries.js';
 import type { DashboardActionResult } from './action-result.js';
-const { acquireOperationLock } = require('../core/installations/lock.js');
-const { readInstallState } = require('../core/inventory/inventory.js');
-const { removeUnmanagedResource } = require('../core/installations/unmanaged.js');
-const { localPreviewFiles } = require('../core/inspection/local-preview.js');
-const { formatAuditLines } = require('../cli/inspection-format.js');
-const { executeInstallationOperation } = require('../core/installations/lifecycle.js');
-const { loadCatalogs } = require('../core/catalogs/indexes.js');
-const { enrichInstalledResources, catalogEntries } = require('../core/resources/queries.js');
-const { formatSourceResource } = require('../cli/resource-format.js');
+
 // Native dashboard adapter: translate structured domain facts into the dashboard refresh envelope.
-const fs = require('node:fs');
-const os = require('node:os');
 export interface NativeDashboardOptions {
   target: string;
   userTarget?: string;
 }
 
-type NativeInstallOptions = Pick<InstallationRequest, 'scope' | 'tool' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'>;
+export interface NativeDashboardCatalogs {
+  sourceResources: CatalogResource[];
+  warnings?: CatalogLoadWarning[];
+}
+
+export type NativeDashboardAction = InstallationRequest['operation'] | 'remove-unmanaged';
+export type NativeInstallOptions = Pick<
+  InstallationRequest,
+  'scope' | 'tool' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
+>;
 
 function createDashboardActionHandler(onProgress: (message: string) => void = () => {}) {
   return async function executeDashboardAction(
-    action: InstallationRequest['operation'] | 'remove-unmanaged',
+    action: NativeDashboardAction,
     resource: CatalogResource,
     dashboardOptions: NativeDashboardOptions,
-    catalogs: { sourceResources: CatalogResource[]; warnings?: ScanError[] },
+    catalogs: NativeDashboardCatalogs,
     installOptions: NativeInstallOptions = {},
   ): Promise<DashboardActionResult> {
-    const scope = action === 'install' ? installOptions.scope || 'project' : resource.scope;
+    // Installed rows receive their scope from the native project/user inventory scan.
+    const scope =
+      action === 'install' ? installOptions.scope || 'project' : (resource.scope as NativeInstallOptions['scope']);
     const target = scope === 'user' ? dashboardOptions.userTarget || os.homedir() : dashboardOptions.target;
     const messages: string[] = [];
     let previewFiles: DashboardActionResult['previewFiles'];
@@ -52,7 +66,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
         }
         messages.push(...removeUnmanagedResource(targetRoot, state, resource));
       } else if (action === 'preview' && resource.scope) {
-        const local = localPreviewFiles(targetRoot, state, resource);
+        const local: ResourceInspection = localPreviewFiles(targetRoot, state, resource);
         previewFiles = local.files;
         previewTree = [
           'local installations/',
@@ -82,14 +96,14 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
             projectTarget: dashboardOptions.target,
             userTarget: dashboardOptions.userTarget || os.homedir(),
             onProgress,
-            onMessage: ({ text }) => messages.push(text),
-            onAudit: (audit) => messages.push(...formatAuditLines(audit)),
+            onMessage: ({ text }: InstallationMessage) => messages.push(text),
+            onAudit: (audit: AuditResult) => messages.push(...formatAuditLines(audit)),
           },
           catalogs.sourceResources,
         );
         code = result.status;
         if (result.preview !== undefined)
-          messages.push(`${formatSourceResource(result.resource)}\n\n${result.preview}`);
+          messages.push(`${formatSourceResource(result.resource!)}\n\n${result.preview}`);
       }
     } catch (error) {
       if (!(error instanceof CatalogError)) throw error;
@@ -121,4 +135,5 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
     };
   };
 }
-module.exports = { createDashboardActionHandler };
+
+export { createDashboardActionHandler };

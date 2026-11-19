@@ -1,15 +1,13 @@
 #!/usr/bin/env node
-'use strict';
+import { randomUUID } from 'node:crypto';
+import fs, { type Stats } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
-const { randomUUID } = require('node:crypto');
-
-const { CURRENT_INVENTORY_VERSION } = require('../core/inventory/version.js');
-const { LOCK_PATH: INVENTORY_PATH } = require('../core/inventory/model.js');
-const { acquireOperationLock } = require('../core/installations/lock.js');
-import type { Stats } from 'node:fs';
+import { acquireOperationLock } from '../core/installations/lock.js';
+import { readInstallState } from '../core/inventory/inventory.js';
+import { LOCK_PATH as INVENTORY_PATH } from '../core/inventory/model.js';
+import { CURRENT_INVENTORY_VERSION } from '../core/inventory/version.js';
 
 type HistoricalInventory = {
   lock_version?: unknown;
@@ -79,7 +77,6 @@ function validateCurrentInventory(inventory: HistoricalInventory): void {
       flag: 'wx',
       mode: 0o600,
     });
-    const { readInstallState } = require('../core/inventory/inventory.js');
     readInstallState(temporary);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
@@ -340,7 +337,7 @@ if (require.main === module) {
   process.exitCode = main();
 }
 
-module.exports = {
+export {
   CURRENT_VERSION,
   applyMigrationChain,
   migrateInventory,

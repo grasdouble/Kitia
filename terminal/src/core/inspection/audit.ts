@@ -1,5 +1,3 @@
-'use strict';
-
 export type AuditKind = 'skill' | 'agent' | 'instruction';
 export type AuditFinding = {
   code: string;
@@ -111,5 +109,3 @@ export function auditTextResources(files: AuditFile[]): AuditResult {
     coverage: { discovered: files.length, analyzed, skipped, complete: skipped.length === 0 },
   };
 }
-
-module.exports = { auditTextResources };

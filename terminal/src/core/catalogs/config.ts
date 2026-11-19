@@ -1,11 +1,11 @@
-'use strict';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const { validateSourceConfiguration, catalogNameKey } = require('./model.js');
-const { readUtf8 } = require('../resources/content.js');
-
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
+import { readUtf8 } from '../resources/content.js';
+import { catalogNameKey, validateSourceConfiguration } from './model.js';
+import type { SourceConfiguration } from './model.js';
 
 function userCatalogDirectory() {
   return process.env.KITIA_CONFIG_DIR || path.join(os.homedir(), '.config', 'kitia');
@@ -20,23 +20,20 @@ function userCatalogIndexDirectory() {
 }
 
 function catalogIndexFileName(name: string) {
-  const crypto = require('node:crypto');
-  const digest = crypto.createHash('sha256').update(catalogNameKey(name), 'utf8').digest('hex');
+  const digest = createHash('sha256').update(catalogNameKey(name), 'utf8').digest('hex');
   return path.join('.kitia-index', `${digest}.json`);
 }
 
-function loadUserSourceConfiguration() {
+function loadUserSourceConfiguration(): SourceConfiguration[] {
   const file = userCatalogSourcesFile();
   if (!fs.existsSync(file)) return [];
   return validateSourceConfiguration(JSON.parse(readUtf8(file, 'User catalog source configuration')));
 }
 
-module.exports = {
+export {
   userCatalogDirectory,
   userCatalogSourcesFile,
   userCatalogIndexDirectory,
   catalogIndexFileName,
   loadUserSourceConfiguration,
 };
-
-export {};

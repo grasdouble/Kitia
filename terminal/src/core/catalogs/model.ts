@@ -1,9 +1,7 @@
-'use strict';
-
 import type { ResourceKind } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
 const CATALOG_NAME_FORBIDDEN = /[\/\\:\u0000-\u001f\u007f-\u009f]/u;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const { CatalogError } = require('../resources/model.js');
 function catalogNameKey(name: string): string {
   return name.toUpperCase();
 }
@@ -134,13 +132,7 @@ function validateSourceConfiguration(configuration: unknown): SourceConfiguratio
   });
 }
 
-module.exports = {
-  catalogNameKey,
-  isReservedCatalogName,
-  isValidCatalogName,
-  repositoryId,
-  validateSourceConfiguration,
-};
+export { catalogNameKey, isReservedCatalogName, isValidCatalogName, repositoryId, validateSourceConfiguration };
 
 export type CatalogEntry = { kind: ResourceKind; id?: string; path: string };
 

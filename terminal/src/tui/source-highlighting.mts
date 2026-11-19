@@ -1,29 +1,26 @@
-import { createRequire } from 'node:module';
 import { basename, extname } from 'node:path';
 
 import type { Grammar, Token, TokenStream } from 'prismjs';
+import 'prismjs/components/prism-markup.js';
+import 'prismjs/components/prism-css.js';
+import 'prismjs/components/prism-clike.js';
+import 'prismjs/components/prism-javascript.js';
+import 'prismjs/components/prism-typescript.js';
+import 'prismjs/components/prism-jsx.js';
+import 'prismjs/components/prism-tsx.js';
+import 'prismjs/components/prism-json.js';
+import 'prismjs/components/prism-python.js';
+import 'prismjs/components/prism-bash.js';
+import 'prismjs/components/prism-yaml.js';
+import 'prismjs/components/prism-go.js';
+import 'prismjs/components/prism-rust.js';
+import 'prismjs/components/prism-sql.js';
+import 'prismjs/components/prism-markdown.js';
+// Load Prism core before the explicitly supported grammars, in dependency order.
+// Consume token streams, never the DOM/HTML APIs, plugins, or automatic loader.
+import Prism from 'prismjs/components/prism-core.js';
 
 import type { DASHBOARD_THEME } from './colors.js';
-
-// Load Prism core and only the explicitly supported grammars. Consume token
-// streams, never the DOM/HTML APIs, plugins, or automatic language loader.
-const require = createRequire(import.meta.url);
-const Prism = require('prismjs/components/prism-core.js') as typeof import('prismjs');
-require('prismjs/components/prism-markup.js');
-require('prismjs/components/prism-css.js');
-require('prismjs/components/prism-clike.js');
-require('prismjs/components/prism-javascript.js');
-require('prismjs/components/prism-typescript.js');
-require('prismjs/components/prism-jsx.js');
-require('prismjs/components/prism-tsx.js');
-require('prismjs/components/prism-json.js');
-require('prismjs/components/prism-python.js');
-require('prismjs/components/prism-bash.js');
-require('prismjs/components/prism-yaml.js');
-require('prismjs/components/prism-go.js');
-require('prismjs/components/prism-rust.js');
-require('prismjs/components/prism-sql.js');
-require('prismjs/components/prism-markdown.js');
 
 export type SyntaxRole = keyof typeof DASHBOARD_THEME.semantic.syntax;
 export type SyntaxSpan = { text: string; role?: SyntaxRole };

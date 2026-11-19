@@ -1,10 +1,19 @@
-'use strict';
+import crypto, { KeyObject } from 'node:crypto';
 
-const { CatalogError } = require('../resources/model.js');
-const crypto = require('node:crypto');
+import { CatalogError } from '../resources/model.js';
 const COLLECTION_SIGNATURE_DOMAIN = Buffer.from('Kitia resource collection signature v1\0', 'utf8');
+interface CollectionSignatureEnvelope {
+  signature_version: 1;
+  algorithm: 'Ed25519';
+  key_id: string;
+  value: string;
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
-function canonicalJson(value) {
+/** @param {unknown} value */
+function canonicalJson(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new CatalogError('Collection signature payload contains a non-finite number');
@@ -19,8 +28,7 @@ function canonicalJson(value) {
     return `[${entries.join(',')}]`;
   }
   if (
-    !value ||
-    typeof value !== 'object' ||
+    !isRecord(value) ||
     (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
   ) {
     throw new CatalogError('Collection signature payload must contain only JSON values');
@@ -31,23 +39,23 @@ function canonicalJson(value) {
     .join(',')}}`;
 }
 
-function collectionSignaturePayload(manifest) {
-  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || manifest.collection_version !== 1) {
+function collectionSignaturePayload(manifest: unknown) {
+  if (!isRecord(manifest) || manifest.collection_version !== 1) {
     throw new CatalogError('Collection signature requires collection_version: 1');
   }
-  const payload = {};
+  const payload: Record<string, unknown> = {};
   for (const key of Object.keys(manifest)) {
     if (key !== 'signature') payload[key] = manifest[key];
   }
   return Buffer.concat([COLLECTION_SIGNATURE_DOMAIN, Buffer.from(canonicalJson(payload), 'utf8')]);
 }
 
-function publicKeyObject(input) {
-  let publicKey;
+function publicKeyObject(input: string | Buffer | KeyObject): KeyObject {
+  let publicKey: KeyObject;
   try {
-    publicKey = input instanceof crypto.KeyObject && input.type === 'public' ? input : crypto.createPublicKey(input);
+    publicKey = input instanceof KeyObject && input.type === 'public' ? input : crypto.createPublicKey(input);
   } catch (error) {
-    throw new CatalogError(`Invalid collection public key: ${error.message}`);
+    throw new CatalogError(`Invalid collection public key: ${(error as { message: string }).message}`);
   }
   if (publicKey.asymmetricKeyType !== 'ed25519') {
     throw new CatalogError('Collection signatures require an Ed25519 public key');
@@ -55,17 +63,15 @@ function publicKeyObject(input) {
   return publicKey;
 }
 
-function collectionKeyId(key) {
+function collectionKeyId(key: string | Buffer | KeyObject) {
   const publicKey = publicKeyObject(key);
   const der = publicKey.export({ format: 'der', type: 'spki' });
   return `sha256:${crypto.createHash('sha256').update(der).digest('hex')}`;
 }
 
-function validateCollectionSignatureEnvelope(signature) {
+function validateCollectionSignatureEnvelope(signature: unknown): asserts signature is CollectionSignatureEnvelope {
   if (
-    !signature ||
-    typeof signature !== 'object' ||
-    Array.isArray(signature) ||
+    !isRecord(signature) ||
     Object.keys(signature).some((key) => !['signature_version', 'algorithm', 'key_id', 'value'].includes(key)) ||
     signature.signature_version !== 1 ||
     signature.algorithm !== 'Ed25519' ||
@@ -81,18 +87,18 @@ function validateCollectionSignatureEnvelope(signature) {
   }
 }
 
-function signCollectionManifest(manifest, privateKeyInput) {
-  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || Object.hasOwn(manifest, 'signature')) {
+function signCollectionManifest(manifest: unknown, privateKeyInput: string | Buffer | KeyObject) {
+  if (!isRecord(manifest) || Object.hasOwn(manifest, 'signature')) {
     throw new CatalogError('Sign an unsigned collection manifest object');
   }
-  let privateKey;
+  let privateKey: KeyObject;
   try {
     privateKey =
-      privateKeyInput instanceof crypto.KeyObject && privateKeyInput.type === 'private'
+      privateKeyInput instanceof KeyObject && privateKeyInput.type === 'private'
         ? privateKeyInput
-        : crypto.createPrivateKey(privateKeyInput);
+        : crypto.createPrivateKey(privateKeyInput as string | Buffer);
   } catch (error) {
-    throw new CatalogError(`Invalid collection private key: ${error.message}`);
+    throw new CatalogError(`Invalid collection private key: ${(error as { message: string }).message}`);
   }
   if (privateKey.asymmetricKeyType !== 'ed25519') {
     throw new CatalogError('Collection signatures require an Ed25519 private key');
@@ -110,39 +116,43 @@ function signCollectionManifest(manifest, privateKeyInput) {
   };
 }
 
-function verifyCollectionSignature(manifest, trustedPublicKey) {
-  const isObject = manifest && typeof manifest === 'object' && !Array.isArray(manifest);
-  const hasSignature = isObject && Object.hasOwn(manifest, 'signature');
-  const hasTrustedKey = trustedPublicKey !== undefined && trustedPublicKey !== null;
-  if (!hasSignature) {
-    if (hasTrustedKey) throw new CatalogError('A trusted collection key was provided, but the collection is unsigned');
+function verifyCollectionSignature(
+  manifest: unknown,
+  trustedPublicKey: string | Buffer | KeyObject | null | undefined,
+) {
+  const value = isRecord(manifest) ? manifest : undefined;
+  if (!value || !Object.hasOwn(value, 'signature')) {
+    if (trustedPublicKey !== undefined && trustedPublicKey !== null) {
+      throw new CatalogError('A trusted collection key was provided, but the collection is unsigned');
+    }
     return { signed: false, key_id: null };
   }
-  if (!hasTrustedKey) {
+  if (trustedPublicKey === undefined || trustedPublicKey === null) {
     throw new CatalogError('Signed collection requires a public key explicitly approved out of band');
   }
-  validateCollectionSignatureEnvelope(manifest.signature);
+  const signature = value.signature;
+  validateCollectionSignatureEnvelope(signature);
   const publicKey = publicKeyObject(trustedPublicKey);
   const keyId = collectionKeyId(publicKey);
-  if (manifest.signature.key_id !== keyId) {
-    throw new CatalogError(`Approved collection key does not match signer key_id ${manifest.signature.key_id}`);
+  if (signature.key_id !== keyId) {
+    throw new CatalogError(`Approved collection key does not match signer key_id ${signature.key_id}`);
   }
   let verified = false;
   try {
     verified = crypto.verify(
       null,
-      collectionSignaturePayload(manifest),
+      collectionSignaturePayload(value),
       publicKey,
-      Buffer.from(manifest.signature.value, 'base64'),
+      Buffer.from(signature.value, 'base64'),
     );
   } catch (error) {
-    throw new CatalogError(`Cannot verify collection signature: ${error.message}`);
+    throw new CatalogError(`Cannot verify collection signature: ${(error as { message: string }).message}`);
   }
   if (!verified) throw new CatalogError('Collection signature verification failed');
   return { signed: true, key_id: keyId };
 }
 
-module.exports = {
+export {
   canonicalJson,
   collectionSignaturePayload,
   collectionKeyId,

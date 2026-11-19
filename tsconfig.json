@@ -5,10 +5,11 @@
     "moduleResolution": "NodeNext",
     "rootDir": "terminal/src",
     "outDir": "terminal/dist",
+    "resolveJsonModule": true,
     "types": ["node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "noEmitOnError": true
   },
   "include": ["terminal/src/**/*.ts", "terminal/src/**/*.mts"],

@@ -1,14 +1,8 @@
-'use strict';
-
-import { createRequire } from 'node:module';
-
+import { matchesLicense } from '../core/resources/license.js';
 import type { CatalogResource } from '../core/resources/model.js';
+import { matchesSearchText, searchRelevance } from '../core/resources/search.js';
 import { adaptiveColumnWidths } from '../table-layout.js';
 import { DASHBOARD_THEME } from './colors.js';
-
-const require = createRequire(import.meta.url);
-const { matchesSearchText, searchRelevance } = require('../core/resources/search.js');
-const { matchesLicense } = require('../core/resources/license.js');
 
 export interface InventoryCatalogConfiguration {
   name: string;

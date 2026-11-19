@@ -1,28 +1,16 @@
 #!/usr/bin/env node
-'use strict';
 
-import type { CliOptions } from './cli/arguments.js';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import manifest from '../../package.json';
+import { parseArguments } from './cli/arguments.js';
 import type { CliReport } from './cli/report.js';
-
-type RuntimeCliOptions = CliOptions & {
-  output?: { log(message: string): void; error(message: string): void };
-};
-
-interface ParserContract {
-  parseArguments(args: string[]): RuntimeCliOptions;
-}
-interface LockContract {
-  acquireOperationLock(target: string): () => void;
-}
-interface InventoryContract {
-  readInstallState(path: string): unknown;
-}
-interface CommandContract {
-  executeCommand(options: RuntimeCliOptions, report?: CliReport): Promise<number>;
-}
+import { CLI_REPORT_SCHEMA_VERSION } from './cli/schema-versions.js';
+import { acquireOperationLock } from './core/installations/lock.js';
+import { readInstallState } from './core/inventory/inventory.js';
 
 function createReport(command: string, dryRun = false): CliReport {
-  const { CLI_REPORT_SCHEMA_VERSION } = require('./cli/schema-versions.js');
   return {
     schema_version: CLI_REPORT_SCHEMA_VERSION,
     command,
@@ -37,18 +25,14 @@ function createReport(command: string, dryRun = false): CliReport {
 }
 
 async function main(args: string[] = process.argv.slice(2)): Promise<number> {
-  const { parseArguments } = require('./cli/arguments.js') as ParserContract;
-  const { acquireOperationLock } = require('./core/installations/lock.js') as LockContract;
-  const { readInstallState } = require('./core/inventory/inventory.js') as InventoryContract;
-  const { executeCommand } = require('./cli/commands.js') as CommandContract;
-  const fs = require('node:fs');
-  const path = require('node:path');
+  // Keep the command graph out of migration startup and import-only callers.
+  const { executeCommand } = await import('./cli/commands.js');
 
   let release: (() => void) | undefined;
   let report: CliReport | undefined;
   try {
     const options = parseArguments(args);
-    const action = options.action || options.command!;
+    const action = options.action || options.command;
     if (options.json && ['check', 'doctor', 'install', 'update', 'uninstall'].includes(action)) {
       const cliReport = createReport(action, Boolean(options.dryRun));
       report = cliReport;
@@ -110,20 +94,19 @@ async function main(args: string[] = process.argv.slice(2)): Promise<number> {
 }
 
 if (require.main === module) {
-  const manifest = require('../../package.json') as { version: string };
   process.env.KITIA_INSTALLED_VERSION = manifest.version;
-  if (process.argv[2] === 'migrate') {
-    process.exitCode = require('./migrations/run.js').main(process.argv.slice(3));
-  } else {
-    main()
-      .then((exitCode) => {
-        process.exitCode = exitCode;
-      })
-      .catch((error: Error) => {
-        console.error(`Error: ${error.message}`);
-        process.exitCode = 1;
-      });
-  }
+  const run =
+    process.argv[2] === 'migrate'
+      ? import('./migrations/run.js').then(({ main }) => main(process.argv.slice(3)))
+      : main();
+  run
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((error: Error) => {
+      console.error(`Error: ${error.message}`);
+      process.exitCode = 1;
+    });
 }
 
-module.exports = { main };
+export { main };

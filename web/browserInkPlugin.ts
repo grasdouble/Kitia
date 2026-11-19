@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 
 import inject from '@rollup/plugin-inject';
 import { normalizePath, type Plugin } from 'vite';
-import commonjs from 'vite-plugin-commonjs';
 
 const require = createRequire(import.meta.url);
 const adapter = (name: string) =>
@@ -57,41 +56,7 @@ export function browserInkPlugins(): Plugin[] {
         },
         build: { target: 'esnext' },
       }),
-      transform(code, id) {
-        const file = id.split('?')[0];
-        if (
-          !file.endsWith('/terminal/src/tui/helpers.mts') &&
-          !file.endsWith('/terminal/src/tui/source-highlighting.mts')
-        )
-          return;
-        // These two ESM files use createRequire only for static CJS dependencies.
-        // Expose those exact dependencies to Vite; the CLI source stays untouched.
-        let transformed = code
-          .replace(/import \{ createRequire \} from ["']node:module["'];?\s*/g, '')
-          .replace(/const require = createRequire\(import\.meta\.url\);?\s*/g, '');
-        const imports: string[] = [];
-        transformed = transformed.replace(
-          /^[ \t]*require\((["'])([^"']+)\1\);?[ \t]*$|require\((["'])([^"']+)\3\)/gm,
-          (
-            _match,
-            _statementQuote,
-            statementSource: string | undefined,
-            _expressionQuote,
-            expressionSource: string,
-          ) => {
-            if (statementSource !== undefined) {
-              imports.push(`import ${JSON.stringify(statementSource)};`);
-              return '';
-            }
-            const name = `__kitiaCjs${imports.length}`;
-            imports.push(`import ${name} from ${JSON.stringify(expressionSource)};`);
-            return name;
-          },
-        );
-        return { code: `${imports.join('\n')}\n${transformed}`, map: null };
-      },
     },
-    commonjs({ filter: (id) => id.includes('/terminal/src/') }),
     {
       name: 'kitia-browser-ink-globals',
       enforce: 'post',

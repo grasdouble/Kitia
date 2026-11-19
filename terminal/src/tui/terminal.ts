@@ -1,15 +1,25 @@
-const { adaptiveColumnWidths } = require('../table-layout.js');
-import type { CatalogResource } from '../core/resources/model.js';
-const { CatalogError } = require('../core/resources/model.js');
-const { matchesSearchText } = require('../core/resources/search.js');
-import type { DashboardActions } from './contracts.js';
-const { resolveCatalogResource } = require('../core/resources/selection.js');
-('use strict');
+import readline from 'node:readline';
 
-const readline = require('node:readline');
+import type { ScanError } from '../core/inventory/checks.js';
+import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import { matchesSearchText } from '../core/resources/search.js';
+import { resolveCatalogResource } from '../core/resources/selection.js';
+import { adaptiveColumnWidths, type ColumnWidthRule } from '../table-layout.js';
 import { DASHBOARD_THEME } from './colors.js';
+import type { DashboardActions } from './contracts.js';
 
-function fitColumn(value, width) {
+type TerminalColor = Exclude<keyof typeof DASHBOARD_THEME.terminalAnsi, 'palette'>;
+type InstalledColumnWidths = {
+  scope: number;
+  catalog: number;
+  kind: number;
+  id: number;
+  status: number;
+  description: number;
+  compact: boolean;
+};
+
+function fitColumn(value: unknown, width: number): string {
   const text = String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -28,15 +38,15 @@ interface Keypress {
 type TerminalInput = NodeJS.ReadStream & { isRaw?: boolean };
 type TerminalOutput = NodeJS.WriteStream;
 
-function catalogColumnWidths(resources, width, markerWidth = 0) {
-  const contentWidth = (header, value) =>
+function catalogColumnWidths(resources: CatalogResource[], width: number | undefined, markerWidth = 0): number[] {
+  const contentWidth = (header: string, value: (resource: CatalogResource) => unknown) =>
     resources.reduce((maximum, resource) => Math.max(maximum, String(value(resource) || '').length), header.length);
   const kindWidth = contentWidth('KIND', (resource) => resource.kind);
   const catalogWidth = contentWidth('CATALOG', (resource) => resource.catalog);
   const idWidth = contentWidth('ID', (resource) => resource.id);
   const statusWidth = contentWidth('STATUS', (resource) => resource.status || '-');
-  const compact = Number.isFinite(width) && width < 58;
-  const rules = [
+  const compact = typeof width === 'number' && Number.isFinite(width) && width < 58;
+  const rules: ColumnWidthRule[] = [
     {
       contentWidth: catalogWidth,
       minWidth: compact ? 7 : catalogWidth,
@@ -54,11 +64,12 @@ function catalogColumnWidths(resources, width, markerWidth = 0) {
     },
   ];
   const naturalWidth = rules.reduce((sum, rule) => sum + rule.contentWidth, rules.length - 1);
-  const availableWidth = Number.isFinite(width) ? Math.max(1, width - markerWidth) : naturalWidth;
+  const availableWidth =
+    typeof width === 'number' && Number.isFinite(width) ? Math.max(1, width - markerWidth) : naturalWidth;
   return adaptiveColumnWidths(availableWidth, rules);
 }
 
-function formatCatalogHeader(columns, markerWidth = 0, color = supportsColor()) {
+function formatCatalogHeader(columns: number[], markerWidth = 0, color = supportsColor()): string {
   const labels = ['CATALOG', 'KIND', 'ID', 'STATUS', 'DESCRIPTION'];
   return (
     ' '.repeat(markerWidth) +
@@ -66,9 +77,15 @@ function formatCatalogHeader(columns, markerWidth = 0, color = supportsColor()) 
   );
 }
 
-function formatCatalogRow(resource, marker = '', color = supportsColor(), columns) {
+function formatCatalogRow(resource: CatalogResource, columns: number[], marker = '', color = supportsColor()): string {
   const statusColor =
-    DASHBOARD_THEME.semantic.catalogStatus[resource.status] || DASHBOARD_THEME.semantic.catalogStatus.unknown;
+    resource.status === 'experimental'
+      ? DASHBOARD_THEME.semantic.catalogStatus.experimental
+      : resource.status === 'stable'
+        ? DASHBOARD_THEME.semantic.catalogStatus.stable
+        : resource.status === 'deprecated'
+          ? DASHBOARD_THEME.semantic.catalogStatus.deprecated
+          : DASHBOARD_THEME.semantic.catalogStatus.unknown;
   const catalogColor = resource.source_repository
     ? DASHBOARD_THEME.semantic.catalogRepository.connected
     : DASHBOARD_THEME.semantic.catalogRepository.missing;
@@ -83,13 +100,13 @@ function formatCatalogRow(resource, marker = '', color = supportsColor(), column
   return `${prefix}${values.join(' ')}`;
 }
 
-function formatCatalogTable(resources, output = process.stdout) {
+function formatCatalogTable(resources: CatalogResource[], output: TerminalOutput = process.stdout): string {
   const color = supportsColor(output);
   const width = output.isTTY ? output.columns || 100 : undefined;
   const columns = catalogColumnWidths(resources, width);
   return [
     formatCatalogHeader(columns, 0, color),
-    ...resources.map((resource) => formatCatalogRow(resource, '', color, columns)),
+    ...resources.map((resource) => formatCatalogRow(resource, columns, '', color)),
   ].join('\n');
 }
 
@@ -138,14 +155,14 @@ function selectCatalogResource(
         formatCatalogHeader(columns, 2, color),
         ...(page.length
           ? page.map((resource, index) =>
-              formatCatalogRow(resource, first + index === selectedIndex ? '> ' : '  ', color, columns),
+              formatCatalogRow(resource, columns, first + index === selectedIndex ? '> ' : '  ', color),
             )
           : ['No matching resources.']),
         `${visible.length ? `${first + 1}-${first + page.length} of ${visible.length}` : '0 results'} | Enter: select`,
       ];
       output.write(`\u001b[H\u001b[2J${lines.join('\n')}`);
     };
-    const finish = (selected) => {
+    const finish = (selected: CatalogResource | null) => {
       if (finished) {
         return;
       }
@@ -185,16 +202,16 @@ function selectCatalogResource(
   });
 }
 
-function installedColumnWidths(resources, width) {
-  const compact = Number.isFinite(width) && width < 48;
-  const contentWidth = (header, value) =>
+function installedColumnWidths(resources: CatalogResource[], width: number | undefined): InstalledColumnWidths {
+  const compact = typeof width === 'number' && Number.isFinite(width) && width < 48;
+  const contentWidth = (header: string, value: (resource: CatalogResource) => unknown) =>
     resources.reduce((maximum, resource) => Math.max(maximum, String(value(resource) || '').length), header.length);
   const kindWidth = contentWidth('KIND', (resource) => resource.kind);
   const scopeWidth = contentWidth('SCOPE', (resource) => resource.scope || 'project');
   const catalogWidth = contentWidth('CATALOG', (resource) => resource.catalog);
   const idWidth = contentWidth('ID', (resource) => resource.id);
   const statusWidth = contentWidth('STATUS', (resource) => dashboardStatus(resource));
-  const rules = [
+  const rules: ColumnWidthRule[] = [
     { contentWidth: scopeWidth, minWidth: scopeWidth, shrinkWeight: 0 },
     {
       contentWidth: catalogWidth,
@@ -218,7 +235,10 @@ function installedColumnWidths(resources, width) {
       : []),
   ];
   const naturalWidth = rules.reduce((sum, rule) => sum + rule.contentWidth, rules.length - 1);
-  const widths = adaptiveColumnWidths(Number.isFinite(width) ? width : naturalWidth, rules);
+  const widths = adaptiveColumnWidths(
+    typeof width === 'number' && Number.isFinite(width) ? width : naturalWidth,
+    rules,
+  );
   return {
     scope: widths[0],
     catalog: widths[1],
@@ -230,21 +250,22 @@ function installedColumnWidths(resources, width) {
   };
 }
 
-function formatInstalledHeader(columns) {
-  return [
+function formatInstalledHeader(columns: InstalledColumnWidths): string {
+  const headers: Array<[string, number]> = [
     ['SCOPE', columns.scope],
     ['CATALOG', columns.catalog],
     ['KIND', columns.kind],
     ['ID', columns.id],
     ['STATUS', columns.status],
-    ...(!columns.compact ? [['DESCRIPTION', columns.description]] : []),
-  ]
+  ];
+  if (!columns.compact) headers.push(['DESCRIPTION', columns.description]);
+  return headers
     .filter(([, columnWidth]) => columnWidth > 0)
     .map(([label, columnWidth]) => fitColumn(label, columnWidth))
     .join(' ');
 }
 
-function dashboardStatus(resource) {
+function dashboardStatus(resource: CatalogResource): string | undefined {
   return resource.status === 'attention' &&
     resource.issues?.length &&
     resource.issues.every((issue) => issue.code === 'UPDATE_AVAILABLE')
@@ -252,7 +273,12 @@ function dashboardStatus(resource) {
     : resource.status;
 }
 
-function formatInstalledRow(resource, marker = '', color = supportsColor(), columns) {
+function formatInstalledRow(
+  resource: CatalogResource,
+  columns: InstalledColumnWidths,
+  marker = '',
+  color = supportsColor(),
+): string {
   const status = dashboardStatus(resource);
   const statusColor =
     status === 'unmanaged'
@@ -269,7 +295,7 @@ function formatInstalledRow(resource, marker = '', color = supportsColor(), colu
   const catalogColor = resource.source_repository
     ? DASHBOARD_THEME.semantic.catalogRepository.connected
     : DASHBOARD_THEME.semantic.catalogRepository.missing;
-  const fields = [
+  const fields: Array<[string, number]> = [
     [colorize(fitColumn(`${marker}${resource.scope || 'project'}`, columns.scope), scopeColor, color), columns.scope],
     [colorize(fitColumn(resource.catalog, columns.catalog), catalogColor, color), columns.catalog],
     [colorize(fitColumn(resource.kind, columns.kind), DASHBOARD_THEME.semantic.terminalKind, color), columns.kind],
@@ -283,15 +309,19 @@ function formatInstalledRow(resource, marker = '', color = supportsColor(), colu
     .join(' ');
 }
 
-function renderInstalledResources(resources, output = process.stdout, errors = []) {
+function renderInstalledResources(
+  resources: CatalogResource[],
+  output: TerminalOutput = process.stdout,
+  errors: ScanError[] = [],
+): string {
   const width = output.isTTY ? output.columns || 100 : undefined;
   const columns = installedColumnWidths(resources, width);
   const lines = resources.length
     ? [
         formatInstalledHeader(columns),
         ...resources.flatMap((resource) => [
-          formatInstalledRow(resource, '', supportsColor(output), columns),
-          ...(columns.compact && resource.description
+          formatInstalledRow(resource, columns, '', supportsColor(output)),
+          ...(columns.compact && resource.description && width !== undefined
             ? [`  ${truncateDescription(resource.description, Math.max(4, width - 2))}`]
             : []),
         ]),
@@ -304,17 +334,17 @@ function renderInstalledResources(resources, output = process.stdout, errors = [
 }
 
 async function browseInstalledResources(
-  resources,
-  input = process.stdin,
-  output = process.stdout,
-  errors = [],
+  resources: CatalogResource[],
+  input: TerminalInput = process.stdin,
+  output: TerminalOutput = process.stdout,
+  errors: ScanError[] = [],
   actions: DashboardActions = {},
-) {
+): Promise<boolean> {
   const { runDashboard } = await import('./dashboard.mjs');
   return runDashboard(resources, input, output, errors, actions);
 }
 
-function truncateDescription(description, maxLength = 80) {
+function truncateDescription(description: string, maxLength = 80): string {
   const characters = Array.from(description);
   if (characters.length <= maxLength) {
     return description;
@@ -329,7 +359,7 @@ function supportsColor(stream: { isTTY?: boolean } = process.stdout, env: NodeJS
   return Boolean(stream.isTTY && !env.NO_COLOR && env.TERM !== 'dumb');
 }
 
-function colorize(value, color, enabled = supportsColor()) {
+function colorize(value: string, color: TerminalColor, enabled = supportsColor()): string {
   if (!enabled) {
     return value;
   }
@@ -340,7 +370,7 @@ function colorize(value, color, enabled = supportsColor()) {
   return `\u001b[${code}m${value}\u001b[0m`;
 }
 
-module.exports = {
+export {
   formatCatalogTable,
   selectCatalogResource,
   formatInstalledHeader,

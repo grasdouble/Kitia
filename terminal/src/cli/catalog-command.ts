@@ -1,31 +1,32 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const { exportCatalogConfiguration } = require('../core/catalogs/manage.js');
-const {
+import { loadUserSourceConfiguration } from '../core/catalogs/config.js';
+import {
+  exportCatalogConfiguration,
   addCatalog,
   importCatalogConfigurationText,
   refreshCatalogs,
   removeCatalog,
-} = require('../core/catalogs/manage.js');
-const { loadUserSourceConfiguration } = require('../core/catalogs/config.js');
-const { repositoryId } = require('../core/catalogs/model.js');
-const { CatalogError } = require('../core/resources/model.js');
-const fs = require('node:fs');
-const path = require('node:path');
-function manageCatalogCommand(options) {
+} from '../core/catalogs/manage.js';
+import { repositoryId } from '../core/catalogs/model.js';
+import { CatalogError } from '../core/resources/model.js';
+import type { CliOptions } from './arguments.js';
+
+function manageCatalogCommand(options: CliOptions): number {
   const output = options.output || console;
   if (options.action === 'add') {
-    addCatalog(options.name, options.repository);
-    output.log(`Added catalog ${options.name} (${repositoryId(options.repository)}).`);
+    addCatalog(options.name!, options.repository!);
+    output.log(`Added catalog ${options.name} (${repositoryId(options.repository!)}).`);
     return 0;
   }
   if (options.action === 'export') {
-    exportCatalogConfiguration(options.file);
+    exportCatalogConfiguration(options.file!);
     output.log(`Exported catalog configuration to ${options.file}.`);
     return 0;
   }
   if (options.action === 'import') {
-    const summary = importCatalogConfigurationText(fs.readFileSync(path.resolve(options.file), 'utf8'));
+    const summary = importCatalogConfigurationText(fs.readFileSync(path.resolve(options.file!), 'utf8'));
     output.log(
       `Catalog import: ${summary.added.length} added, ${summary.ignored.length} ignored, ${summary.refreshed.length} refreshed, ${summary.refreshFailures.length} refresh failed.`,
     );
@@ -40,7 +41,7 @@ function manageCatalogCommand(options) {
     return summary.refreshFailures.length ? 1 : 0;
   }
   if (options.action === 'refresh') {
-    const result = refreshCatalogs(options.allCatalogs ? undefined : [options.name]);
+    const result = refreshCatalogs(options.allCatalogs ? undefined : [options.name!]);
     for (const catalog of result.refreshed) {
       output.log(
         `Refreshed catalog ${catalog.name} · ${catalog.count} resource${catalog.count === 1 ? '' : 's'} indexed.`,
@@ -52,7 +53,7 @@ function manageCatalogCommand(options) {
     return result.failures.length ? 1 : 0;
   }
   if (options.action === 'remove') {
-    removeCatalog(options.name);
+    removeCatalog(options.name!);
     output.log(`Removed user catalog ${options.name}.`);
     return 0;
   }
@@ -67,4 +68,4 @@ function manageCatalogCommand(options) {
   );
 }
 
-module.exports = { manageCatalogCommand };
+export { manageCatalogCommand };
