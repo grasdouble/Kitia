@@ -6,6 +6,7 @@ const sharp = require('sharp');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { version: kitiaVersion } = require('@grasdouble/kitia/package.json');
 const { assertTermlessRuntime } = require('./termless-preflight.js');
 const {
   closeShowcaseDashboard,
@@ -43,8 +44,8 @@ Requires Node.js >=23.6, a built checkout, @resvg/resvg-js, and sharp. The
 command uses the shared deterministic showcase fixture and writes a separate
 lossless WebP pair. It promotes to *-termless.webp only when the parsed xterm
 screen proves both complete frames; otherwise it writes review-only
-*-termless-draft.webp files and reports exactly which cells were missing. The
-original captures are untouched.`;
+*-termless-draft.webp files, reports what was missing, and exits with an error.
+The published captures are untouched on failure.`;
 
 class CaptureError extends Error {}
 
@@ -211,7 +212,7 @@ async function main(args) {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-termless-capture-'));
   let session;
   try {
-    session = await launchShowcaseDashboard(temporaryDirectory);
+    session = await launchShowcaseDashboard(temporaryDirectory, { versionLabel: kitiaVersion });
     const staged = captures.map(({ png }) => path.join(temporaryDirectory, png));
 
     const inventoryAnsi = await waitForInkOutput(session, 'B Browse resources');
@@ -233,7 +234,13 @@ async function main(args) {
       optimized.map((file, index) => encodeWebp(staged[index], file, captures[index].name)),
     );
 
-    const missing = [...missingInventory(inventoryGrid), ...missingCatalog(catalogGrid)];
+    const missingVersion = (name, grid) =>
+      screenRows(grid).some((line) => line.endsWith(`Version ${kitiaVersion}`))
+        ? []
+        : [`${name} header Version ${kitiaVersion}`];
+    const inventoryMissing = [...missingInventory(inventoryGrid), ...missingVersion('Inventory', inventoryGrid)];
+    const catalogMissing = [...missingCatalog(catalogGrid), ...missingVersion('Browse', catalogGrid)];
+    const missing = [...inventoryMissing, ...catalogMissing];
     const complete = missing.length === 0;
     await fs.mkdir(assets, { recursive: true });
     const destinations = captures.map(({ output, draft }) => path.join(assets, complete ? output : draft));
@@ -248,18 +255,15 @@ async function main(args) {
       );
     }
     console.log(
-      `Termless xterm projection: inventory ${missingInventory(inventoryGrid).length ? 'incomplete' : 'complete'}; catalog ${missingCatalog(catalogGrid).length ? 'incomplete' : 'complete'}.`,
+      `Termless xterm projection: inventory ${inventoryMissing.length ? 'incomplete' : 'complete'}; catalog ${catalogMissing.length ? 'incomplete' : 'complete'}.`,
     );
     console.log(`Ink stream evidence: inventory ${inventoryAnsi.length} chars; catalog ${catalogAnsi.length} chars.`);
-    if (missing.length) {
-      console.warn(
-        `Not promoting Termless screenshots because the parsed xterm grid is missing: ${missing.join('; ')}`,
-      );
-    } else {
-      console.log(
-        `Rendered with @resvg/resvg-js using fixed ${screenshotViewport.width}×${screenshotViewport.height} cell metrics.`,
-      );
+    if (!complete) {
+      throw new CaptureError(`Incomplete Termless screenshots; existing captures kept: ${missing.join('; ')}`);
     }
+    console.log(
+      `Rendered with @resvg/resvg-js using fixed ${screenshotViewport.width}×${screenshotViewport.height} cell metrics.`,
+    );
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exitCode = 1;

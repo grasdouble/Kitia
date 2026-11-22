@@ -922,6 +922,7 @@ export async function runDashboard(
   output: NodeJS.WriteStream,
   errors: ScanError[] = [],
   actions: DashboardActions = {},
+  { versionLabel }: { versionLabel?: string } = {},
 ): Promise<boolean> {
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== 'function') return false;
 
@@ -943,7 +944,7 @@ export async function runDashboard(
     const onInputClose = () => onFinish(false);
     input.once('close', onInputClose);
     try {
-      app = render(h(Dashboard, { resources, errors, actions, onFinish, mouse: transport.mouse }), {
+      app = render(h(Dashboard, { resources, errors, actions, onFinish, mouse: transport.mouse, versionLabel }), {
         stdin: transport.stdin,
         stdout: output,
         exitOnCtrlC: false,

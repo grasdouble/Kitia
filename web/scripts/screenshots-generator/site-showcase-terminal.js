@@ -173,6 +173,7 @@ async function launchShowcaseDashboard(
     listSourceVersionsOverride,
     catalogResourcesOverride,
     inventoryRunOverride,
+    versionLabel,
   } = {},
 ) {
   assertTermlessRuntime();
@@ -247,12 +248,19 @@ async function launchShowcaseDashboard(
             dashboardOptions,
           })
       : execute;
-    done = dashboard.runDashboard(rows, input, output, installed.errors, {
-      catalogResources,
-      userCatalogs,
-      execute: executeOverride || runAction,
-      listSourceVersions: listSourceVersionsOverride,
-    });
+    done = dashboard.runDashboard(
+      rows,
+      input,
+      output,
+      installed.errors,
+      {
+        catalogResources,
+        userCatalogs,
+        execute: executeOverride || runAction,
+        listSourceVersions: listSourceVersionsOverride,
+      },
+      { versionLabel },
+    );
     done.catch(() => {});
     const session = {
       fixture,

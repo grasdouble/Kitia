@@ -29,6 +29,12 @@ pnpm --filter @grasdouble/kitia-web run test:termless
 pnpm --filter @grasdouble/kitia-web run screenshots:update:termless
 ```
 
+GitHub Pages regenerates the dashboard screenshots after installing dependencies
+and before building the site. The generator uses the checked-out package version.
+If either capture is incomplete, it writes review-only drafts, leaves the existing
+images untouched, and exits with an error so deployment stops. A successful
+deployment bundles the regenerated images without committing them back to Git.
+
 The private workspace root (`kitia-workspace`) owns orchestration scripts; the published CLI package is `terminal/` (`@grasdouble/kitia`), and the private website package is `web/` (`@grasdouble/kitia-web`). Use `pnpm build` for the workspace build, or target a package directly with `pnpm --filter @grasdouble/kitia run build` or `pnpm --filter @grasdouble/kitia-web run build`. CLI output goes to `terminal/dist/` and website output to `web/dist/`. The website consumes the terminal workspace's live source and changelog, so its build and development server do not require a terminal build first.
 
 Terminal TypeScript uses static `import` and `export`. NodeNext keeps the entry point and CLI modules as CommonJS `.js` output and emits ESM `.mjs` for `.mts` sources where needed. Use `import()` at intentional lazy boundaries, such as loading the command graph only when running the regular CLI.
