@@ -782,6 +782,141 @@ for (const { name, key, title, nextTitle, nextId } of [
   );
 }
 
+test(
+  'Termless Browse actions stay inside the details pane and dispatch Update at 120×24',
+  { timeout: 20000 },
+  async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'kitia-termless-browse-actions-'));
+    const versions = [
+      {
+        sha: 'a'.repeat(40),
+        prefix: 'a'.repeat(7),
+        date: '2026-10-03T12:00:00Z',
+        subject: 'Browse update regression',
+      },
+    ];
+    const calls = [];
+    let session;
+    try {
+      session = await launchShowcaseDashboard(directory, {
+        listSourceVersionsOverride: async (resource) => {
+          calls.push({ catalog: resource.catalog, kind: resource.kind, id: resource.id, scope: resource.scope });
+          return versions;
+        },
+      });
+      await assertTableSurface(session, '');
+      session.input.write('a');
+      await assertTableSurface(session, 'a');
+      resizeDashboard(session, { columns: 120, rows: 24 });
+
+      const actionLabels = ['Install resource', 'Preview / audit', 'Revisions', 'Update resource'];
+      const assertBrowseActionFrame = async (dismissed = []) => {
+        const frame = await assertTableSurface(session, 'a', {
+          visible: catalogIds.slice(0, 4),
+          dismissed,
+        });
+        const { lines, row, left, right, bottom, col, listRight, detailsRow, detailsCol } = frame;
+        assert.equal(detailsRow, row, 'the selected details remain alongside the Browse list');
+        assert.ok(bottom < session.output.rows, 'the workspace bottom edge fits inside the terminal');
+        assert.match(lines[row - 1].slice(left, right + 1), /^┌─+┐$/, 'the workspace top border is intact');
+        assert.match(lines[bottom].slice(left, right + 1), /^└─+┘$/, 'the workspace bottom border is intact');
+        assert.match(lines[row + 1].slice(col, listRight), /^─+$/, 'the Browse pane divider is intact');
+        assert.match(lines[row + 1].slice(detailsCol, right), /^─+$/, 'the details pane divider is intact');
+        for (let current = row; current < bottom; current += 1) {
+          assert.equal(lines[current][left], '│', `workspace left edge is intact at row ${current}`);
+          assert.equal(lines[current][right], '│', `workspace right edge is intact at row ${current}`);
+          assert.equal(
+            lines[current][listRight],
+            current === row + 1 ? '┼' : '│',
+            `Browse/details separator is intact at row ${current}`,
+          );
+        }
+
+        const locations = actionLabels.map((label) => {
+          const location = session.terminal.findText(label);
+          assert.ok(location, `${label} remains visible`);
+          assert.ok(
+            location.row > detailsRow + 1 && location.row < bottom,
+            `${label} is below the details divider and above the workspace bottom`,
+          );
+          assert.ok(
+            location.col > listRight && location.col + label.length <= right,
+            `${label} stays inside the details pane`,
+          );
+          return { label, ...location };
+        });
+        assert.equal(new Set(locations.map(({ row: actionRow }) => actionRow)).size, actionLabels.length);
+        return { frame, locations };
+      };
+
+      const { locations } = await assertBrowseActionFrame();
+      assertSelectedRow(session, 'ask-matt');
+      const openPicker = async () => {
+        const header = await assertSeparatedHeader(session, 'RESOURCE REVISIONS', '', undefined, [
+          'MattPucock / skill:ask-matt',
+          'Select a commit to update; the catalog pin remains unchanged.',
+        ]);
+        assertSelectedRow(session, versions[0].prefix, { revision: true });
+        await assertShortcutsFrame(session, ['Actions', 'ENTER UPDATE', 'Navigation', '↑↓ SELECT', 'ESC BACK']);
+        assert.ok(header.row < session.output.rows, 'the revision picker remains inside the terminal');
+      };
+
+      const update = locations.find(({ label }) => label === 'Update resource');
+      const mouseX = update.col + Math.floor(update.label.length / 2) + 1;
+      const mouseY = update.row + 1;
+      session.input.write(`\u001b[<0;${mouseX};${mouseY}M`);
+      session.input.write(`\u001b[<0;${mouseX};${mouseY}m`);
+      await openPicker();
+      assert.deepEqual(calls, [{ catalog: 'MattPucock', kind: 'skill', id: 'ask-matt', scope: 'project' }]);
+
+      session.input.write('\x1b');
+      await assertBrowseActionFrame(['RESOURCE REVISIONS']);
+      const isActionActive = (grid, activeLabel) => {
+        const active = session.terminal.findText(activeLabel);
+        if (!active) return false;
+        const lines = grid.split('\n');
+        const activeFrame = workspaceFrame(grid, 'CATALOG RESOURCES');
+        if (!activeFrame) return false;
+        const activePrefix = lines[active.row].slice(activeFrame.listRight + 1, active.col);
+        if (!activePrefix.includes('›')) return false;
+        return actionLabels.every((label) => {
+          if (label === activeLabel) return true;
+          const other = session.terminal.findText(label);
+          return !other || !lines[other.row].slice(activeFrame.listRight + 1, other.col).includes('›');
+        });
+      };
+      const waitForActionFocus = async (label) => {
+        await waitForGrid(
+          session,
+          (grid) => isActionActive(grid, label),
+          `${label} has a visible active indication in the Browse action group`,
+        );
+        await assertBrowseActionFrame();
+      };
+
+      session.input.write('\x1b[Z');
+      await waitForActionFocus('Install resource');
+      for (const label of ['Preview / audit', 'Revisions', 'Update resource']) {
+        session.input.write('\x1b[C');
+        await waitForActionFocus(label);
+      }
+      session.input.write('\r');
+      await openPicker();
+      assert.deepEqual(calls, [
+        { catalog: 'MattPucock', kind: 'skill', id: 'ask-matt', scope: 'project' },
+        { catalog: 'MattPucock', kind: 'skill', id: 'ask-matt', scope: 'project' },
+      ]);
+      session.input.write('\x1b');
+      await assertBrowseActionFrame();
+      session.input.write('q');
+      assert.equal(await dashboardExit(session), true);
+    } finally {
+      if (session) await closeShowcaseDashboard(session);
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 for (const versionCount of [3, 40]) {
   test(
     `Termless ${versionCount}-commit revision tables keep header metadata, selection and pagination across layouts`,
