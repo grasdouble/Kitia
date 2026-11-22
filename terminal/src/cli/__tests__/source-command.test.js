@@ -210,6 +210,8 @@ test('audited agent and instruction operations acquire pinned content once and d
   fs.mkdirSync(fixture);
   const content = '---\nname: demo\ndescription: Safe fixture.\n---\n\nSafe local fixture body.\n';
   fs.writeFileSync(path.join(fixture, 'demo.md'), content);
+  // Preserve the fixture's exact bytes when Git checks out the audited revision.
+  fs.writeFileSync(path.join(fixture, '.gitattributes'), 'demo.md -text\n');
   execFileSync('git', ['init', '--quiet', fixture]);
   execFileSync('git', ['-C', fixture, 'add', '.']);
   execFileSync('git', [

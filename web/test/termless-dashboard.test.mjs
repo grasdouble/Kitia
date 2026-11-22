@@ -922,9 +922,11 @@ test(
       resizeDashboard(session, { columns: 120, rows: 24 });
 
       const actionLabels = ['Install resource', 'Preview / audit', 'Revisions', 'Update resource'];
+      const compactHints = screenShortcutHints.b.map((hint) => (hint === '↑↓ navigate' ? '↑↓ move' : hint));
       const assertBrowseActionFrame = async (dismissed = []) => {
         const frame = await assertTableSurface(session, 'b', {
           visible: catalogIds.slice(0, 3),
+          hints: compactHints,
           dismissed,
         });
         const { lines, row, left, right, bottom, col, listRight, detailsRow, detailsCol } = frame;

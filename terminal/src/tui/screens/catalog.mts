@@ -75,7 +75,7 @@ export function CatalogScreen({
               Actions: ['ENTER install', 'V revisions', 'P preview/audit'],
               Filters: ['F filter', 'C catalog', 'K kind', 'L license'],
               Display: ['? guide', 'D details'],
-              Navigation: [...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
+              Navigation: [...sectionNavigationHints, rows < 30 ? '↑↓ move' : '↑↓ navigate', 'Q quit'],
             },
         rows <= 45 || columns < 94 ? 'packed' : 'inline',
       );
