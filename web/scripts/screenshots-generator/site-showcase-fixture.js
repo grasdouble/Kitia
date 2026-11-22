@@ -3,7 +3,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-const root = path.resolve(__dirname, '../../..');
 const catalogName = 'MattPucock';
 const repository = 'https://github.com/demo/skills';
 const sourceRepository = 'demo/skills';
@@ -122,9 +121,7 @@ async function seedShowcase(directory) {
 
   await writeManagedSkill(project, resources[0]);
   await writeManagedSkill(home, resources[1]);
-  const { recordSourceInstallation } = require(
-    path.join(root, 'terminal', 'dist', 'core', 'inventory', 'inventory.js'),
-  );
+  const { recordSourceInstallation } = require('@grasdouble/kitia/dist/core/inventory/inventory.js');
   for (const [target, resource] of [
     [project, resources[0]],
     [home, resources[1]],
@@ -159,4 +156,4 @@ function showcaseEnvironment(fixture) {
   return env;
 }
 
-module.exports = { root, resources, seedShowcase, showcaseEnvironment };
+module.exports = { resources, seedShowcase, showcaseEnvironment };

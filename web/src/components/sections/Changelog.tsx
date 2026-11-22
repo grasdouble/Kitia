@@ -1,7 +1,7 @@
+import changelog from '@grasdouble/kitia/CHANGELOG.md?raw';
 import { Link } from '@tanstack/react-router';
 import React from 'react';
 
-import changelog from '../../../../CHANGELOG.md?raw';
 import { repo } from '../core/siteConstants';
 
 import styles from './Changelog.module.css';

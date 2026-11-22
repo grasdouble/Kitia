@@ -1,8 +1,8 @@
+import { DASHBOARD_THEME } from '@grasdouble/kitia/src/tui/colors.ts';
+import { Dashboard } from '@grasdouble/kitia/src/tui/dashboard.mts';
 import { Link } from '@tanstack/react-router';
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
 
-import { DASHBOARD_THEME } from '../../../../terminal/src/tui/colors';
-import { Dashboard } from '../../../../terminal/src/tui/dashboard.mjs';
 import { mountDashboardTerminal, type BrowserTerminalSession } from './browserTerminal';
 import { terminalColor } from './terminalTheme';
 import { createTuiDemoSession } from './tuiDemoSession';

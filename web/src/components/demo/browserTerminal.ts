@@ -1,11 +1,11 @@
-import type { Instance } from 'ink';
-import type { ReactElement } from 'react';
-
 import {
   createDashboardInputTransport,
   type DashboardInputTransport,
   type DashboardMouseRegions,
-} from '../../../../terminal/src/tui/input-transport.mjs';
+} from '@grasdouble/kitia/src/tui/input-transport.mts';
+import type { Instance } from 'ink';
+import type { ReactElement } from 'react';
+
 import { XTERM_THEME } from './terminalTheme';
 
 export interface BrowserTerminalSession {

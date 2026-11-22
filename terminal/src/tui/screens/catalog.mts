@@ -18,7 +18,6 @@ import { Controls } from '../controls.mjs';
 import type { InventoryCatalogConfiguration } from '../helpers.mjs';
 import { filterCatalogResources, fitText, inventoryCatalogLabels, tableLine } from '../helpers.mjs';
 import { JoinedWorkspace } from '../layouts/joined-workspace.mjs';
-import { DASHBOARD_HEADER_ROWS } from '../sections/header.mjs';
 import { DashboardHeader } from '../sections/header.mjs';
 const h = React.createElement;
 export function CatalogScreen({
@@ -105,15 +104,19 @@ export function CatalogScreen({
     controlsState,
     workspaceGap,
     workspaceHeight,
+    workspaceTop,
+    showWorkspaceDetails,
+    showShortcutFooter,
     outerWorkspaceWidth,
     actionRows,
     workspaceLayout,
     listContentWidth,
     detailsContentWidth,
   } = browserPlan;
-  const footer = catalogShortcutLines.length
-    ? h(ShortcutFooter, { lines: catalogShortcutLines, width: columns - 2 })
-    : null;
+  const footer =
+    showShortcutFooter && catalogShortcutLines.length
+      ? h(ShortcutFooter, { lines: catalogShortcutLines, width: columns - 2 })
+      : null;
   const visibleSourceWidth = visible.reduce((width, resource) => Math.max(width, candidateLabel(resource).length), 8);
   const visibleIdWidth = visible.reduce((width, resource) => Math.max(width, resource.id.length), 8);
   const compactTable = listContentWidth < 58;
@@ -252,17 +255,10 @@ export function CatalogScreen({
     ],
   });
   const actionButtons = actionRows ? ActionButtons({ controls: controlsState, width: detailsContentWidth }) : null;
-  const workspaceTop =
-    DASHBOARD_HEADER_ROWS +
-    browserPlan.tabsHeight +
-    browserPlan.summaryRows +
-    browserPlan.filterHeight +
-    workspaceGap +
-    1;
   const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
   controls.mouse?.replace(
     'browse-rows',
-    modalActive
+    modalActive || !workspaceHeight
       ? []
       : tableWindow.items.map((_, index) => ({
           left: 3,
@@ -286,28 +282,30 @@ export function CatalogScreen({
       columns,
     }),
     h(ResourceBrowserChrome, { plan: browserPlan, resources, columns }),
-    h(
-      Box,
-      { width: columns - 2, marginTop: workspaceGap },
-      h(JoinedWorkspace, {
-        width: outerWorkspaceWidth,
-        height: workspaceHeight,
-        layout: workspaceLayout,
-        showDetails,
-        listTitle: 'CATALOG RESOURCES',
-        listMeta: `${visible.length} results`,
-        listHeader: tableHeader,
-        listRows: tableRows,
-        detailsTitle: 'SELECTION DETAILS',
-        details: detailPaging.visibleLines,
-        detailsFooter: actionButtons,
-        detailsHint: detailPaging.canPage ? 'PgUp/PgDn' : undefined,
-        color:
-          tourStep === 1
-            ? DASHBOARD_THEME.semantic.inventoryStatus.attention
-            : DASHBOARD_THEME.semantic.accents.detailPanel,
-      }),
-    ),
+    workspaceHeight
+      ? h(
+          Box,
+          { width: columns - 2, marginTop: workspaceGap },
+          h(JoinedWorkspace, {
+            width: outerWorkspaceWidth,
+            height: workspaceHeight,
+            layout: workspaceLayout,
+            showDetails: showWorkspaceDetails,
+            listTitle: 'CATALOG RESOURCES',
+            listMeta: `${visible.length} results`,
+            listHeader: tableHeader,
+            listRows: tableRows,
+            detailsTitle: 'SELECTION DETAILS',
+            details: detailPaging.visibleLines,
+            detailsFooter: actionButtons,
+            detailsHint: detailPaging.canPage ? 'PgUp/PgDn' : undefined,
+            color:
+              tourStep === 1
+                ? DASHBOARD_THEME.semantic.inventoryStatus.attention
+                : DASHBOARD_THEME.semantic.accents.detailPanel,
+          }),
+        )
+      : null,
     footer,
     controls.menuFilter ? h(Controls, { ...browserPlan.filterProps, menuOverlayOnly: true }) : null,
   );

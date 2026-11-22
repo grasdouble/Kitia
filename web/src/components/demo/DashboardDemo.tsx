@@ -1,7 +1,7 @@
+import { DASHBOARD_THEME } from '@grasdouble/kitia/src/tui/colors.ts';
 import { Link } from '@tanstack/react-router';
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
 
-import { DASHBOARD_THEME } from '../../../../terminal/src/tui/colors';
 import {
   initialCatalogs,
   initialInstallations,

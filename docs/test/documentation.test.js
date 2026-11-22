@@ -17,7 +17,8 @@ function markdownFiles(directory) {
 
 test('local Markdown links resolve', () => {
   const files = [
-    ...['README.md', 'CONTRIBUTING.md', 'CHANGELOG.md'].map((file) => path.join(root, file)),
+    ...['README.md', 'CONTRIBUTING.md'].map((file) => path.join(root, file)),
+    path.join(root, 'terminal', 'CHANGELOG.md'),
     ...markdownFiles(path.join(root, 'docs')),
     ...markdownFiles(path.join(root, 'terminal', 'src', 'migrations')),
     ...markdownFiles(path.join(root, '.github')),
@@ -34,8 +35,13 @@ test('local Markdown links resolve', () => {
   }
 });
 
-test('package, workflow, and docs agree on runtime and project identity', () => {
-  const pkg = JSON.parse(read('package.json'));
+test('workspace packages, workflow, and docs agree on runtime and project identity', () => {
+  const workspace = JSON.parse(read('package.json'));
+  const pkg = JSON.parse(read('terminal/package.json'));
+  const web = JSON.parse(read('web/package.json'));
+  assert.equal(workspace.private, true);
+  assert.equal(web.name, '@grasdouble/kitia-web');
+  assert.equal(web.private, true);
   assert.equal(pkg.name, '@grasdouble/kitia');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.engines.node, '>=26');

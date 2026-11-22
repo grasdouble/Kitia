@@ -1,13 +1,14 @@
 import type {
   AddCatalogRequest as CatalogRequest,
   UserCatalog as Catalog,
-} from '../../../../terminal/src/core/catalogs/model.js';
-import type { CatalogResource } from '../../../../terminal/src/core/resources/model';
-import type { DashboardActionResult as ActionResult } from '../../../../terminal/src/tui/action-result';
+} from '@grasdouble/kitia/src/core/catalogs/model.ts';
+import type { CatalogResource } from '@grasdouble/kitia/src/core/resources/model.ts';
+import type { DashboardActionResult as ActionResult } from '@grasdouble/kitia/src/tui/action-result.ts';
 import type {
   DashboardActions as Actions,
   CatalogActionResult as CatalogResult,
-} from '../../../../terminal/src/tui/contracts';
+} from '@grasdouble/kitia/src/tui/contracts.ts';
+
 import {
   initialCatalogs,
   initialInstallations,

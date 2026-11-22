@@ -6,6 +6,7 @@ import type { CatalogResource } from '../../core/resources/model.js';
 import { Controls } from '../controls.mjs';
 import { joinedWorkspaceLayout, type JoinedWorkspaceLayout } from '../layouts/joined-workspace.mjs';
 import { DASHBOARD_HEADER_ROWS } from '../sections/header.mjs';
+import { ActionButtons } from './button/button-layout.mjs';
 import {
   dashboardActionButtonRows,
   dashboardControlsLayout,
@@ -15,19 +16,25 @@ import { InventorySummaryCards } from './inventory-summary-cards.mjs';
 
 const h = React.createElement;
 
+// Outer border, list title/rule/table header, and one resource row.
+const minimumWorkspaceHeight = 2 + 3 + 1;
+
 export interface ResourceBrowserPlan {
   controlsState: ControlsProps;
   tabsProps: ControlsProps;
   filterProps: ControlsProps;
   tabsHeight: number;
   summaryRows: number;
-  filterHeight: number;
   ultraCompactSummary: boolean;
   compactSummary: boolean;
   workspaceGap: number;
   workspaceHeight: number;
+  workspaceTop: number;
+  showWorkspaceDetails: boolean;
+  showShortcutFooter: boolean;
   outerWorkspaceWidth: number;
   actionRows: number;
+  toolbarActions?: ControlsProps;
   workspaceLayout: JoinedWorkspaceLayout;
   listContentWidth: number;
   detailsContentWidth: number;
@@ -51,7 +58,7 @@ export function resourceBrowserPlan({
   footerRows: number;
   showDetails: boolean;
 }): ResourceBrowserPlan {
-  const controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
+  let controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
   const tabsProps = { ...controlsState, part: 'tabs' as const, showSearch: false };
   const tabsLayout = dashboardControlsLayout(tabsProps);
   const ultraCompactSummary = rows < 40;
@@ -65,62 +72,66 @@ export function resourceBrowserPlan({
   };
   const filterLayout = dashboardControlsLayout(filterProps);
   const workspaceGap = columns >= 45 && columns < 76 ? 0 : 1;
-  const workspaceHeight = Math.max(
-    1,
-    rows -
-      (DASHBOARD_HEADER_ROWS +
-        tabsLayout.height +
-        summaryRows +
-        filterLayout.height +
-        warningRows +
-        workspaceGap +
-        footerRows),
-  );
+  const chromeRows = DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryRows + filterLayout.height;
+  const availableWorkspaceHeight = rows - chromeRows - warningRows - workspaceGap;
+  let workspaceHeight = Math.max(1, availableWorkspaceHeight - footerRows);
   const stackedWorkspace = columns < 94;
   const outerWorkspaceWidth = columns - 2;
-  const initialWorkspaceLayout = joinedWorkspaceLayout(
-    outerWorkspaceWidth,
-    workspaceHeight,
-    stackedWorkspace,
-    showDetails,
-    0,
-    0.76,
-  );
-  const initialDetailsWidth = initialWorkspaceLayout.detailsWidth
-    ? initialWorkspaceLayout.detailsWidth - 1
-    : initialWorkspaceLayout.innerWidth - 1;
-  const actionRows = showDetails ? dashboardActionButtonRows(controlsState, Math.max(1, initialDetailsWidth)) : 0;
-  const workspaceLayout = joinedWorkspaceLayout(
-    outerWorkspaceWidth,
-    workspaceHeight,
-    stackedWorkspace,
-    showDetails,
-    actionRows,
-    0.76,
-  );
+  const layoutWorkspace = (details: boolean, actionRows = 0) =>
+    joinedWorkspaceLayout(outerWorkspaceWidth, workspaceHeight, stackedWorkspace, details, actionRows);
+  let workspaceLayout = layoutWorkspace(showDetails);
+  const detailsContentWidth = Math.max(1, (workspaceLayout.detailsWidth || workspaceLayout.innerWidth) - 1);
+  let actionRows = showDetails ? dashboardActionButtonRows(controlsState, detailsContentWidth) : 0;
+  let toolbarActions: ControlsProps | undefined;
+  let toolbarActionRows = 0;
+  let showShortcutFooter = true;
+  if (actionRows) {
+    workspaceLayout = layoutWorkspace(true, actionRows);
+    if (actionRows > workspaceLayout.detailsRows || workspaceHeight < minimumWorkspaceHeight) {
+      controlsState = { ...controlsState, compactActions: true };
+      actionRows = dashboardActionButtonRows(controlsState, detailsContentWidth);
+      workspaceLayout = layoutWorkspace(true, actionRows);
+      if (actionRows > workspaceLayout.detailsRows || workspaceHeight < minimumWorkspaceHeight) {
+        // A short stacked pane may not have any body rows. Keep its actions on
+        // the full-width resource toolbar instead, with their own height budget.
+        toolbarActions = { ...controlsState, actionPairs: false };
+        toolbarActionRows = dashboardActionButtonRows(toolbarActions, outerWorkspaceWidth);
+        workspaceHeight = availableWorkspaceHeight - footerRows - toolbarActionRows;
+        if (workspaceHeight < minimumWorkspaceHeight && footerRows) {
+          workspaceHeight += footerRows;
+          showShortcutFooter = false;
+        }
+        if (workspaceHeight < minimumWorkspaceHeight) workspaceHeight = 0;
+        actionRows = 0;
+        workspaceLayout = layoutWorkspace(true);
+      }
+    }
+  }
+  const showWorkspaceDetails = showDetails && (!stackedWorkspace || workspaceLayout.detailsRows > 0);
+  if (showDetails && !showWorkspaceDetails) workspaceLayout = layoutWorkspace(false);
   return {
     controlsState,
     tabsProps,
     filterProps,
     tabsHeight: tabsLayout.height,
     summaryRows,
-    filterHeight: filterLayout.height,
     ultraCompactSummary,
     compactSummary,
     workspaceGap,
     workspaceHeight,
+    workspaceTop: chromeRows + toolbarActionRows + warningRows + workspaceGap + 1,
+    showWorkspaceDetails,
+    showShortcutFooter,
     outerWorkspaceWidth,
     actionRows,
+    toolbarActions,
     workspaceLayout,
     listContentWidth: workspaceLayout.listWidth,
-    detailsContentWidth: Math.max(
-      1,
-      workspaceLayout.detailsWidth ? workspaceLayout.detailsWidth - 1 : workspaceLayout.innerWidth - 1,
-    ),
+    detailsContentWidth,
   };
 }
 
-// ResourceBrowserChrome: tabs → inventory summary cards → filter controls (vertical).
+// ResourceBrowserChrome: tabs → inventory summary → filters → optional compact actions.
 export function ResourceBrowserChrome({
   plan,
   resources,
@@ -142,5 +153,6 @@ export function ResourceBrowserChrome({
       marginTop: plan.ultraCompactSummary ? 0 : 1,
     }),
     h(Controls, plan.filterProps),
+    plan.toolbarActions ? ActionButtons({ controls: plan.toolbarActions, width: columns - 2 }) : null,
   );
 }

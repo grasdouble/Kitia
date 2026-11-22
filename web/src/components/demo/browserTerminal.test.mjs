@@ -106,7 +106,9 @@ const vite = await createServer({
       enforce: 'pre',
       resolveId(id, importer) {
         if (importer?.endsWith('/browserTerminal.ts') && moduleNames.has(id)) return mockPrefix + moduleNames.get(id);
-        if (importer?.endsWith('/TuiDemo.tsx') && id.endsWith('/dashboard.mjs')) return `${mockPrefix}Dashboard`;
+        if (importer?.endsWith('/TuiDemo.tsx') && id === '@grasdouble/kitia/src/tui/dashboard.mts') {
+          return `${mockPrefix}Dashboard`;
+        }
       },
       load(id) {
         if (!id.startsWith(mockPrefix)) return;

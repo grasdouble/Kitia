@@ -8,11 +8,13 @@ package version.
 ## Public surface and defaults
 
 The public surface consists of the `kitia` command, documented options and
-defaults, and the machine-readable output described below. The package
-executable is `terminal/dist/kitia.js`. Direct callers of `terminal/bin/kitia.js`
-must switch to the new path or invoke the installed `kitia` command. In a
-checkout, run `pnpm run cli:build` before using the executable. The other JavaScript
-modules in `terminal/dist/` are implementation details, not a supported JavaScript SDK.
+defaults, and the machine-readable output described below. In a repository
+checkout, the executable is `terminal/dist/kitia.js`; in the published package
+archive it is `dist/kitia.js`. Direct callers of `terminal/bin/kitia.js` must
+switch to the checkout path or invoke the installed `kitia` command. In a
+checkout, run `pnpm --filter @grasdouble/kitia run build` before using
+the executable. The other JavaScript modules in `terminal/dist/` are implementation
+details, not a supported JavaScript SDK.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
@@ -594,15 +596,15 @@ distributed.
 
 ## Regression gate
 
-`pnpm run cli:test:contract` exercises the CLI executable in isolated synthetic
-catalogs, validates complete JSON reports against the schemas and compares
-stable fields against committed version-1 expectations. Human-readable text
+`pnpm --filter @grasdouble/kitia run test:contract` exercises the CLI
+executable in isolated synthetic catalogs, validates complete JSON reports against
+the schemas and compares stable fields against committed version-1 expectations. Human-readable text
 and object/array ordering are deliberately not frozen.
 
 Historical version-1 inventories are read from committed fixtures rather than
 created by the current writer. Future-version and unsupported-kind scenarios
 verify that files remain byte-for-byte unchanged even when `--force` is used.
-The suite is included in `npm test` and therefore in the existing Node.js 26
+The suite is included in `pnpm test` and therefore in the existing Node.js 26
 Linux/macOS/Windows CI matrix.
 
 Do not update a baseline merely to make a regression green. Explain whether a

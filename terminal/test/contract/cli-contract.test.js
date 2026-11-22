@@ -8,9 +8,9 @@ const path = require('node:path');
 const Ajv = require('ajv');
 const { test } = require('node:test');
 
-const root = path.resolve(__dirname, '../../..');
-const executable = path.join(root, 'terminal/dist/kitia.js');
-const { catalogIndexFileName } = require(path.join(root, 'terminal/dist/core/catalogs/config.js'));
+const root = path.resolve(__dirname, '../..');
+const executable = path.join(root, 'dist/kitia.js');
+const { catalogIndexFileName } = require(path.join(root, 'dist/core/catalogs/config.js'));
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-contract-'));
 const config = path.join(temporary, 'config');
 const indexDirectory = path.join(config, 'source-catalogs');
@@ -19,7 +19,7 @@ const environment = {
   KITIA_CONFIG_DIR: config,
   KITIA_INSTALLED_VERSION: '2.0.0',
 };
-const schemaDirectory = path.join(root, 'terminal/schemas');
+const schemaDirectory = path.join(root, 'schemas');
 const validateDiscovery = new Ajv({ allErrors: true }).compile(
   JSON.parse(fs.readFileSync(path.join(schemaDirectory, 'cli-discovery-v1.schema.json'), 'utf8')),
 );
@@ -56,7 +56,7 @@ const fixtureResource = {
 };
 
 function invoke(args, { cwd = temporary, env = {}, preload = false, parseJson = true } = {}) {
-  const preloadArgs = preload ? ['--require', path.join(root, 'terminal/test/gh-process-preload.cjs')] : [];
+  const preloadArgs = preload ? ['--require', path.join(root, 'test/gh-process-preload.cjs')] : [];
   const result = spawnSync(process.execPath, [...preloadArgs, executable, ...args], {
     cwd,
     env: { ...environment, ...env },
@@ -138,7 +138,7 @@ test('packaged CLI check resolves a committed historical inventory fixture', () 
     },
   ]);
   const target = path.join(temporary, 'historical-target');
-  const fixture = fs.readFileSync(path.join(root, 'terminal/test/fixtures/inventory-v1-source-only.json'));
+  const fixture = fs.readFileSync(path.join(root, 'test/fixtures/inventory-v1-source-only.json'));
   writeInventory(target, fixture);
   const result = invoke(['check', '--target', target, '--json']);
   assertSchema(validateReport, result.json);

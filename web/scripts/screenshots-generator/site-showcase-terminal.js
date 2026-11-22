@@ -1,14 +1,13 @@
 'use strict';
 
-const path = require('node:path');
 const { PassThrough } = require('node:stream');
-const { loadCommandCatalogs } = require('../../../terminal/dist/cli/loading.js');
-const { collectInstalledScopes } = require('../../../terminal/dist/core/inventory/checks.js');
-const { catalogEntries, enrichInstalledResources } = require('../../../terminal/dist/core/resources/queries.js');
-const { loadUserSourceConfiguration } = require('../../../terminal/dist/core/catalogs/config.js');
-const { createDashboardActionHandler } = require('../../../terminal/dist/tui/native-actions.js');
-const { DASHBOARD_THEME } = require('../../../terminal/dist/tui/colors.js');
-const { root, seedShowcase } = require('./site-showcase-fixture.js');
+const { loadCommandCatalogs } = require('@grasdouble/kitia/dist/cli/loading.js');
+const { collectInstalledScopes } = require('@grasdouble/kitia/dist/core/inventory/checks.js');
+const { catalogEntries, enrichInstalledResources } = require('@grasdouble/kitia/dist/core/resources/queries.js');
+const { loadUserSourceConfiguration } = require('@grasdouble/kitia/dist/core/catalogs/config.js');
+const { createDashboardActionHandler } = require('@grasdouble/kitia/dist/tui/native-actions.js');
+const { DASHBOARD_THEME } = require('@grasdouble/kitia/dist/tui/colors.js');
+const { seedShowcase } = require('./site-showcase-fixture.js');
 const { assertTermlessRuntime } = require('./termless-preflight.js');
 
 const terminalSize = { columns: 120, rows: 45 };
@@ -167,7 +166,14 @@ function createTtyOutput() {
 
 async function launchShowcaseDashboard(
   directory,
-  { executeOverride, actionHandlerOverride, prepareFixture, listSourceVersionsOverride, catalogResourcesOverride } = {},
+  {
+    executeOverride,
+    actionHandlerOverride,
+    prepareFixture,
+    listSourceVersionsOverride,
+    catalogResourcesOverride,
+    inventoryRunOverride,
+  } = {},
 ) {
   assertTermlessRuntime();
   const fixture = await seedShowcase(directory);
@@ -181,7 +187,7 @@ async function launchShowcaseDashboard(
     const [{ createTerminal }, { createXtermBackend }, dashboard] = await Promise.all([
       import('@termless/core'),
       import('@termless/xtermjs'),
-      import(path.join(root, 'terminal', 'dist', 'tui', 'dashboard.mjs')),
+      import('@grasdouble/kitia/dist/tui/dashboard.mjs'),
     ]);
     terminal = createTerminal({
       backend: createXtermBackend(),
@@ -216,7 +222,9 @@ async function launchShowcaseDashboard(
       mode,
       entries,
     }));
-    const installed = collectInstalledScopes({ project: fixture.project, user: fixture.home }, loaded.sourceResources);
+    const installed = collectInstalledScopes({ project: fixture.project, user: fixture.home }, loaded.sourceResources, {
+      run: inventoryRunOverride,
+    });
     const allResources = catalogEntries(loaded.sourceResources);
     const rows = enrichInstalledResources(installed.resources, allResources);
     const catalogResources = catalogResourcesOverride || allResources;

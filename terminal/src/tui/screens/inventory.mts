@@ -28,7 +28,6 @@ import {
   wrapText,
 } from '../helpers.mjs';
 import { JoinedWorkspace } from '../layouts/joined-workspace.mjs';
-import { DASHBOARD_HEADER_ROWS } from '../sections/header.mjs';
 import { DashboardHeader } from '../sections/header.mjs';
 const h = React.createElement;
 export function InventoryScreen({
@@ -139,13 +138,17 @@ export function InventoryScreen({
     controlsState,
     workspaceGap,
     workspaceHeight,
+    workspaceTop,
+    showWorkspaceDetails,
+    showShortcutFooter,
     outerWorkspaceWidth,
     actionRows,
     workspaceLayout,
     listContentWidth,
     detailsContentWidth,
   } = browserPlan;
-  const footer = !modalActive ? h(ShortcutFooter, { lines: shortcutLines, width: columns - 2 }) : null;
+  const footer =
+    showShortcutFooter && !modalActive ? h(ShortcutFooter, { lines: shortcutLines, width: columns - 2 }) : null;
   const warnings = warningLines.length
     ? h(
         Box,
@@ -238,21 +241,8 @@ export function InventoryScreen({
     selected?.managed === false ? 'Not managed by Kitia; removal requires two confirmations.' : undefined;
   const coreDetails = selected
     ? [
-        ...(hasDetail(catalog)
-          ? [
-              h(
-                Text,
-                {
-                  key: 'inventory-catalog',
-                  color: DASHBOARD_THEME.semantic.accents.label,
-                  bold: true,
-                },
-                'CATALOG ',
-                h(Text, { color: DASHBOARD_THEME.semantic.accents.muted }, String(catalog)),
-              ),
-            ]
-          : []),
         ...detailFieldRows([
+          { key: 'inventory-catalog', label: 'CATALOG', value: catalog },
           { key: 'inventory-license', label: 'LICENSE', value: license },
           { key: 'inventory-revision', label: 'INSTALLED REVISION', value: installedRevision },
           { key: 'inventory-path', label: 'INSTALLED PATH', value: installedPath },
@@ -348,18 +338,10 @@ export function InventoryScreen({
     ],
   });
   const actionButtons = actionRows ? ActionButtons({ controls: controlsState, width: detailsContentWidth }) : null;
-  const workspaceTop =
-    DASHBOARD_HEADER_ROWS +
-    browserPlan.tabsHeight +
-    browserPlan.summaryRows +
-    browserPlan.filterHeight +
-    warningBlockRows +
-    workspaceGap +
-    1;
   const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
   controls.mouse?.replace(
     'inventory-rows',
-    modalActive
+    modalActive || !workspaceHeight
       ? []
       : tableWindow.items.map((_, index) => ({
           left: 3,
@@ -384,28 +366,30 @@ export function InventoryScreen({
     }),
     h(ResourceBrowserChrome, { plan: browserPlan, resources, columns }),
     warnings,
-    h(
-      Box,
-      { width: columns - 2, marginTop: workspaceGap },
-      h(JoinedWorkspace, {
-        width: outerWorkspaceWidth,
-        height: workspaceHeight,
-        layout: workspaceLayout,
-        showDetails,
-        listTitle: 'INSTALLED RESOURCES',
-        listMeta: `${visible.length} results`,
-        listHeader: tableHeader,
-        listRows: tableRows,
-        detailsTitle: 'SELECTION DETAILS',
-        details: detailPaging.visibleLines,
-        detailsFooter: actionButtons,
-        detailsHint: detailPaging.canPage ? 'PgUp/PgDn' : undefined,
-        color:
-          tourStep === 0
-            ? DASHBOARD_THEME.semantic.inventoryStatus.attention
-            : DASHBOARD_THEME.semantic.accents.detailPanel,
-      }),
-    ),
+    workspaceHeight
+      ? h(
+          Box,
+          { width: columns - 2, marginTop: workspaceGap },
+          h(JoinedWorkspace, {
+            width: outerWorkspaceWidth,
+            height: workspaceHeight,
+            layout: workspaceLayout,
+            showDetails: showWorkspaceDetails,
+            listTitle: 'INSTALLED RESOURCES',
+            listMeta: `${visible.length} results`,
+            listHeader: tableHeader,
+            listRows: tableRows,
+            detailsTitle: 'SELECTION DETAILS',
+            details: detailPaging.visibleLines,
+            detailsFooter: actionButtons,
+            detailsHint: detailPaging.canPage ? 'PgUp/PgDn' : undefined,
+            color:
+              tourStep === 0
+                ? DASHBOARD_THEME.semantic.inventoryStatus.attention
+                : DASHBOARD_THEME.semantic.accents.detailPanel,
+          }),
+        )
+      : null,
     footer,
     controls.menuFilter ? h(Controls, { ...browserPlan.filterProps, menuOverlayOnly: true }) : null,
   );

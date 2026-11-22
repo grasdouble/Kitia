@@ -1,2 +1,8 @@
+packages:
+  - terminal
+  - web
+
+hoist: false
+
 allowBuilds:
   esbuild: true

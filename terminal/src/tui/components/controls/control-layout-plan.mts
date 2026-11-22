@@ -42,6 +42,8 @@ export interface ControlsProps {
   actionPairs?: boolean;
   /** Omit the heading row when contextual buttons directly follow selection details. */
   hideActionHeading?: boolean;
+  /** Use single-line actions when the details pane cannot fit the boxed layout. */
+  compactActions?: boolean;
   actions?: DashboardControlButton[];
   actionsInToolbar?: boolean;
   actionIndex?: number;
@@ -134,23 +136,24 @@ function filterWidth(filter: DashboardControlFilter, width: number) {
 function actionButtonLines(props: ControlsProps, width: number) {
   if (props.actionsInToolbar || props.modalActive || !props.actions?.length) return [];
   const safeWidth = Math.max(1, width);
+  const stride = props.compactActions ? 1 : 3;
   const items = props.actions.map((action): LayoutItem => ({
     id: action.id,
     label: action.label,
     text: action.label,
-    width: Math.min(safeWidth, Math.max(1, action.label.length + 4)),
+    width: Math.min(safeWidth, Math.max(1, action.label.length + (props.compactActions ? 2 : 4))),
     target: { type: 'action', action: action.id },
   }));
-  if (!props.actionPairs) return splitControlLines(items, safeWidth, 0, 'actions', 3);
+  if (!props.actionPairs) return splitControlLines(items, safeWidth, 0, 'actions', stride);
   const lines: ControlLine[] = [];
   for (let index = 0; index < items.length;) {
     const pair = items.slice(index, index + 2);
     if (pair.length === 2 && pair[0].width + 1 + pair[1].width <= safeWidth) {
-      lines.push({ row: lines.length * 3, kind: 'actions', items: pair });
+      lines.push({ row: lines.length * stride, kind: 'actions', items: pair });
     } else {
       for (const item of pair) {
         lines.push({
-          row: lines.length * 3,
+          row: lines.length * stride,
           kind: 'actions',
           items: [{ ...item, width: Math.min(item.width, safeWidth) }],
         });
@@ -163,7 +166,7 @@ function actionButtonLines(props: ControlsProps, width: number) {
 
 export function dashboardActionButtonRows(props: ControlsProps, width: number) {
   const rows = actionButtonLines(props, width).length;
-  return rows ? Number(!props.hideActionHeading) + rows * 3 : 0;
+  return rows ? Number(!props.hideActionHeading) + rows * (props.compactActions ? 1 : 3) : 0;
 }
 
 export function dashboardActionButtonLines(props: ControlsProps, width: number) {

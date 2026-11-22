@@ -30,16 +30,17 @@ function ActionButtonsLayout({ controls, width }: { controls: ControlsProps; wid
       const node = rowRefs.current[lineIndex]?.current;
       if (!node) continue;
       const { x, y, clientWidth, clientHeight } = measureElement(node);
+      const bottom = Math.min(y + clientHeight, controls.rows ?? Infinity);
       let offset = 0;
       for (const [index, item] of line.items.entries()) {
         if (index) offset += 1;
         const itemWidth = Math.max(0, Math.min(item.width, clientWidth - offset, controls.columns - x - offset));
-        if (itemWidth && clientHeight)
+        if (itemWidth && bottom > y)
           regions.push({
             left: x + offset + 1,
             right: x + offset + itemWidth,
             top: y + 1,
-            bottom: y + clientHeight,
+            bottom,
             target: item.target,
           });
         offset += item.width;

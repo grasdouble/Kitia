@@ -3,8 +3,8 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "rootDir": "terminal/src",
-    "outDir": "terminal/dist",
+    "rootDir": "src",
+    "outDir": "dist",
     "resolveJsonModule": true,
     "types": ["node"],
     "esModuleInterop": true,
@@ -12,6 +12,6 @@
     "strict": true,
     "noEmitOnError": true
   },
-  "include": ["terminal/src/**/*.ts", "terminal/src/**/*.mts"],
-  "exclude": ["terminal/src/**/__tests__/**"]
+  "include": ["src/**/*.ts", "src/**/*.mts"],
+  "exclude": ["src/**/__tests__/**"]
 }

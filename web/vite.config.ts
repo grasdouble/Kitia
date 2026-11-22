@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig, type Plugin } from 'vite';
@@ -5,6 +7,8 @@ import { defineConfig, type Plugin } from 'vite';
 import { browserInkPlugins } from './browserInkPlugin';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
+const require = createRequire(import.meta.url);
+const terminalPackage = dirname(require.resolve('@grasdouble/kitia/package.json'));
 
 function pageRoutes(): Plugin {
   return {
@@ -34,6 +38,11 @@ export default defineConfig({
   root,
   base: '/',
   plugins: [...browserInkPlugins(), pageRoutes()],
+  resolve: {
+    // The browser runs the live dashboard source, not a previous CLI build.
+    alias: { '@grasdouble/kitia/src': resolve(terminalPackage, 'src') },
+    dedupe: ['ink', 'react', 'react-dom'],
+  },
   server: {
     host: true,
   },

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -283,47 +283,42 @@ async function assertShortcutsFrame(session, hints) {
   await assertSeparatedHeader(session, 'SHORTCUTS', hints[0]);
 }
 
+const inventoryIds = ['ask-matt', 'unmanaged', 'grill-me'];
+const catalogIds = ['ask-matt', 'grill-me', 'plan-review', 'release-helper', 'review-guide'];
 const screenShortcutHints = {
   '': [
-    'Actions',
     'A install',
     'P preview',
-    'V revision',
-    'U update',
     'Delete uninstall',
-    'Filters',
     'F filter',
     'C catalog',
     'K kind',
     'L license',
-    'Display',
     'D details',
-    'Navigation',
+    '1/2/3 sections',
     'M catalogs',
     '↑↓ navigate',
     '? guide',
     'Q quit',
   ],
   a: [
-    'Actions',
     'ENTER install',
     'V revisions',
     'P preview/audit',
-    'Filters',
     'F filter',
     'C catalog',
     'K kind',
     'L license',
-    'Display',
     'D details',
-    'Navigation',
-    '↑↓ navigate',
+    '1/2/3 sections',
     'ESC back',
+    '↑↓ navigate',
     '? guide',
     'Q quit',
   ],
-  m: ['Display', 'D details', 'Navigation', '↑↓ nav', '? guide', 'ESC inventory', 'Q quit'],
+  m: ['D details', 'ESC inventory', '1/2/3 sections', '↑↓ navigate', '? guide', 'Q quit'],
 };
+const searchShortcutHints = ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear', '↑↓ navigate'];
 const previewShortcutHints = [
   'Display',
   'S source',
@@ -335,96 +330,214 @@ const previewShortcutHints = [
   'ENTER/ESC close',
 ];
 
+function shortcutFooter(grid, columns) {
+  const lines = grid.trimEnd().split('\n');
+  const separator = lines.findLastIndex((line) => line.trim() === '─'.repeat(columns - 2));
+  if (separator < 0) return;
+  if (lines.length === separator + 1) return;
+  return {
+    row: separator,
+    lastRow: lines.length - 1,
+    text: lines
+      .slice(separator + 1)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  };
+}
+
+function hasHints(text, hints) {
+  let offset = 0;
+  for (const hint of hints) {
+    const match = text.indexOf(hint, offset);
+    if (match < 0) return false;
+    offset = match + hint.length;
+  }
+  return true;
+}
+
+function workspaceFrame(grid, title) {
+  const lines = grid.split('\n');
+  const row = lines.findIndex((line) => line.trimStart().startsWith(`│${title}`));
+  if (row < 1) return;
+  const col = lines[row].indexOf(title);
+  const left = col - 1;
+  const right = lines[row].lastIndexOf('│');
+  const bottom = lines.findIndex((line, index) => index > row && line[left] === '└' && line[right] === '┘');
+  if (right <= col || bottom <= row + 2 || lines[row - 1][left] !== '┌' || lines[row - 1][right] !== '┐') return;
+  const listRight = lines[row].indexOf('│', col);
+  const detailsRow = lines.findIndex(
+    (line, index) => index >= row && index < bottom && line.includes('SELECTION DETAILS'),
+  );
+  const detailsCol = detailsRow < 0 ? -1 : lines[detailsRow].indexOf('SELECTION DETAILS');
+  const bodyRow = row + 2;
+  const tableBottom = detailsRow > row ? detailsRow - 1 : bottom;
+  const table = lines.slice(bodyRow + 1, tableBottom).map((line) => line.slice(col, listRight).trimEnd());
+  const entries = table.flatMap((line, index) => {
+    const match = /^\s*(›\s+)?([\w-]+)(?:\s{2,}|$)/.exec(line);
+    return match ? [{ id: match[2], selected: Boolean(match[1]), row: bodyRow + index + 1, line }] : [];
+  });
+  return { lines, row, col, left, right, bottom, listRight, bodyRow, entries, detailsRow, detailsCol };
+}
+
 async function assertTableSurface(
   session,
   key,
-  { query = '', editing = false, license = 'ALL', inventoryCount = query ? 1 : 3 } = {},
+  {
+    query = '',
+    editing = false,
+    catalog = 'ALL',
+    kind = 'ALL',
+    license = 'ALL',
+    ids = query ? [query] : key === 'a' ? catalogIds : inventoryIds,
+    visible = ids,
+    selected = ids[0],
+    total = key === 'a' ? catalogIds.length : inventoryIds.length,
+    details = true,
+    hints = editing ? searchShortcutHints : screenShortcutHints[key],
+    dismissed = [],
+  } = {},
 ) {
-  const title = key === 'm' ? 'CONNECTED CATALOGS' : key === 'a' ? 'CATALOG RESOURCES' : 'INVENTORY';
-  const filter = `Filter ${editing ? `${query}▏` : query || '(F to filter)'}`;
-  const metadata =
-    key === 'm'
-      ? []
-      : key === 'a'
-        ? [
-            new RegExp(`^RESOURCES ${query ? 1 : 5}/5 · \\d-\\d$`),
-            `${filter} · Catalog ALL · Kind ALL · License ${license}`,
-          ]
-        : [
-            new RegExp(`^RESOURCES ${inventoryCount}/3 · \\d-\\d$`),
-            `${filter} · Catalog ALL · Kind ALL · License ${license}`,
-          ];
-  const header = await assertSeparatedHeader(
+  const title = key === 'a' ? 'CATALOG RESOURCES' : 'INSTALLED RESOURCES';
+  const countLabel = key === 'a' ? 'AVAILABLE' : 'RESOURCES';
+  const summary = `${countLabel} ${ids.length}/${total} · CATALOG ${catalog} · KIND ${kind} · LICENSE ${license}`;
+  const search = editing ? `${query}▏` : query || 'Search resources…';
+  let frame;
+  let searchField;
+  const grid = await waitForGrid(
     session,
-    title,
-    key === 'm' ? 'CATALOG' : key === 'a' ? 'INST' : 'STATUS',
-    undefined,
-    metadata,
+    (grid) => {
+      if (dismissed.some((text) => grid.includes(text))) return false;
+      const workspace = workspaceFrame(grid, title);
+      if (!workspace || (workspace.detailsRow !== -1) !== details) return false;
+      const { lines, row, col, listRight, entries, bodyRow } = workspace;
+      const footer = shortcutFooter(grid, session.output.columns);
+      if (
+        footer?.lastRow !== session.output.rows - 1 ||
+        footer.row <= workspace.bottom ||
+        !hasHints(footer.text, hints)
+      )
+        return false;
+      const metadata = lines.slice(0, row).find((line) => line.includes(`${countLabel} `));
+      if (!metadata) return false;
+      const label = metadata.slice(metadata.indexOf(`${countLabel} `)).trimEnd();
+      if (summary !== label && !(label.endsWith('...') && summary.startsWith(label.slice(0, -3)))) return false;
+      if (!lines[row].slice(col, listRight).includes(`${ids.length} results`)) return false;
+      if (selected !== undefined && !entries.some((entry) => entry.id === selected && entry.selected)) return false;
+      if (entries.length !== visible.length || !visible.every((id) => entries.some((entry) => entry.id === id)))
+        return false;
+      if (!ids.length && !lines.slice(bodyRow + 1, workspace.bottom).some((line) => line.includes('No matching')))
+        return false;
+      searchField = lines
+        .slice(0, row)
+        .map((line, row) => {
+          const field = /^\s*│ (.*?) *│/.exec(line);
+          return (
+            field && {
+              row,
+              col: field[0].indexOf('│'),
+              value: field[1],
+            }
+          );
+        })
+        .find(
+          (field) =>
+            field &&
+            (field.value === search ||
+              (!query && !editing && field.value.startsWith('…') && search.endsWith(field.value.slice(1)))),
+        );
+      if (!searchField) return false;
+      const labels = [
+        kind === 'ALL' ? 'All kinds' : kind,
+        catalog === 'ALL' ? 'All catalogs' : catalog,
+        license === 'ALL' ? 'All licenses' : license,
+      ];
+      if (
+        !labels.every((label) =>
+          lines.slice(0, row).some((line) => line.toUpperCase().includes(`${label.toUpperCase()}▾`)),
+        )
+      )
+        return false;
+      frame = workspace;
+      return true;
+    },
+    `${title} renders ${summary}, search ${JSON.stringify(search)} and the expected rows: ${ids.join(', ')}`,
   );
-  const lines = session.terminal.screen.getText().split('\n');
-  const right = lines[header.row].indexOf('│', header.col);
-  const columns = lines[header.bodyRow].slice(header.col, right);
-  for (const label of key === 'm'
-    ? ['CATALOG', 'REPOSITORY', 'RES', 'INST', 'FRESHNESS']
-    : key === 'a'
-      ? ['INST', 'SOURCE', 'KIND', 'ID']
-      : ['STATUS', 'SCOPE', 'KIND', 'ID', 'CATALOG']) {
-    assert.ok(columns.includes(label), `${title} preserves its ${label} column:\n${columns}`);
+  const { lines, row, col, left, right, bottom, listRight, bodyRow, entries, detailsRow, detailsCol } = frame;
+  assert.match(lines[row + 1].slice(col, listRight), /^─+$/, 'the list divider separates title and headings');
+  assert.match(
+    lines[bodyRow].slice(col, listRight).trim(),
+    key === 'a' ? /^RESOURCE\s+KIND\s+CATALOG\s+INST(?:ALLED|\.\.\.)$/ : /^RESOURCE\s+KIND\s+SCOPE\s+STATUS$/,
+    `${title} keeps its ordered column headings`,
+  );
+  assert.deepEqual(
+    entries.filter((entry) => entry.selected).map((entry) => entry.id),
+    selected ? [selected] : [],
+  );
+  for (const line of lines.slice(row, bottom)) {
+    assert.equal(line[left], '│', 'workspace left edge is intact');
+    assert.equal(line[right], '│', 'workspace right edge is intact');
   }
-  const bottom = lines.findIndex((line, index) => index > header.bodyRow && line[header.col - 2] === '└');
-  assert.ok(
-    lines.slice(header.bodyRow + 1, bottom).some((line) => line.slice(header.col, right).includes('›')),
-    'the selected data row stays below the column headings',
+  assert.deepEqual(session.terminal.cell(row, col).fg, { r: 139, g: 190, b: 183 }, 'workspace title stays cyan');
+  assert.deepEqual(session.terminal.cell(row + 1, col).fg, { r: 129, g: 162, b: 190 }, 'workspace divider stays blue');
+  assert.ok(searchField.row < row, 'search control stays above the workspace');
+  assert.deepEqual(
+    session.terminal.cell(searchField.row, searchField.col).fg,
+    editing ? { r: 139, g: 190, b: 183 } : { r: 102, g: 102, b: 102 },
+    'the search field border reflects focus',
   );
-  if (key === 'm') {
-    assert.match(lines[header.row], /CONNECTED CATALOGS 1/);
-  } else {
-    const filterRow = header.row + (key === 'a' ? 2 : 2);
-    assert.deepEqual(
-      session.terminal.cell(filterRow, header.col).fg,
-      editing || query || license !== 'ALL' ? { r: 129, g: 162, b: 190 } : { r: 102, g: 102, b: 102 },
-      'filter text colors are preserved above the divider',
-    );
-    if (key === 'a') {
-      const [, first, last] = lines[header.row + 1].slice(header.col, right).match(/· (\d)-(\d)/);
-      const dataRows = lines
-        .slice(header.bodyRow + 1, bottom)
-        .map((line) => line.slice(header.col, right))
-        .filter((line) => /ask-matt|grill-me|plan-review|release-helper|review-guide/.test(line));
-      assert.equal(
-        Number(last) - Number(first) + 1,
-        dataRows.length,
-        'catalog header range matches rows below the headings',
-      );
-      assert.ok(Number(first) >= 1 && Number(last) <= (query ? 1 : 5));
+  if (details) {
+    assert.match(lines[detailsRow + 1].slice(detailsCol, right), /^─+$/, 'the detail divider is below its heading');
+    if (detailsRow === row) {
+      assert.equal(lines[row + 1][listRight], '┼', 'list and details share their separator');
+      assert.ok(lines.slice(bodyRow, bottom).every((line) => line[listRight] === '│'));
+    } else {
+      assert.match(lines[detailsRow - 1].slice(col, right), /^─+$/, 'a stacked rule separates list and details');
+    }
+  }
+  return { ...frame, grid };
+}
+
+function assertSelectedRow(session, id, { revision = false } = {}) {
+  const lines = session.terminal.screen.getText().split('\n');
+  const marker = new RegExp(`›\\s+${id}(?=\\s|│|$)`);
+  const row = lines.findIndex((line) => marker.test(line));
+  assert.notEqual(row, -1, `${id} retains the selected-row marker`);
+  const col = lines[row].search(marker);
+  for (const offset of [col, lines[row].indexOf(id, col)]) {
+    const { fg, bg } = session.terminal.cell(row, offset);
+    const blue = { r: 129, g: 162, b: 190 };
+    if (revision) {
+      assert.deepEqual(fg, blue, `${id} retains blue revision text`);
+    } else {
+      assert.deepEqual(fg, { r: 255, g: 255, b: 255 }, `${id} retains contrasting selection text`);
+      assert.deepEqual(bg, blue, `${id} retains the blue selection background`);
     }
   }
 }
 
-function assertSelectedRow(session, id, truncated = false) {
-  const lines = session.terminal.screen.getText().split('\n');
-  const row = lines.findIndex(
-    (line) => line.includes('›') && (line.includes(id) || (truncated && line.includes(id.slice(0, 3)))),
-  );
-  assert.notEqual(row, -1, `${id} retains the selected-row marker`);
-  const label = truncated
-    ? lines[row]
-        .slice(lines[row].indexOf('›') + 1)
-        .trimStart()
-        .split(/\s+/, 1)[0]
-    : id;
-  if (truncated)
-    assert.ok(
-      label === id || (label.endsWith('...') && id.startsWith(label.slice(0, -3))),
-      'the selected catalog retains its label or the existing width-limited prefix',
-    );
-  for (const col of [lines[row].indexOf('›'), lines[row].indexOf(label)]) {
-    assert.deepEqual(
-      session.terminal.cell(row, col).fg,
-      { r: 129, g: 162, b: 190 },
-      `${id} retains blue selection highlighting`,
-    );
-  }
+function workspaceDetails(frame) {
+  if (!frame || frame.detailsRow < 0) return [];
+  return frame.lines
+    .slice(frame.detailsRow + 2, frame.bottom)
+    .map((line) => line.slice(frame.detailsCol, frame.right).trim());
+}
+
+function assertWorkspaceDetail(frame, id, sideBySide) {
+  assert.equal(frame.detailsRow === frame.row, sideBySide, 'selection details move beside or below the list');
+  assert.equal(frame.detailsCol > frame.listRight, sideBySide, 'the pane starts on the expected side of the list');
+  const detail = workspaceDetails(frame).filter(Boolean);
+  assert.deepEqual(detail.slice(0, 2), ['skill', id], 'the pane shows the selected resource kind and ID');
+  assert.ok(!detail.some((line) => /^FILE |^PAGE \d+\//.test(line)), 'selection details do not use Preview metadata');
+  return detail;
+}
+
+function resizeDashboard(session, { columns, rows }) {
+  if (session.output.columns === columns && session.output.rows === rows) return;
+  session.terminal.resize(columns, rows);
+  session.output.columns = columns;
+  session.output.rows = rows;
+  session.output.emit('resize');
 }
 
 test('Termless xterm consumes the real Ink dashboard and its stream-driven states', { timeout: 15000 }, async () => {
@@ -440,118 +553,95 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
   let session;
   try {
     session = await launchShowcaseDashboard(directory);
-    const inventory = await waitForInkOutput(session, 'ask-matt');
-    await session.flushTerminal();
-    const rawInventory = session.rawBytes().toString('utf8');
-    const rows = inventory
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const resourceRows = rows.filter(
-      (line) =>
-        ['ask-matt', 'unmanaged', 'grill-me'].some((id) => line.includes(id)) &&
-        /(?:CURRENT|UNMANAGED)/.test(line) &&
-        /(?:PROJECT|USER)/.test(line),
+    const inventory = await assertTableSurface(session, '');
+    assert.deepEqual(
+      inventory.entries.map(({ line }) => line.trim().split(/\s{2,}/)),
+      [
+        ['›', 'ask-matt', 'skill', 'project', 'Current'],
+        ['unmanaged', 'skill', 'user', 'Unmanaged'],
+        ['grill-me', 'skill', 'user', 'Current'],
+      ],
+      'all three deterministic inventory rows show their resource, kind, scope and status',
     );
-
-    assert.equal(resourceRows.length, 3, 'all three deterministic inventory rows are visible');
-    assert.ok(resourceRows.some((line) => /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/.test(line)));
-    assert.ok(resourceRows.some((line) => /UNMANAGED.*USER.*skill.*unmanaged/.test(line)));
-    assert.ok(resourceRows.some((line) => /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/.test(line)));
-    assert.ok(inventory.includes('2 current') && inventory.includes('1 unmanaged'));
+    assert.match(inventory.grid, /│PROJECT\s+1│\s+│USER\s+2│\s+│UPDATES\s+0│/);
+    const detail = assertWorkspaceDetail(inventory, 'ask-matt', true);
     assert.ok(
-      rows.some((line) => line.includes('INVENTORY') && line.includes('SKILL - ask-matt')),
-      'selected project details remain side-by-side at 120 columns',
+      detail.includes('CATALOG') && detail.includes('MattPucock[engineering]'),
+      'the project catalog is visible',
     );
-    const normalizedInventory = inventory.replace(/\s+/g, '');
-    for (const value of [
-      'MattPucock[engineering]',
-      'PROJECT',
-      '[ CURRENT ]',
-      'https://github.com/demo/skills',
-      '4ae2317',
-    ]) {
-      assert.ok(normalizedInventory.includes(value.replace(/\s+/g, '')), `selected ask-matt details include ${value}`);
-    }
-    assert.match(rawInventory, /\u001b\[(?:[0-9;]*;)?3[0-9]m/, 'Ink emitted color for the inventory');
-
-    const colorOf = (text) => {
-      const match = session.terminal.findText(text);
-      assert.ok(match, `${text} is present in the xterm grid`);
-      return session.terminal.cell(match.row, match.col).fg;
-    };
-    assert.deepEqual(colorOf('INVENTORY'), { r: 139, g: 190, b: 183 });
-    assert.deepEqual(colorOf('MANAGED'), { r: 180, g: 189, b: 105 });
-    assert.deepEqual(colorOf('SKILL - ask-matt'), { r: 129, g: 162, b: 190 });
-    await assertSeparatedHeader(session, 'SKILL - ask-matt', 'CATALOG');
+    assert.ok(detail.includes('Route repository questions'), 'the xterm grid exposes the project description');
+    assert.match(session.rawBytes().toString('utf8'), /\u001b\[(?:[0-9;]*;)?3[0-9]m/, 'Ink emitted color');
     assertSelectedRow(session, 'ask-matt');
-    assert.deepEqual(colorOf('Route repository questions'), { r: 102, g: 102, b: 102 });
-    const panelCorner = Array.from({ length: terminalSize.rows }, (_, row) =>
-      Array.from({ length: terminalSize.columns }, (_, col) => ({ row, col })).find(
-        ({ row: cellRow, col: cellCol }) => session.terminal.cell(cellRow, cellCol).char === '┌',
-      ),
-    ).find(Boolean);
-    assert.ok(panelCorner, 'the xterm grid contains a panel corner');
-    assert.equal(session.terminal.cell(panelCorner.row, panelCorner.col + 1).char, '─');
-    assert.equal(session.terminal.cell(panelCorner.row + 1, panelCorner.col).char, '│');
+    const description = session.terminal.findText('Route repository questions');
+    assert.ok(description);
+    assert.deepEqual(session.terminal.cell(description.row, description.col).fg, { r: 102, g: 102, b: 102 });
+    assert.equal(session.terminal.cell(inventory.row - 1, inventory.left).char, '┌');
+    assert.equal(session.terminal.cell(inventory.row - 1, inventory.left + 1).char, '─');
+    assert.equal(session.terminal.cell(inventory.row, inventory.left).char, '│');
 
-    const xtermScreen = session.terminal.screen.getText();
-    await assertShortcutsFrame(session, screenShortcutHints['']);
-    const xtermLines = xtermScreen.split(/\r?\n/).map((line) => line.trim());
-    assert.ok(xtermLines.some((line) => /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/.test(line)));
-    assert.ok(xtermLines.some((line) => /UNMANAGED.*USER.*skill.*unmanaged/.test(line)));
-    assert.ok(xtermLines.some((line) => /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/.test(line)));
-    assert.ok(xtermLines.some((line) => line.includes('INVENTORY') && line.includes('SKILL - ask-matt')));
-    assert.ok(xtermScreen.includes('2 current') && xtermScreen.includes('1 unmanaged'));
-    const updateStart = session.rawBytes().length;
+    session.input.write('\x1b[6~');
+    const laterDetails = await waitForGrid(
+      session,
+      (grid) => {
+        const details = workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES'));
+        return (
+          details.join('').includes('SOURCEhttps://github.com/demo/skills') &&
+          !details.includes('Route repository questions')
+        );
+      },
+      'paging the selected details shows the installed revision and upstream source',
+    );
+    const metadata = workspaceDetails(workspaceFrame(laterDetails, 'INSTALLED RESOURCES')).filter(Boolean).join(' ');
+    assert.match(metadata, /INSTALLED REVISION 4ae2317/);
+    assert.match(metadata.replace(/\s+/g, ''), /SOURCEPATHskills\/engineering\/ask-matt/);
+    session.input.write('\x1b[5~');
+    await waitForGrid(
+      session,
+      (grid) => workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES')).includes('Route repository questions'),
+      'Page Up restores the first page of the same selection details',
+    );
+    assertWorkspaceDetail(await assertTableSurface(session, ''), 'ask-matt', true);
+
+    session.input.write('a');
+    const catalog = await assertTableSurface(session, 'a');
+    assertWorkspaceDetail(catalog, 'ask-matt', true);
+    assertSelectedRow(session, 'ask-matt');
+    assert.match(catalog.entries.find(({ id }) => id === 'grill-me').line, /MattPucock\[productivity\]\s+user$/);
+    session.input.write('\x1b');
+    await assertTableSurface(session, '', { dismissed: ['CATALOG RESOURCES'] });
+    session.input.write('q');
+    assert.equal(await dashboardExit(session), true, 'q exits the Ink dashboard cleanly');
+    await closeShowcaseDashboard(session);
+    session = undefined;
+
+    session = await launchShowcaseDashboard(path.join(directory, 'update'), {
+      prepareFixture: async ({ config, catalogName }) => {
+        const indexPath = path.join(config, 'source-catalogs', `${catalogName}.json`);
+        const index = JSON.parse(await readFile(indexPath, 'utf8'));
+        index.source_ref = 'b'.repeat(40);
+        await writeFile(indexPath, JSON.stringify(index));
+      },
+      inventoryRunOverride: (_program, args) => {
+        const ref = args.find((arg) => arg.startsWith('sha='))?.slice(4);
+        assert.ok(ref, 'inventory compares the installed and catalog path histories');
+        return JSON.stringify([{ sha: ref }]);
+      },
+    });
+    const updateHints = [...screenShortcutHints['']];
+    updateHints.splice(updateHints.indexOf('Delete uninstall'), 0, 'U update');
+    await assertTableSurface(session, '', { hints: updateHints });
     session.input.write('u');
-    const updatePrompt = await waitForInkOutput(session, 'CONFIRM UPDATE', updateStart);
-    await session.flushTerminal();
-    assert.ok(
-      updatePrompt.includes('Update skill:ask-matt from project?'),
+    await waitForGrid(
+      session,
+      (grid) => grid.includes('CONFIRM UPDATE') && grid.includes('Update skill:ask-matt from project?'),
       'the advertised update key opens the real confirmation flow',
     );
     await assertShortcutsFrame(session, ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE']);
-    const cancelStart = session.rawBytes().length;
     session.input.write('\x1b');
-    await waitForInkOutput(session, 'INVENTORY', cancelStart);
-    await session.flushTerminal();
-    await waitForGrid(
-      session,
-      (grid) => grid.includes('Route repository questions') && !grid.includes('CONFIRM UPDATE'),
-      'the confirmation closes before inventory assertions',
-    );
-
-    assert.ok(
-      xtermScreen.includes('Route repository questions'),
-      'the xterm.js backend consumes and exposes actual Ink dashboard output',
-    );
-    const description = session.terminal.findText('Route repository');
-    assert.ok(description, 'the description is present in the xterm screen');
-    assert.ok(
-      session.terminal.cell(description.row, description.col).fg,
-      'the xterm cell preserves ANSI foreground color',
-    );
-
-    const catalogStart = session.rawBytes().length;
-    session.input.write('a');
-    const catalog = await waitForInkOutput(session, 'CATALOG RESOURCES', catalogStart);
-    await session.flushTerminal();
-    const xtermCatalog = session.terminal.screen.getText();
-    await assertSeparatedHeader(session, 'SKILL - ask-matt', 'CATALOG');
-    assertSelectedRow(session, 'ask-matt');
-    for (const id of ['ask-matt', 'grill-me', 'plan-review', 'release-helper', 'review-guide']) {
-      assert.ok(xtermCatalog.includes(id), `xterm catalog screen contains ${id}`);
-    }
-
-    const returnStart = session.rawBytes().length;
-    session.input.write('\x1b');
-    const returned = await waitForInkOutput(session, 'INVENTORY', returnStart);
-    await session.flushTerminal();
-    const xtermReturned = session.terminal.screen.getText();
-    assert.ok(xtermReturned.includes('ask-matt') && xtermReturned.includes('INVENTORY'));
-    assert.ok(returned.includes('ask-matt'), 'Escape returns to the selected project resource');
-
+    await assertTableSurface(session, '', {
+      hints: updateHints,
+      dismissed: ['CONFIRM UPDATE', 'Y/N SHORTCUTS'],
+    });
     session.input.write('q');
     assert.equal(await dashboardExit(session), true, 'q exits the Ink dashboard cleanly');
   } finally {
@@ -560,28 +650,12 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
   }
 });
 
-for (const { name, key, title, nextTitle, nextId } of [
-  {
-    name: 'Inventory',
-    key: '',
-    title: 'SKILL - ask-matt',
-    nextTitle: 'SKILL - unmanaged',
-    nextId: 'unmanaged',
-  },
-  {
-    name: 'catalog entry',
-    key: 'a',
-    title: 'SKILL - ask-matt',
-    nextTitle: 'SKILL - grill-me',
-    nextId: 'grill-me',
-  },
-  {
-    name: 'catalog management',
-    key: 'm',
-    title: 'CATALOG - MattPucock',
-    nextTitle: 'CATALOG - MattPucock',
-    nextId: 'MattPucock',
-  },
+const layoutSizes = [terminalSize, { columns: 72, rows: 45 }, { columns: 120, rows: 36 }, terminalSize];
+const licensedInventoryIds = ['ask-matt', 'grill-me'];
+
+for (const [name, key, nextId] of [
+  ['Inventory', '', 'unmanaged'],
+  ['catalog entry', 'a', 'grill-me'],
 ]) {
   test(
     `Termless ${name} separates tables, details and shortcuts across resizing and navigation`,
@@ -591,186 +665,93 @@ for (const { name, key, title, nextTitle, nextId } of [
       let session;
       try {
         session = await launchShowcaseDashboard(directory);
-        await waitForGrid(
-          session,
-          (grid) => grid.includes('SKILL - ask-matt'),
-          'the initial inventory selection reaches the visible grid',
-        );
+        await assertTableSurface(session, '');
         if (key) {
           session.input.write(key);
-          await waitForGrid(
-            session,
-            (grid) => grid.includes(key === 'a' ? 'CATALOG RESOURCES' : 'CONNECTED CATALOGS'),
-            `${name} opens before resizing its selected details`,
-          );
-        }
-        for (const size of [terminalSize, { columns: 72, rows: 45 }, { columns: 120, rows: 36 }, terminalSize]) {
-          session.terminal.resize(size.columns, size.rows);
-          session.output.columns = size.columns;
-          session.output.rows = size.rows;
-          session.output.emit('resize');
-          await waitForGrid(
-            session,
-            () => {
-              const header = session.terminal.findText(title);
-              return header && (size.columns < 112 ? header.col === 3 : header.col > 3);
-            },
-            `${name} switches between stacked and side-by-side details`,
-          );
-          const firstContent =
-            key === 'm'
-              ? 'REPOSITORY'
-              : !key && size.rows < 40
-                ? 'STATUS'
-                : !key && title === 'SKILL - unmanaged'
-                  ? 'SCOPE'
-                  : 'CATALOG';
-          await assertSeparatedHeader(session, title, firstContent);
-          assertSelectedRow(session, key === 'm' ? 'MattPucock' : 'ask-matt', key === 'm');
-          await assertShortcutsFrame(session, screenShortcutHints[key]);
           await assertTableSurface(session, key);
-          const grid = session.terminal.screen.getText();
-          assert.ok(
-            !grid.includes('FILE ') && !/PAGE \d+\//.test(grid),
-            'selected details do not acquire Preview-only filename or page labels',
-          );
-          if (key === 'm') {
-            assert.ok(
-              grid.includes('FRESHNESS') && grid.includes('REFRESH'),
-              'catalog freshness and refresh semantics remain visible',
-            );
-          } else if (size.rows >= 40) {
-            assert.ok(
-              grid.includes('MattPucock') && grid.includes('Route repository'),
-              'the selected resource keeps its catalog and description',
-            );
-            if (key) assert.ok(grid.includes('LICENSE') && grid.includes('PINNED SOURCE'));
-          } else if (!key) {
-            assert.ok(grid.includes('[ CURRENT ]'), 'compact inventory keeps selected status');
+        }
+        for (const size of layoutSizes) {
+          resizeDashboard(session, size);
+          const surface = await assertTableSurface(session, key);
+          const detail = assertWorkspaceDetail(surface, 'ask-matt', size.columns === 120);
+          if (key) {
+            assert.match(surface.entries[0].line, /MattPucock\[engineering\]\s+project$/);
+            if (size.rows >= 40) {
+              assert.ok(
+                detail.includes('PINNED SOURCE') || surface.lines[surface.detailsRow].includes('PgUp/PgDn'),
+                'the pinned source remains visible or reachable in the resized details pane',
+              );
+            }
+          } else {
+            assert.match(surface.entries[0].line, /project\s+Current$/);
+            if (size.rows >= 40) assert.ok(detail.some((line) => line.startsWith('Route repository questions')));
           }
-          session.input.write('d');
-          await waitForGrid(
-            session,
-            (screen) => !screen.includes(title) && screen.includes('SHORTCUTS'),
-            'D hides selected details without hiding shortcuts',
-          );
-          await assertTableSurface(session, key);
-          await assertShortcutsFrame(session, screenShortcutHints[key]);
-          assertSelectedRow(session, key === 'm' ? 'MattPucock' : 'ask-matt', key === 'm');
-          session.input.write('d');
-          await assertSeparatedHeader(session, title, firstContent);
-        }
-        await assertTableSurface(session, key);
-        await assertShortcutsFrame(session, screenShortcutHints[key]);
-        const nextFirstContent = key === 'm' ? 'REPOSITORY' : 'CATALOG';
-        session.input.write('\x1b[B');
-        await assertSeparatedHeader(session, nextTitle, nextFirstContent);
-        assertSelectedRow(session, nextId, key === 'm');
-        await assertTableSurface(session, key);
-        await assertShortcutsFrame(
-          session,
-          key
-            ? screenShortcutHints[key]
-            : [
-                'Actions',
-                'A install',
-                'P preview',
-                'Delete remove',
-                'Filters',
-                'F filter',
-                'C catalog',
-                'K kind',
-                'Display',
-                'D details',
-                'Navigation',
-                'M catalogs',
-                '↑↓ navigate',
-                '? guide',
-                'Q quit',
-              ],
-        );
-        session.input.write('\x1b[A');
-        await assertSeparatedHeader(session, title, key === 'm' ? 'REPOSITORY' : 'CATALOG');
-        assertSelectedRow(session, key === 'm' ? 'MattPucock' : 'ask-matt', key === 'm');
-        if (key !== 'm') {
-          session.input.write('f');
-          await assertShortcutsFrame(session, [
-            'Filters',
-            'TYPE to search',
-            'ENTER apply',
-            'BACKSPACE edit',
-            'ESC clear',
-            'Navigation',
-            '↑↓ navigate',
-          ]);
-          session.input.write('ask-matt');
-          await waitForGrid(
-            session,
-            (grid) => grid.includes('ask-matt▏'),
-            'the table retains its live filter query above the divider',
-          );
-          await assertTableSurface(session, key, { query: 'ask-matt', editing: true });
           assertSelectedRow(session, 'ask-matt');
-          session.input.write('\r');
-          await assertShortcutsFrame(session, screenShortcutHints[key]);
-          await assertTableSurface(session, key, { query: 'ask-matt' });
-          if (key === 'a') {
-            session.input.write('l');
-            await assertTableSurface(session, key, { query: 'ask-matt', license: 'MIT' });
-            assertSelectedRow(session, 'ask-matt');
-          } else if (!key) {
-            session.input.write('f');
-            session.input.write('\x1b');
-            await waitForGrid(
-              session,
-              (grid) => grid.includes('RESOURCES 3/3'),
-              'clearing the accepted text query isolates the License filter test',
-            );
-            await assertTableSurface(session, key);
-            session.input.write('l');
-            await waitForGrid(
-              session,
-              (grid) => grid.includes('RESOURCES 2/3'),
-              'Inventory License filters out the unlicensed unmanaged resource',
-            );
-            await assertTableSurface(session, key, { license: 'MIT', inventoryCount: 2 });
-            session.input.write('f');
-            await assertShortcutsFrame(session, [
-              'Filters',
-              'TYPE to search',
-              'BACKSPACE edit',
-              'ENTER apply',
-              'ESC clear',
-              'Navigation',
-              '↑↓ navigate',
-            ]);
-            session.input.write('grill-me');
-            await waitForGrid(
-              session,
-              (grid) => grid.includes('grill-me▏'),
-              'Inventory text search composes with License',
-            );
-            await assertTableSurface(session, key, {
-              query: 'grill-me',
-              editing: true,
-              license: 'MIT',
-              inventoryCount: 1,
-            });
-            session.input.write('\x1b');
-            await waitForGrid(
-              session,
-              (grid) => grid.includes('RESOURCES 2/3'),
-              'clearing Inventory search preserves its License filter',
-            );
-            await assertTableSurface(session, key, { license: 'MIT', inventoryCount: 2 });
-            session.input.write('l');
-            await assertTableSurface(session, key, { license: 'ALL', inventoryCount: 3 });
-          }
+          session.input.write('d');
+          await assertTableSurface(session, key, { details: false });
+          assertSelectedRow(session, 'ask-matt');
+          session.input.write('d');
+          assertWorkspaceDetail(await assertTableSurface(session, key), 'ask-matt', size.columns === 120);
         }
+        session.input.write('\x1b[B');
+        const nextHints = key
+          ? screenShortcutHints[key]
+          : screenShortcutHints[key].map((hint) => (hint === 'Delete uninstall' ? 'Delete remove' : hint));
+        assertWorkspaceDetail(
+          await assertTableSurface(session, key, { selected: nextId, hints: nextHints }),
+          nextId,
+          true,
+        );
+        assertSelectedRow(session, nextId);
+        session.input.write('\x1b[A');
+        const returned = assertWorkspaceDetail(await assertTableSurface(session, key), 'ask-matt', true);
         if (key) {
+          assert.ok(returned.includes('PINNED SOURCE') && returned.includes('Route repository questions'));
+          session.input.write('\x1b[6~');
+          await waitForGrid(
+            session,
+            (grid) => {
+              const detail = workspaceDetails(workspaceFrame(grid, 'CATALOG RESOURCES'));
+              return ['CATALOG', 'MattPucock[engineering]', 'LICENSE', 'MIT'].every((label) => detail.includes(label));
+            },
+            'paging Browse details keeps the catalog and license reachable at the stock size',
+          );
+        }
+        assertSelectedRow(session, 'ask-matt');
+
+        session.input.write('f');
+        await assertTableSurface(session, key, { editing: true });
+        session.input.write('ask-matt');
+        await assertTableSurface(session, key, { query: 'ask-matt', editing: true });
+        assertSelectedRow(session, 'ask-matt');
+        session.input.write('\r');
+        await assertTableSurface(session, key, { query: 'ask-matt', dismissed: ['TYPE to search', 'ask-matt▏'] });
+        if (key) {
+          session.input.write('l');
+          await assertTableSurface(session, key, { query: 'ask-matt', license: 'MIT' });
+          assertSelectedRow(session, 'ask-matt');
           session.input.write('\x1b');
-          await assertSeparatedHeader(session, 'SKILL - ask-matt', 'CATALOG');
-          await waitForGrid(session, (grid) => grid.includes('M catalogs'), 'Escape returns to inventory');
+          await assertTableSurface(session, '', { dismissed: ['CATALOG RESOURCES'] });
+        } else {
+          session.input.write('f');
+          await assertTableSurface(session, key, { query: 'ask-matt', editing: true });
+          session.input.write('\x1b');
+          await assertTableSurface(session, key, { dismissed: ['TYPE to search'] });
+          session.input.write('l');
+          await assertTableSurface(session, key, { license: 'MIT', ids: licensedInventoryIds });
+          session.input.write('f');
+          await assertTableSurface(session, key, { license: 'MIT', ids: licensedInventoryIds, editing: true });
+          session.input.write('grill-me');
+          await assertTableSurface(session, key, { license: 'MIT', query: 'grill-me', editing: true });
+          assertSelectedRow(session, 'grill-me');
+          session.input.write('\x1b');
+          await assertTableSurface(session, key, {
+            license: 'MIT',
+            ids: licensedInventoryIds,
+            dismissed: ['TYPE to search'],
+          });
+          session.input.write('l');
+          await assertTableSurface(session, key);
         }
         session.input.write('q');
         assert.equal(await dashboardExit(session), true);
@@ -781,6 +762,95 @@ for (const { name, key, title, nextTitle, nextId } of [
     },
   );
 }
+
+test(
+  'Termless catalog management separates cards, details and shortcuts across resizing and navigation',
+  { timeout: 15000 },
+  async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'kitia-termless-catalog-cards-'));
+    const catalogs = [
+      { name: 'MattPucock', repository: 'https://github.com/demo/skills', resources: 5, installed: 2 },
+      { name: 'Second', repository: 'https://github.com/demo/second', resources: 0, installed: 0 },
+    ];
+    let session;
+    try {
+      session = await launchShowcaseDashboard(directory, {
+        prepareFixture: async ({ config }) => {
+          const manifestPath = path.join(config, 'catalogSources.json');
+          const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+          const { name, repository } = catalogs[1];
+          manifest.sources.push({ ...manifest.sources[0], name, repository });
+          await writeFile(manifestPath, JSON.stringify(manifest));
+        },
+      });
+      const assertCards = async (selectedIndex, details) => {
+        const grid = await waitForGrid(
+          session,
+          (grid) => {
+            if (!grid.includes('CONNECTED CATALOGS 2') || !grid.includes('USER CATALOGS 2')) return false;
+            const footer = shortcutFooter(grid, session.output.columns);
+            if (footer?.lastRow !== session.output.rows - 1 || !hasHints(footer.text, screenShortcutHints.m))
+              return false;
+            return (
+              catalogs.every(({ name }, index) => {
+                const heading = session.terminal.findText(`│ ${name} `);
+                if (!heading) return false;
+                const selected = session.terminal.cell(heading.row, heading.col + 2).bg;
+                return (
+                  (selected?.r === 129 && selected?.g === 162 && selected?.b === 190) === (selectedIndex === index)
+                );
+              }) && grid.includes('FRESHNESS UNKNOWN') === details
+            );
+          },
+          `catalog cards have ${catalogs[selectedIndex].name} selected with details ${details ? 'shown' : 'hidden'}`,
+        );
+        const lines = grid.split('\n');
+        for (const [index, { name, repository, resources, installed }] of catalogs.entries()) {
+          const heading = session.terminal.findText(`│ ${name} `);
+          const { row, col } = heading;
+          const right = col + session.output.columns - 3;
+          assert.equal(lines[row - 1][col], '┌');
+          assert.equal(lines[row - 1][right], '┐');
+          const bottom = lines.findIndex((line, index) => index > row && line[col] === '└' && line[right] === '┘');
+          assert.ok(bottom > row + 2, 'each catalog retains a complete card');
+          const body = lines.slice(row + 1, bottom).map((line) => line.slice(col + 1, right).trim());
+          assert.deepEqual(body, [
+            `REPOSITORY ${repository}`,
+            `RESOURCES ${resources} · INSTALLED ${installed} · UNKNOWN`,
+            ...(index === selectedIndex && details
+              ? ['FRESHNESS UNKNOWN', 'Refresh updates metadata only; installed content stays unchanged.']
+              : []),
+          ]);
+          if (index === selectedIndex) {
+            assert.deepEqual(session.terminal.cell(row, col + 2).fg, { r: 255, g: 255, b: 255 });
+          }
+        }
+      };
+      await assertTableSurface(session, '');
+      session.input.write('m');
+      await assertCards(0, true);
+      for (const size of layoutSizes) {
+        resizeDashboard(session, size);
+        await assertCards(0, true);
+        session.input.write('d');
+        await assertCards(0, false);
+        session.input.write('d');
+        await assertCards(0, true);
+      }
+      session.input.write('\x1b[B');
+      await assertCards(1, true);
+      session.input.write('\x1b[A');
+      await assertCards(0, true);
+      session.input.write('\x1b');
+      await assertTableSurface(session, '', { dismissed: ['CONNECTED CATALOGS'] });
+      session.input.write('q');
+      assert.equal(await dashboardExit(session), true);
+    } finally {
+      if (session) await closeShowcaseDashboard(session);
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   'Termless Browse actions stay inside the details pane and dispatch Update at 120×24',
@@ -941,17 +1011,10 @@ for (const versionCount of [3, 40]) {
             return versions;
           },
         });
-        await waitForGrid(
-          session,
-          (grid) => grid.includes('SKILL - ask-matt'),
-          'the inventory selection is visible before opening revisions',
-        );
+        await assertTableSurface(session, '');
         session.input.write('v');
         for (const size of [terminalSize, { columns: 72, rows: 45 }, { columns: 120, rows: 24 }, terminalSize]) {
-          session.terminal.resize(size.columns, size.rows);
-          session.output.columns = size.columns;
-          session.output.rows = size.rows;
-          session.output.emit('resize');
+          resizeDashboard(session, size);
           const count = Math.min(versionCount, size.rows === 24 ? 7 : 14);
           const assertRevisionSurface = async (selectedIndex) => {
             await waitForGrid(
@@ -994,7 +1057,7 @@ for (const versionCount of [3, 40]) {
                 'unpaginated revisions do not acquire range metadata',
               );
             }
-            assertSelectedRow(session, versions[selectedIndex].prefix);
+            assertSelectedRow(session, versions[selectedIndex].prefix, { revision: true });
             await assertShortcutsFrame(session, ['Actions', 'ENTER UPDATE', 'Navigation', '↑↓ SELECT', 'ESC BACK']);
           };
           await assertRevisionSurface(0);
@@ -1022,13 +1085,7 @@ for (const versionCount of [3, 40]) {
           'resizing and navigation reuse the real revision picker result',
         );
         session.input.write('\x1b');
-        await waitForGrid(
-          session,
-          (grid) => grid.includes('SKILL - ask-matt') && !grid.includes('RESOURCE REVISIONS'),
-          'Escape closes revisions and restores inventory',
-        );
-        await assertTableSurface(session, '');
-        await assertShortcutsFrame(session, screenShortcutHints['']);
+        await assertTableSurface(session, '', { dismissed: ['RESOURCE REVISIONS', 'ENTER UPDATE'] });
         assertSelectedRow(session, 'ask-matt');
         session.input.write('q');
         assert.equal(await dashboardExit(session), true);
@@ -1143,8 +1200,10 @@ test(
           return { code: 0, messages: [source, audit], resources: [], errors: [] };
         },
       });
-      ({ inspectionPageView } = await import('../../terminal/dist/tui/screens.mjs'));
-      await press('a', 'CATALOG RESOURCES');
+      ({ inspectionPageView } = await import('@grasdouble/kitia/dist/tui/screens.mjs'));
+      await assertTableSurface(session, '');
+      session.input.write('a');
+      await assertTableSurface(session, 'a');
       const initial = await press('p', '# Pinned skill source');
       await assertShortcutsFrame(session, previewShortcutHints);
       assert.equal(previewResource.kind, 'skill');
@@ -1270,17 +1329,13 @@ test(
         'pane focus and navigation reuse one Preview result',
       );
 
-      session.terminal.resize(terminalSize.columns, terminalSize.rows);
-      session.output.columns = terminalSize.columns;
-      session.output.rows = terminalSize.rows;
-      session.output.emit('resize');
-      await press('\r', 'CATALOG RESOURCES');
-      let grid = session.terminal.screen.getText();
-      session.input.write('\x1b[B');
-      await waitForGrid(session, (next) => next !== grid, 'first Down selection reaches the grid');
-      grid = session.terminal.screen.getText();
-      session.input.write('\x1b[B');
-      await waitForGrid(session, (next) => next !== grid, 'second Down selection reaches the grid');
+      resizeDashboard(session, terminalSize);
+      session.input.write('\r');
+      await assertTableSurface(session, 'a', { dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'] });
+      for (const selected of ['grill-me', 'plan-review']) {
+        session.input.write('\x1b[B');
+        await assertTableSurface(session, 'a', { selected });
+      }
       await press('\r', 'INSTALL OPTIONS');
       await press('\r', 'CONFIRM INSTALL');
       const blocked = await press('y', 'INSTALL FAILED');
@@ -1289,22 +1344,26 @@ test(
         calls.map(({ action }) => action),
         ['preview', 'install'],
       );
-      await press('\x1b', 'INVENTORY');
-      await waitForGrid(
-        session,
-        (grid) => grid.includes('INVENTORY') && !grid.includes('INSTALL FAILED'),
-        'the failure popup closes before quitting',
-      );
+      session.input.write('\x1b');
+      await assertTableSurface(session, '', {
+        ids: [],
+        total: 0,
+        hints: [
+          'A install',
+          'F filter',
+          'D details',
+          '1/2/3 sections',
+          'M catalogs',
+          '↑↓ navigate',
+          '? guide',
+          'Q quit',
+        ],
+        dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE'],
+      });
       session.input.write('q');
-      await dashboardExit(session);
+      assert.equal(await dashboardExit(session), false, 'quit retains the audit-blocked install result');
     } finally {
-      if (session) {
-        if (!session.doneSettled) {
-          session.input.write('\x1b');
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        await closeShowcaseDashboard(session);
-      }
+      if (session) await closeShowcaseDashboard(session);
       await rm(directory, { recursive: true, force: true });
     }
   },
@@ -1317,8 +1376,8 @@ test(
   },
   async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'kitia-termless-local-preview-'));
-    const { DASHBOARD_THEME } = require('../../terminal/dist/tui/colors.js');
-    const { createDashboardActionHandler } = require('../../terminal/dist/tui/native-actions.js');
+    const { DASHBOARD_THEME } = require('@grasdouble/kitia/dist/tui/colors.js');
+    const { createDashboardActionHandler } = require('@grasdouble/kitia/dist/tui/native-actions.js');
     const handler = createDashboardActionHandler();
     let session;
     try {
@@ -1370,7 +1429,27 @@ test(
       session.output.columns = 68;
       session.output.rows = 32;
       session.output.emit('resize');
-      await waitForGrid(session, (grid) => grid.includes('INVENTORY'), 'the narrow Inventory layout is ready');
+      const waitForInventory = (message, id) =>
+        waitForGrid(
+          session,
+          (grid) => {
+            const frame = workspaceFrame(grid, 'INSTALLED RESOURCES');
+            const footer = shortcutFooter(grid, session.output.columns);
+            return (
+              frame &&
+              footer?.lastRow === session.output.rows - 1 &&
+              footer.text.includes('Q quit') &&
+              (!id || frame.entries.some((entry) => entry.id === id && entry.selected)) &&
+              !/PREVIEW FAILED|ENTER \/ ESC CLOSE|SOURCE · PAGE|SOURCE TREE|AUDIT REPORT|TYPE to search/.test(grid)
+            );
+          },
+          message,
+        );
+      const closeLocal = (id) => {
+        session.input.write('\x1b');
+        return waitForInventory(`closing local Preview restores the complete Inventory for ${id}`, id);
+      };
+      await waitForInventory('the narrow Inventory layout is ready');
       const press = async (key, expected) => {
         const start = session.rawBytes().length;
         session.input.write(key);
@@ -1380,14 +1459,11 @@ test(
       const openLocal = async (id, marker, auditMarkers = []) => {
         await press('f', 'TYPE to search');
         session.input.write('\x1b');
-        await waitForGrid(
-          session,
-          (grid) => grid.includes('INVENTORY') && !grid.includes('TYPE to search'),
-          'reset the previous local-resource search',
-        );
+        await waitForInventory('reset the previous local-resource search');
         await press('f', 'TYPE to search');
         await press(id, `${id}▏`);
-        await press('\r', 'INVENTORY');
+        session.input.write('\r');
+        await waitForInventory(`Inventory applies search and selects ${id}`, id);
         const grid = await press('p', marker);
         await assertShortcutsFrame(session, previewShortcutHints);
         const auditGrid = (await press('a', 'AUDIT REPORT')).replace(/\s+/g, ' ');
@@ -1414,7 +1490,7 @@ test(
         'binary assets remain represented in the local tree',
       );
       await press('s', 'SOURCE');
-      await press('\x1b', 'INVENTORY');
+      await closeLocal('local-cards');
       const externalFile = path.join(directory, 'outside-skill-file.txt');
       await writeFile(externalFile, 'outside');
       await symlink(
@@ -1423,12 +1499,7 @@ test(
       );
       const unsafe = await press('p', 'Refusing symbolic link');
       assert.ok(unsafe.includes('unsafe-link.txt'), 'symlink paths are refused');
-      session.input.write('\x1b');
-      await waitForGrid(
-        session,
-        (grid) => grid.includes('INVENTORY') && !grid.includes('PREVIEW FAILED'),
-        'close the symlink refusal message',
-      );
+      await closeLocal('local-cards');
 
       await openLocal('ask-matt', 'Synthetic local showcase body for ask-matt.', ['Audit coverage:']);
       const localRgb = (role) => {
@@ -1450,7 +1521,7 @@ test(
       assert.deepEqual(localCellColor('or writing its narrative'), localPlainColor);
       assert.deepEqual(localCellColor('English text but may'), localPlainColor);
       assert.deepEqual(localCellColor('Invocation-time questions'), localRgb('heading'));
-      await press('\x1b', 'INVENTORY');
+      await closeLocal('ask-matt');
       await openLocal('local-review', 'curl https://example.invalid', [
         'Audit coverage: 2/2 files analyzed; no files skipped.',
         'local-review.agent.md:5',
@@ -1464,7 +1535,7 @@ test(
       );
       await press('s', 'SOURCE');
       await press('\x1b[C', 'Local agent copy two.');
-      await press('\x1b', 'INVENTORY');
+      await closeLocal('local-review');
 
       await openLocal('local-guide', 'Local instruction body.', [
         'Audit coverage: 1/1 files analyzed; no files skipped.',
@@ -1473,34 +1544,21 @@ test(
       ]);
       const instructionTree = await press('t', 'SOURCE TREE');
       assert.ok(instructionTree.includes('.agents/instructions/local-guide.instructions.md'));
-      await press('\x1b', 'INVENTORY');
+      await closeLocal('local-guide');
       await press('f', 'TYPE to search');
       session.input.write('\x1b');
-      await waitForGrid(
-        session,
-        (grid) => grid.includes('INVENTORY') && !grid.includes('TYPE to search'),
-        'reset the instruction search',
-      );
+      await waitForInventory('reset the instruction search');
       await press('f', 'TYPE to search');
       await press('ask-matt', 'ask-matt▏');
-      await press('\r', 'INVENTORY');
+      session.input.write('\r');
+      await waitForInventory('Inventory applies search for the missing-file check', 'ask-matt');
       await rm(path.join(session.fixture.project, '.agents', 'skills', 'ask-matt', 'SKILL.md'));
       const missing = await press('p', 'Local preview file is missing');
       assert.ok(
         missing.includes('.agents/skills/ask-matt/SKILL.md'),
         'a missing installed file reports its exact local path',
       );
-      session.input.write('\x1b');
-      await waitForGrid(
-        session,
-        (grid) =>
-          grid.includes('INVENTORY') &&
-          grid.includes('INSTALLED RESOURCES') &&
-          grid.includes('Q quit') &&
-          !grid.includes('PREVIEW FAILED') &&
-          !grid.includes('ENTER / ESC CLOSE'),
-        'render the narrow Inventory frame and dismiss the missing-file preview failure before quitting',
-      );
+      await closeLocal('ask-matt');
       session.input.write('q');
       assert.equal(await dashboardExit(session), false, 'quit retains the failed preview status');
     } finally {
@@ -1558,11 +1616,16 @@ for (const [kind, id, filename] of [
           return { code: 0, messages: [content], resources: [], errors: [] };
         },
       });
-      ({ inspectionPageView } = await import('../../terminal/dist/tui/screens.mjs'));
-      await press('a', 'CATALOG RESOURCES');
-      await press('f', 'TYPE to search');
-      await press(id, id);
-      await press('\r', 'CATALOG RESOURCES');
+      ({ inspectionPageView } = await import('@grasdouble/kitia/dist/tui/screens.mjs'));
+      await assertTableSurface(session, '');
+      session.input.write('a');
+      await assertTableSurface(session, 'a');
+      session.input.write('f');
+      await assertTableSurface(session, 'a', { editing: true });
+      session.input.write(id);
+      await assertTableSurface(session, 'a', { query: id, editing: true });
+      session.input.write('\r');
+      await assertTableSurface(session, 'a', { query: id, dismissed: ['TYPE to search'] });
       const screen = await press('p', `# Pinned ${kind} source`);
       await assertShortcutsFrame(session, previewShortcutHints);
       assert.equal(previewResource.kind, kind);
@@ -1581,15 +1644,13 @@ for (const [kind, id, filename] of [
       assertSourceHeader(session, filename, `id: ${id}`, view.pageCount);
       assert.ok(view.lines.includes('----|-----|----'));
       assert.deepEqual(calls, ['preview']);
-      await press('\r', 'CATALOG RESOURCES');
+      session.input.write('\r');
+      await assertTableSurface(session, 'a', {
+        query: id,
+        dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'],
+      });
     } finally {
-      if (session) {
-        if (!session.doneSettled) {
-          session.input.write('\x1b');
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        await closeShowcaseDashboard(session);
-      }
+      if (session) await closeShowcaseDashboard(session);
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -1600,7 +1661,7 @@ test(
   { timeout: 15000 },
   async () => {
     let inspectionPageView;
-    const { DASHBOARD_THEME } = require('../../terminal/dist/tui/colors.js');
+    const { DASHBOARD_THEME } = require('@grasdouble/kitia/dist/tui/colors.js');
     const expectedColors = Object.fromEntries(
       Object.entries(DASHBOARD_THEME.semantic.syntax).map(([role, color]) => [
         role,
@@ -1777,8 +1838,10 @@ test(
           return { code: 0, messages: [source], resources: [], errors: [] };
         },
       });
-      ({ inspectionPageView } = await import('../../terminal/dist/tui/screens.mjs'));
-      await press('a', 'CATALOG RESOURCES');
+      ({ inspectionPageView } = await import('@grasdouble/kitia/dist/tui/screens.mjs'));
+      await assertTableSurface(session, '');
+      session.input.write('a');
+      await assertTableSurface(session, 'a');
       await press('p', '# Syntax preview');
       const plain = session.terminal.findText('Plain source sentinel.');
       assert.ok(plain);
@@ -1802,15 +1865,13 @@ test(
       await press('s', 'SOURCE');
       assertSourceHeader(session, 'SKILL.md', '# Syntax preview', pageView(0).pageCount);
       await inspectPages();
-      await press('\r', 'CATALOG RESOURCES');
+      session.input.write('\r');
+      await assertTableSurface(session, 'a', {
+        visible: ['ask-matt'],
+        dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'],
+      });
     } finally {
-      if (session) {
-        if (!session.doneSettled) {
-          session.input.write('\x1b');
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        await closeShowcaseDashboard(session);
-      }
+      if (session) await closeShowcaseDashboard(session);
       await rm(directory, { recursive: true, force: true });
     }
   },
@@ -1839,121 +1900,73 @@ test('Termless Catalog Catalog/Kind/License filters match visible candidates', {
     source_ref: 'a'.repeat(40),
   }));
   const all = resources.map(({ id }) => id);
-  let state = { catalog: 'all', kind: 'all', query: '', editing: false, license: 'all' };
+  let state = { catalog: 'ALL', kind: 'ALL', query: '', editing: false, license: 'ALL' };
   let session;
-  let columns = terminalSize.columns;
   try {
     session = await launchShowcaseDashboard(directory, { catalogResourcesOverride: resources });
-    await assertSeparatedHeader(session, 'INVENTORY', 'STATUS', undefined, [
-      /^RESOURCES 3\/3 · 1-3$/,
-      'Filter (F to filter) · Catalog ALL · Kind ALL · License ALL',
-    ]);
+    await assertTableSurface(session, '');
     session.input.write('l');
-    await waitForGrid(
-      session,
-      (grid) => grid.includes('RESOURCES 2/3'),
-      'Inventory License filters the actual installed candidates',
-    );
-    let inventoryGrid = session.terminal.screen.getText();
-    assert.ok(
-      inventoryGrid.includes('ask-matt') &&
-        inventoryGrid.includes('grill-me') &&
-        !inventoryGrid.split('\n').some((line) => /UNMANAGED\s+USER\s+skill\s+unmanaged/.test(line)),
-    );
+    await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds });
     session.input.write('f');
-    await waitForGrid(session, (grid) => grid.includes('TYPE to search'), 'Inventory enters query mode');
+    await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds, editing: true });
     session.input.write('grill-me');
-    await waitForGrid(session, (grid) => grid.includes('grill-me▏'), 'Inventory query composes with License');
+    await assertTableSurface(session, '', { license: 'MIT', query: 'grill-me', editing: true });
     session.input.write('\x1b');
-    await waitForGrid(session, (grid) => grid.includes('RESOURCES 2/3'), 'Inventory search clear preserves License');
+    await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds, dismissed: ['TYPE to search'] });
     session.input.write('l');
-    await waitForGrid(session, (grid) => grid.includes('RESOURCES 3/3'), 'Inventory cycles back to ALL');
-    inventoryGrid = session.terminal.screen.getText();
-    assert.ok(inventoryGrid.includes('unmanaged'));
+    await assertTableSurface(session, '');
     session.input.write('a');
-    await waitForGrid(session, (grid) => grid.includes('CATALOG RESOURCES'), 'Catalog opens before filtering');
+    await assertTableSurface(session, 'a', { ids: all, total: all.length });
     session.input.write('d');
-    await waitForGrid(session, (grid) => !grid.includes('SKILL - alpha-brief'), 'details are hidden');
-
-    const wrapText = (await import('../../terminal/dist/tui/helpers.mjs')).wrapText;
-    const assertView = async (ids) => {
-      const summary = `Filter ${state.editing ? `${state.query}▏` : state.query || '(F to filter)'} · Catalog ${state.catalog.toUpperCase()} · Kind ${state.kind.toUpperCase()} · License ${state.license.toUpperCase()}`;
-      const metadata = [
-        `RESOURCES ${ids.length}/6 · ${ids.length ? `1-${ids.length}` : '0-0'}`,
-        ...wrapText(summary, columns - 6),
-      ];
-      const header = await assertSeparatedHeader(session, 'CATALOG RESOURCES', 'INST', undefined, metadata);
-      const lines = session.terminal.screen.getText().split('\n');
-      const right = lines[header.row].indexOf('│', header.col);
-      const bottom = lines.findIndex((line, index) => index > header.bodyRow && line[header.col - 2] === '└');
-      const body = lines.slice(header.bodyRow + 1, bottom).map((line) => line.slice(header.col, right));
-      const visible = all.filter((id) => body.some((line) => line.includes(id)));
-      assert.deepEqual(visible.sort(), [...ids].sort(), 'visible candidates match active filters');
-      assert.equal(
-        body.some((line) => line.includes('›')),
-        ids.length > 0,
-      );
-    };
+    const assertView = (ids, dismissed = []) =>
+      assertTableSurface(session, 'a', {
+        ...state,
+        ids,
+        total: all.length,
+        details: false,
+        dismissed,
+      });
+    await assertView(all);
     const press = async (key, patch, ids) => {
       state = { ...state, ...patch };
       session.input.write(key);
       await assertView(ids);
     };
     for (const width of [120, 72]) {
-      columns = width;
-      session.terminal.resize(columns, terminalSize.rows);
-      session.output.columns = columns;
-      session.output.emit('resize');
+      resizeDashboard(session, { columns: width, rows: terminalSize.rows });
       await assertView(all);
-      await press('l', { license: 'Apache-2.0' }, ['alpha-audit', 'alpha-extra']);
+      await press('l', { license: 'APACHE-2.0' }, ['alpha-audit', 'alpha-extra']);
       await press(
         'c',
-        { catalog: 'Alpha', license: 'all' },
+        { catalog: 'ALPHA', license: 'ALL' },
         all.filter((id) => id.startsWith('alpha-')),
       );
-      await press('k', { kind: 'agent', license: 'all' }, ['alpha-agent']);
+      await press('k', { kind: 'AGENT', license: 'ALL' }, ['alpha-agent']);
       await press('l', { license: 'MIT' }, ['alpha-agent']);
       await press('f', { editing: true }, ['alpha-agent']);
       await press('tsl', { query: 'tsl' }, []);
       await press('\r', { editing: false }, []);
       await press('f', { editing: true }, []);
-      await press('\x1b', { query: '', editing: false, license: 'all' }, ['alpha-agent']);
-      await press('k', { kind: 'skill', license: 'all' }, ['alpha-brief', 'alpha-audit', 'alpha-extra', 'alpha-mit']);
+      await press('\x1b', { query: '', editing: false, license: 'ALL' }, ['alpha-agent']);
+      await press('k', { kind: 'SKILL', license: 'ALL' }, ['alpha-brief', 'alpha-audit', 'alpha-extra', 'alpha-mit']);
       session.input.write('\x1b');
-      await waitForGrid(
-        session,
-        (grid) => grid.includes('INVENTORY') && !grid.includes('CATALOG RESOURCES'),
-        'Escape leaves Catalog',
-      );
+      await assertTableSurface(session, '', { details: false, dismissed: ['CATALOG RESOURCES'] });
       session.input.write('a');
-      await waitForGrid(session, (grid) => grid.includes('CATALOG RESOURCES'), 'A reopens Catalog');
-      state = {
-        ...state,
-        catalog: 'Beta',
-        kind: 'skill',
-        license: 'all',
-        query: '',
-        editing: false,
-      };
-      await press('c', { catalog: 'Beta', license: 'all' }, ['beta-check']);
-      await press('l', { license: 'Proprietary' }, ['beta-check']);
+      const skills = all.filter((id) => id.startsWith('alpha-') && id !== 'alpha-agent');
+      await assertView(skills);
+      await press('c', { catalog: 'BETA', license: 'ALL' }, ['beta-check']);
+      await press('l', { license: 'PROPRIETARY' }, ['beta-check']);
       await press(
         'c',
-        { catalog: 'all', license: 'all' },
+        { catalog: 'ALL', license: 'ALL' },
         all.filter((id) => id !== 'alpha-agent'),
       );
-      await press('k', { kind: 'all', license: 'all' }, all);
+      await press('k', { kind: 'ALL', license: 'ALL' }, all);
     }
     session.input.write('q');
     assert.equal(await dashboardExit(session), true);
   } finally {
-    if (session) {
-      if (!session.doneSettled) {
-        session.input.write('\x1b');
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      await closeShowcaseDashboard(session);
-    }
+    if (session) await closeShowcaseDashboard(session);
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -1984,39 +1997,33 @@ test(
           return { code: 0, messages: ['Unmanaged skill removed.'] };
         },
       });
-      await waitForGrid(
-        session,
-        (grid) => grid.includes('SKILL - ask-matt'),
-        'the managed skill is selected before uninstall',
-      );
+      await assertTableSurface(session, '');
       const columns = 68;
       const rows = 32;
-      session.terminal.resize(columns, rows);
-      session.output.columns = columns;
-      session.output.rows = rows;
-      session.output.emit('resize');
-      await waitForGrid(
-        session,
-        (grid) => grid.includes('SKILL - ask-matt'),
-        'the selected skill remains visible after resizing',
-      );
+      resizeDashboard(session, { columns, rows });
+      await assertTableSurface(session, '', { visible: ['ask-matt'] });
       session.input.write('\x1b[3~');
-      let grid = await waitForGrid(
-        session,
-        (value) => value.includes('CONFIRM UNINSTALL'),
-        'Delete opens the managed uninstall confirmation',
-      );
+      const confirmationHints = ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE'];
+      await assertShortcutsFrame(session, confirmationHints);
+      const danger = { r: 224, g: 108, b: 117 };
+      const uninstallIsSelected = () => {
+        const button = session.terminal.findText('│ UNINSTALL │');
+        if (!button) return false;
+        const { r, g, b } = session.terminal.cell(button.row, button.col + 2).fg || {};
+        return r === danger.r && g === danger.g && b === danger.b;
+      };
+      assert.equal(uninstallIsSelected(), false, 'the destructive option is initially inactive');
       session.input.write('\x1b[C');
-      grid = await waitForGrid(
+      const grid = await waitForGrid(
         session,
-        (value) => value.includes('‹ UNINSTALL ›'),
+        (value) => value.includes('CONFIRM UNINSTALL') && uninstallIsSelected(),
         'the destructive option is selected without confirming it',
       );
       const lines = grid.split('\n');
       const top = lines.findIndex((line) => line.includes('CONFIRM UNINSTALL'));
       assert.ok(top >= 0);
       const topLine = lines[top];
-      const left = topLine.indexOf('┌');
+      const left = topLine.lastIndexOf('┌', topLine.indexOf('CONFIRM UNINSTALL'));
       const right = topLine.indexOf('┐', left);
       const bottom = lines.findIndex((line, index) => index > top && line[left] === '└' && line[right] === '┘');
       assert.ok(left >= 0 && right > left && right < columns, 'modal top border corners fit within the terminal');
@@ -2068,7 +2075,7 @@ test(
         );
       }
       const shortcutTop = shortcutTitle - 1;
-      const shortcutLeft = lines[shortcutTop].indexOf('┌');
+      const shortcutLeft = lines[shortcutTop].lastIndexOf('┌', lines[shortcutTitle].indexOf('SHORTCUTS'));
       const shortcutRight = lines[shortcutTop].indexOf('┐', shortcutLeft);
       const shortcutBottom = lines.findIndex(
         (line, index) => index > shortcutTitle && line[shortcutLeft] === '└' && line[shortcutRight] === '┘',
@@ -2089,39 +2096,37 @@ test(
         assertAccentAt(row, shortcutLeft, 'shortcut panel border');
         assertAccentAt(row, shortcutRight, 'shortcut panel border');
       }
-      const uninstall = session.terminal.findText('‹ UNINSTALL ›');
+      const uninstall = session.terminal.findText('│ UNINSTALL │');
       assert.ok(uninstall, 'the destructive choice remains visible');
       assert.deepEqual(
-        session.terminal.cell(uninstall.row, uninstall.col).fg,
-        { r: 224, g: 108, b: 117 },
+        session.terminal.cell(uninstall.row, uninstall.col + 2).fg,
+        danger,
         'the selected destructive choice retains the danger accent',
       );
       session.input.write('\x1b');
-      await waitForGrid(
-        session,
-        (value) => value.includes('SKILL - ask-matt') && !value.includes('CONFIRM UNINSTALL'),
-        'the uninstall confirmation closes',
-      );
+      await assertTableSurface(session, '', {
+        visible: ['ask-matt'],
+        dismissed: ['CONFIRM UNINSTALL', 'Y/N SHORTCUTS'],
+      });
       session.input.write('\x1b[B');
-      await waitForGrid(
-        session,
-        (value) => value.split('\n').some((line) => line.includes('›') && line.includes('unmanaged')),
-        'the unmanaged skill row is selected',
-      );
+      const hints = screenShortcutHints[''].map((hint) => (hint === 'Delete uninstall' ? 'Delete remove' : hint));
+      await assertTableSurface(session, '', { selected: 'unmanaged', visible: ['unmanaged'], hints });
       assertSelectedRow(session, 'unmanaged');
 
       session.input.write('\x1b[3~');
       await waitForGrid(
         session,
-        (value) => value.includes('CONFIRM REMOVE'),
+        (value) => value.includes('CONFIRM REMOVE') && value.includes('Remove unmanaged skill:unmanaged?'),
         'Delete opens the first unmanaged removal confirmation',
       );
+      await assertShortcutsFrame(session, ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE']);
       session.input.write('y');
       await waitForGrid(
         session,
-        (value) => value.includes('permanently lost'),
+        (value) => value.includes('CONFIRM PERMANENT REMOVAL') && value.includes('permanently lost'),
         'the first confirmation opens the irreversible warning',
       );
+      await assertShortcutsFrame(session, ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE']);
       assert.equal(actions.length, 0, 'the action remains undispatched after one confirmation');
 
       session.input.write('y');
@@ -2135,12 +2140,23 @@ test(
       assert.equal(actions.length, 1);
       assert.equal(actions[0][0], 'remove-unmanaged');
       assert.equal(actions[0][1].id, 'unmanaged');
-      const completionStart = session.rawBytes().length;
       finishAction();
-      await waitForInkOutput(session, 'Unmanaged skill removed.', completionStart);
-      await session.flushTerminal();
+      await assertTableSurface(session, '', {
+        selected: 'unmanaged',
+        visible: ['unmanaged'],
+        hints,
+        dismissed: ['LOADING', 'CONFIRM PERMANENT REMOVAL'],
+      });
+      resizeDashboard(session, { columns: 120, rows: 55 });
+      await assertTableSurface(session, '', { selected: 'unmanaged', hints });
+      await waitForGrid(
+        session,
+        (grid) =>
+          workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES')).join(' ').includes('Unmanaged skill removed.'),
+        'removal completion is visible in the selected details',
+      );
       session.input.write('q');
-      assert.equal(await session.done, true);
+      assert.equal(await dashboardExit(session), true);
     } finally {
       finishAction();
       if (session) {

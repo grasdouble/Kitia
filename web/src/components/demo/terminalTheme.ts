@@ -1,6 +1,5 @@
+import { DASHBOARD_THEME } from '@grasdouble/kitia/src/tui/colors.ts';
 import type { ITheme } from '@xterm/xterm';
-
-import { DASHBOARD_THEME } from '../../../../terminal/src/tui/colors';
 
 const { semantic, terminalAnsi } = DASHBOARD_THEME;
 const palette = terminalAnsi.palette;

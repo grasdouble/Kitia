@@ -184,7 +184,7 @@ Priority ladder: **P1** release/CI or data-integrity risks; **P2** behavioral/re
 
 ### Production TypeScript and type assertions use separate strict projects
 
-**Evidence:** [`tsconfig.json`](../tsconfig.json) applies `strict: true` to production sources. [`tsconfig.type-tests.json`](../tsconfig.type-tests.json) extends that project, sets `noEmit: true`, includes TypeScript test roots, and clears the inherited production-test exclusion.
+**Evidence:** [`tsconfig.json`](../terminal/tsconfig.json) applies `strict: true` to production sources. [`tsconfig.type-tests.json`](../terminal/tsconfig.type-tests.json) extends that project, sets `noEmit: true`, includes TypeScript test roots, and clears the inherited production-test exclusion.
 
 **Impact:** Production sources are checked strictly in the default project; type-only tests are checked separately without producing output.
 

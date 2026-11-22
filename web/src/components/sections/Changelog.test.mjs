@@ -29,7 +29,7 @@ test('changelog renders source versions with shareable links', async () => {
   const router = await createComponentRouter(React.createElement(Changelog), {
     initialEntries: ['/changelog'],
   });
-  const source = await readFile(path.join(projectRoot, 'CHANGELOG.md'), 'utf8');
+  const source = await readFile(path.join(projectRoot, 'terminal', 'CHANGELOG.md'), 'utf8');
   const expectedVersions = [...source.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
   const markup = renderToStaticMarkup(React.createElement(RouterProvider, { router }));
   const renderedVersions = [...markup.matchAll(/<h2 id="release-([^"]+)">([^<]+)<\/h2>/g)].map((match) => match[2]);

@@ -60,12 +60,12 @@ Run the narrowest relevant checks once after editing:
 
 ```sh
 node --test web/src/components/demo/tuiDemoSession.test.mjs
-pnpm run web:build
+pnpm --filter @grasdouble/kitia-web run build
 ```
 
-The first exercises fixture semantics; the second checks static routes and the browser bundle. Use `pnpm run web:test:components` instead of the individual test when navigation or other web components also changed. Add focused regression coverage for uncovered consumer-visible edge cases, not source-text assertions or wiring checks. If shared CLI behavior changed, run its relevant CLI/TUI tests too; browser simulation is not proof of real filesystem safety.
+The first exercises fixture semantics; the second checks static routes and the browser bundle. Use `pnpm --filter @grasdouble/kitia-web run test` instead of the individual test when navigation or other web components also changed. Add focused regression coverage for uncovered consumer-visible edge cases, not source-text assertions or wiring checks. If shared CLI behavior changed, run its relevant CLI/TUI tests too; browser simulation is not proof of real filesystem safety.
 
-Launch `pnpm run web:dev` and open the actual page. After a build, use `pnpm exec vite preview --config web/vite.config.ts` to inspect the production output. Use the displayed URL/port.
+Launch `pnpm dev` and open the actual page. After a build, use `pnpm --filter @grasdouble/kitia-web run preview` to inspect the production output. Use the displayed URL/port.
 
 Exercise the affected native TUI paths, including search/filter, selection, install options and confirmation, revision replacement, preview panes, update/uninstall, catalog actions, and guide when applicable. Verify on-screen key buttons, keyboard focus, reset during initialization, quit/restart, desktop-to-mobile resizing, and `/demo-keep` preservation when the change can affect them.
 

@@ -6,7 +6,6 @@ const sharp = require('sharp');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { root } = require('./site-showcase-fixture.js');
 const { assertTermlessRuntime } = require('./termless-preflight.js');
 const {
   closeShowcaseDashboard,
@@ -17,7 +16,7 @@ const {
   waitForInkOutput,
 } = require('./site-showcase-terminal.js');
 
-const assets = path.join(root, 'web', 'assets');
+const assets = path.resolve(__dirname, '../../assets');
 const captures = [
   {
     name: 'Termless inventory',
@@ -37,8 +36,8 @@ const captures = [
 const usage = `Capture Termless/xterm.js screenshots of Kitia's actual Ink dashboard.
 
 Usage:
-  pnpm run web:screenshots:update:termless
-  pnpm run web:screenshots:update:termless -- --help
+  pnpm --filter @grasdouble/kitia-web run screenshots:update:termless
+  pnpm --filter @grasdouble/kitia-web run screenshots:update:termless --help
 
 Requires Node.js >=23.6, a built checkout, @resvg/resvg-js, and sharp. The
 command uses the shared deterministic showcase fixture and writes a separate

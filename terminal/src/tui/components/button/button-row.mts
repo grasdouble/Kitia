@@ -17,7 +17,7 @@ function actionColor(id: string) {
   return accents.neutral;
 }
 
-// ActionButtonRow: one horizontal row of three-line ActionButtons.
+// ActionButtonRow: one horizontal row of boxed or compact ActionButtons.
 export function ActionButtonRow({
   line,
   controls,
@@ -33,6 +33,8 @@ export function ActionButtonRow({
   rowRef?: React.Ref<DOMElement>;
   toolbar?: boolean;
 }) {
+  const compact = !toolbar && controls.compactActions;
+  const height = compact ? 1 : 3;
   const buttons: React.ReactNode[] = [];
   for (const [index, item] of line.items.entries()) {
     if (toolbar && index) buttons.push(h(Text, { key: `toolbar-action-gap-${line.row}-${index}` }, ' '));
@@ -44,7 +46,7 @@ export function ActionButtonRow({
           key: toolbar ? `toolbar-action-${line.row}-${item.id}` : `action-button-${item.id}`,
           flexDirection: 'column',
           width: item.width,
-          height: 3,
+          height,
           marginRight: index < line.items.length - 1 ? 1 : 0,
         },
         h(ActionButton, {
@@ -56,6 +58,7 @@ export function ActionButtonRow({
           activeColor: DASHBOARD_THEME.semantic.selected,
           selectedForeground: DASHBOARD_THEME.semantic.selectedForeground,
           selectedSurface,
+          compact,
         }),
       ),
     );
@@ -66,7 +69,7 @@ export function ActionButtonRow({
       key: toolbar ? `toolbar-actions-${line.row}` : `action-row-${line.row}`,
       ref: rowRef,
       flexDirection: 'row',
-      height: 3,
+      height,
       width,
     },
     ...buttons,

@@ -1,6 +1,9 @@
 import { basename, extname } from 'node:path';
 
 import type { Grammar, Token, TokenStream } from 'prismjs';
+// Load Prism core before the explicitly supported grammars, in dependency order.
+// Consume token streams, never the DOM/HTML APIs, plugins, or automatic loader.
+import Prism from 'prismjs/components/prism-core.js';
 import 'prismjs/components/prism-markup.js';
 import 'prismjs/components/prism-css.js';
 import 'prismjs/components/prism-clike.js';
@@ -16,9 +19,6 @@ import 'prismjs/components/prism-go.js';
 import 'prismjs/components/prism-rust.js';
 import 'prismjs/components/prism-sql.js';
 import 'prismjs/components/prism-markdown.js';
-// Load Prism core before the explicitly supported grammars, in dependency order.
-// Consume token streams, never the DOM/HTML APIs, plugins, or automatic loader.
-import Prism from 'prismjs/components/prism-core.js';
 
 import type { DASHBOARD_THEME } from './colors.js';
 

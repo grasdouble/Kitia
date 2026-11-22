@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import manifest from '../../package.json';
+import manifest from '../package.json';
 import { parseArguments } from './cli/arguments.js';
 import type { CliReport } from './cli/report.js';
 import { CLI_REPORT_SCHEMA_VERSION } from './cli/schema-versions.js';

@@ -20,6 +20,7 @@ export interface ActionButtonProps {
   activeColor: string;
   selectedForeground: string;
   selectedSurface?: boolean;
+  compact?: boolean;
 }
 
 // ActionButton
@@ -36,8 +37,22 @@ export function ActionButton({
   activeColor,
   selectedForeground,
   selectedSurface = false,
+  compact = false,
 }: ActionButtonProps) {
   const buttonWidth = Math.max(1, width);
+  const labelColor = selectedSurface && !active ? selectedForeground : color;
+  if (compact)
+    return h(
+      Text,
+      {
+        color: active ? activeColor : labelColor,
+        bold: active,
+        underline: active,
+        wrap: 'truncate-end',
+      },
+      clipped(`${active ? '› ' : '  '}${label}`, buttonWidth),
+    );
+
   const innerWidth = Math.max(0, buttonWidth - 4);
   const textWidth = Math.max(0, buttonWidth - 2);
   const borderColor = active ? activeColor : color;
@@ -58,7 +73,7 @@ export function ActionButton({
       Text,
       {
         key: `${id}-content`,
-        color: selectedSurface && !active ? selectedForeground : color,
+        color: labelColor,
         bold: active,
         underline: active,
       },

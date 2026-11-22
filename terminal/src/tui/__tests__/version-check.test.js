@@ -15,7 +15,7 @@ test('version check returns an update notice and changelog link for a newer rele
     notice: {
       installed: '1.0.0',
       available: '1.0.2',
-      changelogUrl: 'https://github.com/grasdouble/Kitia/blob/main/CHANGELOG.md#102',
+      changelogUrl: 'https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#102',
     },
   });
   assert.equal(requestedUrl[0], 'https://registry.npmjs.org/@grasdouble%2Fkitia/latest');

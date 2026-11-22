@@ -36,7 +36,7 @@ export async function checkInstalledVersion(
       notice: {
         installed,
         available: version,
-        changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/CHANGELOG.md#${heading}`,
+        changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#${heading}`,
       },
     };
   }
