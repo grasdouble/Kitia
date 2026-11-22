@@ -14,6 +14,7 @@ import {
 } from '../components/controls/control-layout-plan.mjs';
 import { InventorySummaryCards } from '../components/inventory-summary-cards.mjs';
 import { Panel } from '../components/panel.mjs';
+import { categorizedShortcutLines, sectionNavigationHints } from '../components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
@@ -128,22 +129,22 @@ export function CatalogManagementScreen({
   const cardActions = makeActionControls('card', ['edit-catalog', 'refresh-catalog', 'remove-catalog']);
   const headingActionRows = dashboardActionButtonRows(headingActions, contentWidth);
   const cardActionRows = dashboardActionButtonRows(cardActions, contentWidth);
-  const shortcutLine = modalActive
-    ? ''
-    : [
-        ...(canAdd ? ['A add', 'P presets'] : []),
-        ...(canEdit && selected ? ['E edit'] : []),
-        ...(canRefresh && selected ? ['R refresh'] : []),
-        ...(canRemove && selected ? ['Delete remove'] : []),
-        ...(canTransfer ? ['I import', 'X export'] : []),
-        'D details',
-        'ESC inventory',
-        '1/2/3 sections',
-        '↑↓ navigate',
-        '? guide',
-        'Q quit',
-      ].join(' · ');
-  const shortcutLines = shortcutLine ? [shortcutLine] : [];
+  const shortcutLines = modalActive
+    ? []
+    : categorizedShortcutLines(
+        {
+          Actions: [
+            ...(canAdd ? ['A add', 'P presets'] : []),
+            ...(canEdit && selected ? ['E edit'] : []),
+            ...(canRefresh && selected ? ['R refresh'] : []),
+            ...(canRemove && selected ? ['Delete remove'] : []),
+            ...(canTransfer ? ['Shift+I import', 'X export'] : []),
+          ],
+          Display: ['? guide', 'D details'],
+          Navigation: [...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
+        },
+        rows <= 40 || columns < 94 ? 'packed' : 'inline',
+      );
   const shortcutRows = shortcutsPanelRows(shortcutLines, columns - 2);
   const ultraCompactSummary = rows < 40;
   const compactSummary = columns < 80 || rows < 50;

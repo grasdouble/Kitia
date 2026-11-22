@@ -11,6 +11,7 @@ import type { ControlsProps } from '../components/controls/control-layout-plan.m
 import { detailField } from '../components/detail-fields.mjs';
 import { ResourceBrowserChrome, resourceBrowserPlan } from '../components/resource-browser.mjs';
 import { SelectionDetails, useDashboardDetailPaging } from '../components/selection-details.mjs';
+import { categorizedShortcutLines, sectionNavigationHints } from '../components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
@@ -64,31 +65,20 @@ export function CatalogScreen({
   });
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const detailPagingFocus =
-    !modalActive && !filterMode && !controls.menuFilter && (controls.focus === 'list' || controls.focus === 'actions');
-  const shortcuts =
-    modalActive
-      ? []
-      : filterMode
-        ? ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear', '↑↓ navigate']
-        : [
-            'ENTER install',
-            'V revisions',
-            'P preview/audit',
-            'F filter',
-            'C catalog',
-            'K kind',
-            'L license',
-            'D details',
-            '1/2/3 sections',
-            'ESC back',
-            '↑↓ navigate',
-            ...(showDetails && selected && detailPagingFocus ? ['PgUp/PgDn details'] : []),
-            '? guide',
-            'Q quit',
-          ];
-  const shortcutLines = shortcuts.length ? [shortcuts.join(' · ')] : [];
-  const compactShortcuts = rows < 30;
+  const compactShortcuts = rows < 30 || columns < 76;
+  const shortcutLines = modalActive
+    ? []
+    : categorizedShortcutLines(
+        filterMode
+          ? { Filters: ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear'], Navigation: ['↑↓ navigate'] }
+          : {
+              Actions: ['ENTER install', 'V revisions', 'P preview/audit'],
+              Filters: ['F filter', 'C catalog', 'K kind', 'L license'],
+              Display: ['? guide', 'D details'],
+              Navigation: [...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
+            },
+        rows <= 45 || columns < 94 ? 'packed' : 'inline',
+      );
   const browserPlan = resourceBrowserPlan({
     controls,
     modalActive,

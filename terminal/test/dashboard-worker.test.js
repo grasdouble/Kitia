@@ -218,7 +218,7 @@ test('real GH update progress and sanitized output reach the TUI through its wor
   let finished = false;
   try {
     await waitForFrame((frame) => frame.includes('↑↓ navigate'), 'Inventory');
-    input.write('a');
+    input.write('b');
     await waitForFrame((frame) => frame.includes('CATALOG RESOURCES'), 'Catalog');
     input.write('v');
     await waitForFrame((frame) => frame.includes('RESOURCE REVISIONS'), 'version picker');
@@ -233,7 +233,7 @@ test('real GH update progress and sanitized output reach the TUI through its wor
     );
     assert.ok(phase.includes('Invoking GitHub CLI to update'));
     const ghOutput = await waitForFrame(
-      (frame) => frame.includes('Fetching https://[REDACTED]@example.invalid/resource?[REDACTED]'),
+      (frame) => frame.includes('Fetching') && frame.includes('https://[REDACTED]@example.invalid/resource?[REDACTED]'),
       'sanitized GitHub progress output',
     );
     assert.ok(ghOutput.includes('token=[REDACTED]'));

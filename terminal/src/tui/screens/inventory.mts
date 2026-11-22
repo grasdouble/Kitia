@@ -12,6 +12,7 @@ import type { ControlsProps } from '../components/controls/control-layout-plan.m
 import { detailField, detailLocations } from '../components/detail-fields.mjs';
 import { ResourceBrowserChrome, resourceBrowserPlan } from '../components/resource-browser.mjs';
 import { SelectionDetails, useDashboardDetailPaging } from '../components/selection-details.mjs';
+import { categorizedShortcutLines, sectionNavigationHints } from '../components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
@@ -40,7 +41,6 @@ export function InventoryScreen({
   selectedIndex,
   versionLabel,
   actionMessage,
-  catalogAvailable,
   canExecute,
   showDetails,
   columns,
@@ -61,7 +61,6 @@ export function InventoryScreen({
   selectedIndex: number;
   versionLabel: string;
   actionMessage: string;
-  catalogAvailable: boolean;
   canExecute: boolean;
   showDetails: boolean;
   columns: number;
@@ -84,38 +83,33 @@ export function InventoryScreen({
   );
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
-  const detailPagingFocus =
-    !modalActive && !filterMode && !controls.menuFilter && (controls.focus === 'list' || controls.focus === 'actions');
-  const shortcuts = modalActive
+  const compactShortcuts = rows < 30 || columns < 76;
+  const shortcutLines = modalActive
     ? []
-    : filterMode
-      ? ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear', '↑↓ navigate']
-      : [
-          ...(catalogAvailable ? ['A install'] : []),
-          ...(canExecute &&
-          selected &&
-          selected.scope &&
-          (selected.managed === false
-            ? Boolean(selected.paths?.length)
-            : Boolean(selected.source_repository && selected.source_path))
-            ? ['P preview']
-            : []),
-          ...(canExecute && selected && selected.managed !== false && dashboardStatus(selected) === 'update'
-            ? ['U update']
-            : []),
-          ...(canExecute && selected ? [selected.managed === false ? 'Delete remove' : 'Delete uninstall'] : []),
-          'F filter',
-          ...(resources.length ? ['C catalog', 'K kind', 'L license'] : []),
-          'D details',
-          '1/2/3 sections',
-          'M catalogs',
-          '↑↓ navigate',
-          ...(showDetails && selected && detailPagingFocus ? ['PgUp/PgDn details'] : []),
-          '? guide',
-          'Q quit',
-        ];
-  const shortcutLines = shortcuts.length ? [shortcuts.join(' · ')] : [];
-  const compactShortcuts = rows < 30;
+    : categorizedShortcutLines(
+        filterMode
+          ? { Filters: ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear'], Navigation: ['↑↓ navigate'] }
+          : {
+              Actions: [
+                ...(canExecute &&
+                selected &&
+                selected.scope &&
+                (selected.managed === false
+                  ? Boolean(selected.paths?.length)
+                  : Boolean(selected.source_repository && selected.source_path))
+                  ? ['P preview']
+                  : []),
+                ...(canExecute && selected && selected.managed !== false && dashboardStatus(selected) === 'update'
+                  ? ['U update']
+                  : []),
+                ...(canExecute && selected ? [selected.managed === false ? 'Delete remove' : 'Delete uninstall'] : []),
+              ],
+              Filters: ['F filter', ...(resources.length ? ['C catalog', 'K kind', 'L license'] : [])],
+              Display: ['? guide', 'D details'],
+              Navigation: [...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
+            },
+        rows <= 45 || columns < 94 ? 'packed' : 'inline',
+      );
   const warningLines = errors.flatMap((error) =>
     wrapText(`${error.scope.toUpperCase()} · ${error.code}: ${error.message}`, Math.max(1, columns - 2)),
   );

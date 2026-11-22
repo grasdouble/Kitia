@@ -285,23 +285,22 @@ async function assertShortcutsFrame(session, hints) {
 
 const inventoryIds = ['ask-matt', 'unmanaged', 'grill-me'];
 const catalogIds = ['ask-matt', 'grill-me', 'plan-review', 'release-helper', 'review-guide'];
+const sectionNavigationHints = ['I Inventory', 'B Browse resources', 'M Manage catalogs'];
 const screenShortcutHints = {
   '': [
-    'A install',
     'P preview',
     'Delete uninstall',
     'F filter',
     'C catalog',
     'K kind',
     'L license',
-    'D details',
-    '1/2/3 sections',
-    'M catalogs',
-    '↑↓ navigate',
     '? guide',
+    'D details',
+    ...sectionNavigationHints,
+    '↑↓ navigate',
     'Q quit',
   ],
-  a: [
+  b: [
     'ENTER install',
     'V revisions',
     'P preview/audit',
@@ -309,14 +308,13 @@ const screenShortcutHints = {
     'C catalog',
     'K kind',
     'L license',
-    'D details',
-    '1/2/3 sections',
-    'ESC back',
-    '↑↓ navigate',
     '? guide',
+    'D details',
+    ...sectionNavigationHints,
+    '↑↓ navigate',
     'Q quit',
   ],
-  m: ['D details', 'ESC inventory', '1/2/3 sections', '↑↓ navigate', '? guide', 'Q quit'],
+  m: ['? guide', 'D details', ...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
 };
 const searchShortcutHints = ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear', '↑↓ navigate'];
 const previewShortcutHints = [
@@ -392,7 +390,7 @@ async function assertTableSurface(
     catalog = 'ALL',
     kind = 'ALL',
     license = 'ALL',
-    ids = query ? [query] : key === 'a' ? catalogIds : inventoryIds,
+    ids = query ? [query] : key === 'b' ? catalogIds : inventoryIds,
     visible = ids,
     selected = ids[0],
     details = true,
@@ -400,7 +398,7 @@ async function assertTableSurface(
     dismissed = [],
   } = {},
 ) {
-  const title = key === 'a' ? 'CATALOG RESOURCES' : 'INSTALLED RESOURCES';
+  const title = key === 'b' ? 'CATALOG RESOURCES' : 'INSTALLED RESOURCES';
   const search = editing ? `${query}▏` : query || 'Search resources…';
   let frame;
   let searchField;
@@ -463,7 +461,7 @@ async function assertTableSurface(
   assert.match(lines[row + 1].slice(col, listRight), /^─+$/, 'the list divider separates title and headings');
   assert.match(
     lines[bodyRow].slice(col, listRight).trim(),
-    key === 'a' ? /^RESOURCE\s+KIND\s+CATALOG\s+INST(?:ALLED|\.\.\.)$/ : /^RESOURCE\s+KIND\s+SCOPE\s+STATUS$/,
+    key === 'b' ? /^RESOURCE\s+KIND\s+CATALOG\s+INST(?:ALLED|\.\.\.)$/ : /^RESOURCE\s+KIND\s+SCOPE\s+STATUS$/,
     `${title} keeps its ordered column headings`,
   );
   assert.deepEqual(
@@ -598,12 +596,12 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
     );
     assertWorkspaceDetail(await assertTableSurface(session, ''), 'ask-matt', true);
 
-    session.input.write('a');
-    const catalog = await assertTableSurface(session, 'a');
+    session.input.write('b');
+    const catalog = await assertTableSurface(session, 'b');
     assertWorkspaceDetail(catalog, 'ask-matt', true);
     assertSelectedRow(session, 'ask-matt');
     assert.match(catalog.entries.find(({ id }) => id === 'grill-me').line, /MattPucock\[productivity\]\s+user$/);
-    session.input.write('\x1b');
+    session.input.write('i');
     await assertTableSurface(session, '', { dismissed: ['CATALOG RESOURCES'] });
     session.input.write('q');
     assert.equal(await dashboardExit(session), true, 'q exits the Ink dashboard cleanly');
@@ -651,7 +649,7 @@ const licensedInventoryIds = ['ask-matt', 'grill-me'];
 
 for (const [name, key, nextId] of [
   ['Inventory', '', 'unmanaged'],
-  ['catalog entry', 'a', 'grill-me'],
+  ['Browse', 'b', 'grill-me'],
 ]) {
   test(
     `Termless ${name} separates tables, details and shortcuts across resizing and navigation`,
@@ -736,7 +734,7 @@ for (const [name, key, nextId] of [
           session.input.write('l');
           await assertTableSurface(session, key, { query: 'ask-matt', license: 'MIT' });
           assertSelectedRow(session, 'ask-matt');
-          session.input.write('\x1b');
+          session.input.write('i');
           await assertTableSurface(session, '', { dismissed: ['CATALOG RESOURCES'] });
         } else {
           session.input.write('f');
@@ -847,7 +845,11 @@ test(
       await assertCards(1, true);
       session.input.write('\x1b[A');
       await assertCards(0, true);
-      session.input.write('\x1b');
+      session.input.write('b');
+      await assertTableSurface(session, 'b', { dismissed: ['CONNECTED CATALOGS'] });
+      session.input.write('m');
+      await assertCards(0, true);
+      session.input.write('i');
       await assertTableSurface(session, '', { dismissed: ['CONNECTED CATALOGS'] });
       session.input.write('q');
       assert.equal(await dashboardExit(session), true);
@@ -857,6 +859,40 @@ test(
     }
   },
 );
+
+test('Termless opens Browse even without catalog resources', { timeout: 15000 }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'kitia-termless-empty-browse-'));
+  let session;
+  try {
+    session = await launchShowcaseDashboard(directory, { catalogResourcesOverride: [] });
+    await assertTableSurface(session, '');
+    session.input.write('b');
+    await assertTableSurface(session, 'b', { ids: [], dismissed: ['INSTALLED RESOURCES'] });
+    session.input.write('m');
+    await waitForGrid(
+      session,
+      (grid) => {
+        const shortcuts = screenShortcutsFrame(grid, session.output.columns);
+        return (
+          grid.includes('CONNECTED CATALOGS 1') &&
+          !grid.includes('CATALOG RESOURCES') &&
+          shortcuts?.lastRow === session.output.rows - 1 &&
+          hasHints(shortcuts.text, screenShortcutHints.m)
+        );
+      },
+      'Catalogs opens from an empty Browse view',
+    );
+    session.input.write('b');
+    await assertTableSurface(session, 'b', { ids: [], dismissed: ['CONNECTED CATALOGS'] });
+    session.input.write('i');
+    await assertTableSurface(session, '', { dismissed: ['CATALOG RESOURCES'] });
+    session.input.write('q');
+    assert.equal(await dashboardExit(session), true);
+  } finally {
+    if (session) await closeShowcaseDashboard(session);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test(
   'Termless Browse actions stay inside the details pane and dispatch Update at 120×24',
@@ -881,13 +917,13 @@ test(
         },
       });
       await assertTableSurface(session, '');
-      session.input.write('a');
-      await assertTableSurface(session, 'a');
+      session.input.write('b');
+      await assertTableSurface(session, 'b');
       resizeDashboard(session, { columns: 120, rows: 24 });
 
       const actionLabels = ['Install resource', 'Preview / audit', 'Revisions', 'Update resource'];
       const assertBrowseActionFrame = async (dismissed = []) => {
-        const frame = await assertTableSurface(session, 'a', {
+        const frame = await assertTableSurface(session, 'b', {
           visible: catalogIds.slice(0, 3),
           dismissed,
         });
@@ -1208,8 +1244,8 @@ test(
       });
       ({ inspectionPageView } = await import('@grasdouble/kitia/dist/tui/screens.mjs'));
       await assertTableSurface(session, '');
-      session.input.write('a');
-      await assertTableSurface(session, 'a');
+      session.input.write('b');
+      await assertTableSurface(session, 'b');
       const initial = await press('p', '# Pinned skill source');
       await assertShortcutsFrame(session, previewShortcutHints);
       assert.equal(previewResource.kind, 'skill');
@@ -1337,10 +1373,10 @@ test(
 
       resizeDashboard(session, terminalSize);
       session.input.write('\r');
-      await assertTableSurface(session, 'a', { dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'] });
+      await assertTableSurface(session, 'b', { dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'] });
       for (const selected of ['grill-me', 'plan-review']) {
         session.input.write('\x1b[B');
-        await assertTableSurface(session, 'a', { selected });
+        await assertTableSurface(session, 'b', { selected });
       }
       await press('\r', 'INSTALL OPTIONS');
       await press('\r', 'CONFIRM INSTALL');
@@ -1354,13 +1390,11 @@ test(
       await assertTableSurface(session, '', {
         ids: [],
         hints: [
-          'A install',
           'F filter',
-          'D details',
-          '1/2/3 sections',
-          'M catalogs',
-          '↑↓ navigate',
           '? guide',
+          'D details',
+          ...sectionNavigationHints,
+          '↑↓ navigate',
           'Q quit',
         ],
         dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE'],
@@ -1623,14 +1657,14 @@ for (const [kind, id, filename] of [
       });
       ({ inspectionPageView } = await import('@grasdouble/kitia/dist/tui/screens.mjs'));
       await assertTableSurface(session, '');
-      session.input.write('a');
-      await assertTableSurface(session, 'a');
+      session.input.write('b');
+      await assertTableSurface(session, 'b');
       session.input.write('f');
-      await assertTableSurface(session, 'a', { editing: true });
+      await assertTableSurface(session, 'b', { editing: true });
       session.input.write(id);
-      await assertTableSurface(session, 'a', { query: id, editing: true });
+      await assertTableSurface(session, 'b', { query: id, editing: true });
       session.input.write('\r');
-      await assertTableSurface(session, 'a', { query: id, dismissed: ['TYPE to search'] });
+      await assertTableSurface(session, 'b', { query: id, dismissed: ['TYPE to search'] });
       const screen = await press('p', `# Pinned ${kind} source`);
       await assertShortcutsFrame(session, previewShortcutHints);
       assert.equal(previewResource.kind, kind);
@@ -1650,7 +1684,7 @@ for (const [kind, id, filename] of [
       assert.ok(view.lines.includes('----|-----|----'));
       assert.deepEqual(calls, ['preview']);
       session.input.write('\r');
-      await assertTableSurface(session, 'a', {
+      await assertTableSurface(session, 'b', {
         query: id,
         dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'],
       });
@@ -1845,8 +1879,8 @@ test(
       });
       ({ inspectionPageView } = await import('@grasdouble/kitia/dist/tui/screens.mjs'));
       await assertTableSurface(session, '');
-      session.input.write('a');
-      await assertTableSurface(session, 'a');
+      session.input.write('b');
+      await assertTableSurface(session, 'b');
       await press('p', '# Syntax preview');
       const plain = session.terminal.findText('Plain source sentinel.');
       assert.ok(plain);
@@ -1871,7 +1905,7 @@ test(
       assertSourceHeader(session, 'SKILL.md', '# Syntax preview', pageView(0).pageCount);
       await inspectPages();
       session.input.write('\r');
-      await assertTableSurface(session, 'a', {
+      await assertTableSurface(session, 'b', {
         visible: ['ask-matt'],
         dismissed: ['SOURCE · PAGE', 'AUDIT REPORT', 'SOURCE TREE'],
       });
@@ -1920,11 +1954,11 @@ test('Termless Catalog Catalog/Kind/License filters match visible candidates', {
     await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds, dismissed: ['TYPE to search'] });
     session.input.write('l');
     await assertTableSurface(session, '');
-    session.input.write('a');
-    await assertTableSurface(session, 'a', { ids: all });
+    session.input.write('b');
+    await assertTableSurface(session, 'b', { ids: all });
     session.input.write('d');
     const assertView = (ids, dismissed = []) =>
-      assertTableSurface(session, 'a', {
+      assertTableSurface(session, 'b', {
         ...state,
         ids,
         details: false,
@@ -1948,14 +1982,14 @@ test('Termless Catalog Catalog/Kind/License filters match visible candidates', {
       await press('k', { kind: 'AGENT', license: 'ALL' }, ['alpha-agent']);
       await press('l', { license: 'MIT' }, ['alpha-agent']);
       await press('f', { editing: true }, ['alpha-agent']);
-      await press('tsl', { query: 'tsl' }, []);
+      await press('bm123', { query: 'bm123' }, []);
       await press('\r', { editing: false }, []);
       await press('f', { editing: true }, []);
       await press('\x1b', { query: '', editing: false, license: 'ALL' }, ['alpha-agent']);
       await press('k', { kind: 'SKILL', license: 'ALL' }, ['alpha-brief', 'alpha-audit', 'alpha-extra', 'alpha-mit']);
-      session.input.write('\x1b');
+      session.input.write('i');
       await assertTableSurface(session, '', { details: false, dismissed: ['CATALOG RESOURCES'] });
-      session.input.write('a');
+      session.input.write('b');
       const skills = all.filter((id) => id.startsWith('alpha-') && id !== 'alpha-agent');
       await assertView(skills);
       await press('c', { catalog: 'BETA', license: 'ALL' }, ['beta-check']);
@@ -2007,6 +2041,7 @@ test(
       resizeDashboard(session, { columns, rows });
       await assertTableSurface(session, '', { visible: ['ask-matt'] });
       session.input.write('\x1b[3~');
+      await waitForGrid(session, (grid) => grid.includes('CONFIRM UNINSTALL'), 'uninstall confirmation opens');
       const confirmationHints = ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE'];
       await assertShortcutsFrame(session, confirmationHints);
       const danger = { r: 224, g: 108, b: 117 };

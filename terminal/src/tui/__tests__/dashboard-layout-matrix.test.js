@@ -57,10 +57,9 @@ test('dashboard renders the resource list and selection panel at wide and narrow
       'selected inventory details',
     );
     assert.match(frame, /INSTALLED RESOURCES/);
-    const fields = ['abcdef0', 'https://github.com/example/manual-skill', 'SOURCEPATHskills/manual-skill'];
+    const fields = ['INSTALLEDREVISIONabcdef0', 'https://github.com/example/manual-skill', 'SOURCEPATHskills/manual-skill'];
     let details = detailBodyText(frame);
     assert.ok(details.startsWith('skillmanual-skillAmanuallymaintainedskill.'));
-    assert.match(details, /INSTALLEDREVISION/);
     const initial = frame;
     for (let page = 0; page < 6 && !fields.every((field) => details.includes(field)); page += 1) {
       const previous = detailBodyText(frame);
@@ -140,7 +139,7 @@ test('catalog browser renders ordered columns without list descriptions at wide 
     });
     await waitForDashboardFrame(output, () => rendered, inventoryFrameReady, 'initial inventory');
     const start = rendered.length;
-    input.write('2');
+    input.write('b');
     const frame = await waitForDashboardFrame(
       output,
       () => rendered,
@@ -324,6 +323,11 @@ for (const [screen, dimensions] of [
         }
         const shortcuts = plain.match(/^ *┌─+┐\r?\n *│ SHORTCUTS +│\r?\n(?: *│[^\r\n]*│\r?\n)+ *└─+┘/m)?.[0];
         assert.ok(shortcuts, 'the shortcut panel retains its complete frame');
+        assert.match(shortcuts, /Display: \? guide/);
+        const navigation = ['I Inventory', 'B Browse resources', 'M Manage catalogs'];
+        assert.match(shortcuts, /Navigation: I Inventory[\s\S]*B Browse resources[\s\S]*M Manage catalogs/);
+        if (screen !== 'management') assert.match(shortcuts, /Filters: F filter/);
+        if (screen === 'catalog') assert.match(shortcuts, /Actions: ENTER install/);
         const shortcutTokens =
           screen === 'inventory'
             ? [
@@ -332,8 +336,7 @@ for (const [screen, dimensions] of [
                 'K kind',
                 'L license',
                 'D details',
-                '1/2/3 sections',
-                'M catalogs',
+                ...navigation,
                 '↑↓ navigate',
                 '? guide',
                 'Q quit',
@@ -348,13 +351,12 @@ for (const [screen, dimensions] of [
                   'K kind',
                   'L license',
                   'D details',
-                  '1/2/3 sections',
-                  'ESC back',
+                  ...navigation,
                   '↑↓ navigate',
                   '? guide',
                   'Q quit',
                 ]
-              : ['D details', 'ESC inventory', '1/2/3 sections', '↑↓ navigate', '? guide', 'Q quit'];
+              : ['D details', ...navigation, '↑↓ navigate', '? guide', 'Q quit'];
         for (const token of shortcutTokens) assert.ok(shortcuts.includes(token), `shortcut remains reachable: ${token}`);
       };
       const assertSelection = (value, index) => {
@@ -380,14 +382,18 @@ for (const [screen, dimensions] of [
         const initial =
           screen === 'inventory'
             ? inventory
-            : await press(screen === 'catalog' ? '2' : '3', ready(0), `${screen} ready`);
+            : await press(screen === 'catalog' ? 'b' : 'm', ready(0), `${screen} ready`);
         assertSelection(initial, 0);
         assertSelection(await press('\u001b[A', ready(59), 'wrapped to the last selection'), 59);
         assertListAndShortcuts(await press('d', ready(59, false), 'details hidden'), false);
         assertSelection(await press('d', ready(59), 'details shown'), 59);
         assertSelection(await press('\u001b[B', ready(0), 'wrapped to the first selection'), 0);
         if (screen !== 'management') {
-          await press('f', (value) => value.includes('TYPE to search') && value.includes('▏'), 'search is ready');
+          await press(
+            'f',
+            (value) => value.includes('Filters: TYPE to search') && value.includes('▏'),
+            'categorized search hints are ready',
+          );
           await press(
             'resource-5',
             (value) => value.includes('TYPE to search') && value.includes('resource-5▏') && selected(value, 50),

@@ -427,7 +427,7 @@ for (const [kind, columns, rows, hasAudit] of [
       const inventoryVisible = (frame) => frame.includes('INSTALLED RESOURCES');
       const browseVisible = (frame) => frame.includes('CATALOG RESOURCES');
       await waitForDashboardFrame(output, () => rendered, inventoryVisible, 'initial inventory before preview');
-      await press('2', (frame) => browseVisible(frame) && selectedListRow(frame) === 'reviewer', 'Browse selection');
+      await press('b', (frame) => browseVisible(frame) && selectedListRow(frame) === 'reviewer', 'Browse selection');
       const initial = await navigate('p', 'source', 0);
       assert.match(initial, /SOURCE PREVIEW/);
       assert.match(initial, new RegExp(`FILE ${kind === 'skill' ? 'SKILL\\.md' : 'reviewer\\.md'}`));
@@ -464,7 +464,7 @@ for (const [kind, columns, rows, hasAudit] of [
         (frame) => browseVisible(frame) && !frame.includes('SOURCE PREVIEW'),
         'Browse after preview',
       );
-      await press('\x1b', (frame) => inventoryVisible(frame) && !browseVisible(frame), 'Inventory after Browse');
+      await press('i', (frame) => inventoryVisible(frame) && !browseVisible(frame), 'Inventory after Browse');
       input.write('q');
       assert.equal(await done, true);
     } finally {

@@ -239,11 +239,15 @@ foreground. Unknown kinds use the status-based Inventory fallback or the
 proprietary-license Browse warning color. CLI text tables retain their existing
 format.
 
-The normal dashboard uses a compact, wrapping horizontal shortcut footer rather
-than a separate sidebar. Its hints follow control focus, so active search and
-filter controls, open menus, and modals retain their own keyboard input. Preview
-and modal surfaces keep their context-specific framed `SHORTCUTS` panels.
-Preview uses the same framed `SHORTCUTS` panel: `Display` lists source, audit,
+The dashboard groups keyboard hints into Actions, Filters, Display, and
+Navigation in the bordered `SHORTCUTS` panel. Short or narrow terminals pack
+groups onto the same line when there is room. Search shows its own filtering hints,
+and modals keep their context-specific shortcut panels.
+Use `I` for Inventory, `B` to browse resources, and `M` to manage catalogs from
+any dashboard section. Tabs remain available by mouse or keyboard. Use `Q`
+to quit the dashboard; `Esc` does not switch sections or quit. In Manage
+Catalogs, use `Shift+I` to import catalog configuration.
+Preview uses the same panel: `Display` lists source, audit,
 and tree controls; `Navigation` lists pane focus, pagination, and close
 controls. The panel reserves its full height before pane pagination is sized.
 Below 12 terminal rows, the shortcut frame temporarily occupies the screen;

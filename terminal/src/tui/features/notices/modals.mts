@@ -1,4 +1,5 @@
 import { DASHBOARD_THEME } from '../../colors.js';
+import { sectionNavigationHints } from '../../components/shortcuts/shortcut-lines.mjs';
 import type { DashboardSelfUpdate } from '../../contracts.js';
 import { choiceGroup, modalFrame } from '../../modals.mjs';
 const { semantic } = DASHBOARD_THEME;
@@ -40,24 +41,25 @@ export function inventoryMigrationModal({ scopes, columns }: { scopes: string[];
 }
 
 export function onboardingModal(step: number) {
+  const navigation = sectionNavigationHints.join(' · ');
   const tour = [
     {
       title: '1/3 · INVENTORY',
       description:
         'Your installed resources live here. The highlighted list shows status, scope, kind, and catalog; move the selection to inspect an item.',
-      shortcut: '1 / 2 / 3 sections · ↑ / ↓ move · F filter · D details',
+      shortcut: `${navigation} · ↑ / ↓ move · F filter · D details`,
     },
     {
       title: '2/3 · CATALOG',
       description:
         'Browse resources available to install. Select a resource with Enter to choose its scope and runtime before installing.',
-      shortcut: '1 / 2 / 3 sections · F filter · C catalog · K kind · Enter select',
+      shortcut: `${navigation} · F filter · C catalog · K kind · Enter select`,
     },
     {
       title: '3/3 · CATALOG MANAGEMENT',
       description:
         'Manage the GitHub catalogs that supply resources. Refreshing updates the catalog index; it does not change installed resources.',
-      shortcut: '1 / 2 / 3 sections · A add · E edit · R refresh · Delete remove',
+      shortcut: `${navigation} · A add · E edit · R refresh · Delete remove`,
     },
   ][step];
   return modalFrame(

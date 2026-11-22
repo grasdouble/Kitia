@@ -26,10 +26,10 @@ const navigationKeys = [
   ['PgDn', '\u001b[6~', 'Page Down'],
 ] as const;
 const actionKeys = [
-  ['1', 'Inventory'],
-  ['2', 'Browse resources'],
-  ['3', 'Catalogs'],
-  ['A', 'Browse / add'],
+  ['I', 'Inventory'],
+  ['B', 'Browse resources'],
+  ['M', 'Manage Catalogs'],
+  ['A', 'Add catalog'],
   ['U', 'Update'],
   ['P', 'Preview / presets'],
   ['V', 'Revisions'],
@@ -38,11 +38,9 @@ const actionKeys = [
   ['K', 'Kind filter'],
   ['L', 'License filter'],
   ['D', 'Toggle details'],
-  ['M', 'Manage catalogs'],
-  ['N', 'Connect catalog'],
   ['E', 'Edit catalog'],
   ['R', 'Refresh catalogs'],
-  ['I', 'Import catalogs'],
+  ['Shift+I', 'Import catalogs', 'I'],
   ['X', 'Export catalogs'],
   ['?', 'Guide'],
   ['Y', 'Confirm'],
@@ -163,9 +161,9 @@ export function TuiDemo() {
         <p id="terminal-instructions" className={styles.instructions}>
           Click tabs, filters, options, rows, actions, and confirmation choices in the terminal. Use the mouse wheel
           over lists or details, or to page through the active preview pane. Click inside the terminal to use your
-          keyboard. Press <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> to switch sections; <kbd>Tab</kbd>/
-          <kbd>Shift+Tab</kbd> moves between controls, and arrows plus <kbd>Enter</kbd> select. Press <kbd>?</kbd> for
-          the guide. When search is focused, type normally; numbers are text. The buttons below send the same keys.
+          keyboard. Press <kbd>I</kbd> for Inventory, <kbd>B</kbd> to browse resources, or <kbd>M</kbd> to manage
+          catalogs. <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> moves between controls, and arrows plus <kbd>Enter</kbd> select.
+          Press <kbd>?</kbd> for the guide. When search is focused, type normally. The buttons below send the same keys.
         </p>
         <div className={styles.screen}>
           <div
@@ -217,8 +215,8 @@ export function TuiDemo() {
             <summary>Action keys</summary>
             <p>Keys follow the current TUI screen; in text fields, they enter text instead of triggering actions.</p>
             <div className={styles.actionKeys}>
-              {actionKeys.map(([key, label]) => (
-                <button type="button" key={key} disabled={phase !== 'ready'} onClick={() => sendKey(key.toLowerCase())}>
+              {actionKeys.map(([key, label, value = key.toLowerCase()]) => (
+                <button type="button" key={key} disabled={phase !== 'ready'} onClick={() => sendKey(value)}>
                   <kbd>{key}</kbd>
                   {label}
                 </button>

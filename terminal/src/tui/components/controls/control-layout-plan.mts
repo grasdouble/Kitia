@@ -117,7 +117,7 @@ function splitControlLines(
 }
 
 export function sectionTabMetrics(width: number) {
-  const compact = width < 56;
+  const compact = width < 62;
   return { inset: compact ? 0 : 1, itemPadding: compact ? 0 : 1, gap: compact ? 1 : 2 };
 }
 
@@ -184,25 +184,28 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
   if (part !== 'filters') {
     const sectionNames: Record<DashboardSection, string> = {
       inventory: 'Inventory',
-      browse: width < 45 ? 'Browse' : 'Browse resources',
-      catalogs: 'Catalogs',
+      browse: 'Browse resources',
+      catalogs: 'Manage Catalogs',
     };
     const tabMetrics = sectionTabMetrics(width);
-    const tabs: LayoutItem[] = (['inventory', 'browse', 'catalogs'] as const).map((section) => ({
+    const sections = ['inventory', 'browse', 'catalogs'] as const;
+    const tabWidth = (section: DashboardSection) =>
+      sectionNames[section].length + String(props.sectionCounts?.[section] ?? 0).length + 1 + tabMetrics.itemPadding * 2;
+    const availableTabWidth = Math.max(1, width - 2 - tabMetrics.inset * 2);
+    // Leave room for the focus marker so focusing a tab does not wrap the strip.
+    const preferredTabWidth = () => sections.reduce((total, section) => total + tabWidth(section), 2 + 2 * tabMetrics.gap);
+    if (preferredTabWidth() > availableTabWidth) sectionNames.browse = 'Browse';
+    if (preferredTabWidth() > availableTabWidth) sectionNames.catalogs = 'Manage…';
+    const tabs: LayoutItem[] = sections.map((section) => ({
       id: section,
       label: sectionNames[section],
       text: `${sectionNames[section]} ${props.sectionCounts?.[section] ?? 0}`,
-      width:
-        sectionNames[section].length +
-        String(props.sectionCounts?.[section] ?? 0).length +
-        1 +
-        Number(props.focus === 'tabs' && props.section === section) * 2 +
-        tabMetrics.itemPadding * 2,
+      width: tabWidth(section) + Number(props.focus === 'tabs' && props.section === section) * 2,
       target: { type: 'section', section },
     }));
     const tabLines = splitControlLines(
       tabs,
-      Math.max(1, width - 2 - tabMetrics.inset * 2),
+      availableTabWidth,
       row,
       'tabs',
       3,

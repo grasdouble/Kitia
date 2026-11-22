@@ -39,11 +39,6 @@ import { CatalogManagementScreen, CatalogScreen, InspectionScreen, InventoryScre
 import { checkInstalledVersion, type VersionNotice } from './version-check.mjs';
 
 const h = React.createElement;
-const sectionScreens: Record<string, 'inventory' | 'catalog' | 'catalog-management'> = {
-  '1': 'inventory',
-  '2': 'catalog',
-  '3': 'catalog-management',
-};
 
 export function Dashboard({
   resources,
@@ -566,10 +561,6 @@ export function Dashboard({
       setScreenMode('inventory');
       return;
     }
-    if (!catalogs.active && character === 'm' && screenMode === 'inventory' && !filterMode) {
-      navigateToSection('catalogs');
-      return;
-    }
     if (catalogs.active) {
       catalogs.handleInput(input, key);
       return;
@@ -627,10 +618,19 @@ export function Dashboard({
       return;
     }
 
-    const destination = !activeFilter && screenMode !== 'install-options' ? sectionScreens[character] : undefined;
-    if (destination) {
-      navigateToSection(destination === 'inventory' ? 'inventory' : destination === 'catalog' ? 'browse' : 'catalogs');
-      return;
+    if (!activeFilter && screenMode !== 'install-options') {
+      if (character === 'i' && screenMode !== 'inventory') {
+        navigateToSection('inventory');
+        return;
+      }
+      if (character === 'b' && screenMode !== 'catalog') {
+        navigateToSection('browse');
+        return;
+      }
+      if (character === 'm' && screenMode !== 'catalog-management') {
+        navigateToSection('catalogs');
+        return;
+      }
     }
 
     if (screenMode === 'catalog') {
@@ -653,8 +653,6 @@ export function Dashboard({
           setCatalogQuery((value) => value + input);
           setCatalogIndex(0);
         }
-      } else if (key.escape) {
-        navigateToSection('inventory');
       } else if (character === 'd') {
         setShowDetails((value) => !value);
       } else if (character === 'f') {
@@ -710,8 +708,7 @@ export function Dashboard({
       return;
     }
     if (screenMode === 'catalog-management') {
-      if (key.escape) setScreenMode('inventory');
-      else if (character === 'd') setShowDetails((value) => !value);
+      if (character === 'd') setShowDetails((value) => !value);
       else if (key.upArrow || key.downArrow) {
         setCatalogManagementIndex(cycleIndex(userCatalogs.length, catalogManagementIndex, key.downArrow ? 1 : -1));
       }
@@ -738,17 +735,12 @@ export function Dashboard({
       }
       return;
     }
-    if (key.escape) {
-      onFinish(!lastActionFailed);
-    } else if (key.upArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, -1));
+    if (key.upArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, -1));
     else if (key.downArrow) setSelectedIndex(cycleIndex(visibleInventory.length, activeInventoryIndex, 1));
     else if (character === 'd') setShowDetails((value) => !value);
     else if (character === 'f') {
       setFilterMode(true);
       setControlFocus('search');
-    } else if (character === 'm') {
-      setScreenMode('catalog-management');
-      setCatalogManagementIndex(0);
     } else if (character === 'c') {
       setInventoryCatalogFilter(
         cycleFilter(inventoryCatalogFilter, installedResources, 'catalog', 'kind', inventoryKindFilter, userCatalogs),
@@ -788,13 +780,6 @@ export function Dashboard({
       typeof actions.listSourceVersions === 'function'
     ) {
       openSourceVersions(selectedResource, 'update');
-    } else if (character === 'a' && candidates.length) {
-      setScreenMode('catalog');
-      setCatalogQuery('');
-      resetCatalogLicenseFilter();
-      setCatalogIndex(0);
-      setCatalogFilterMode(false);
-      setActionMessage('');
     } else if (
       character === 'u' &&
       selectedResource &&
@@ -898,7 +883,6 @@ export function Dashboard({
       selectedIndex: activeInventoryIndex,
       versionLabel,
       actionMessage,
-      catalogAvailable: candidates.length > 0,
       showDetails,
       canExecute: typeof actions.execute === 'function' && Boolean(selectedResource),
       columns,

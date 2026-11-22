@@ -33,7 +33,7 @@ test('SectionTabs renders planned section labels and reports tab hit regions', a
   });
   assert.ok(frame.includes('Inventory 4'));
   assert.ok(frame.includes('Browse resources 7'));
-  assert.ok(frame.includes('Catalogs 2'));
+  assert.ok(frame.includes('Manage Catalogs 2'));
   assert.deepEqual(
     regions.map(({ id }) => id),
     ['inventory', 'browse', 'catalogs'],

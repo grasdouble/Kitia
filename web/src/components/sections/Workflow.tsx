@@ -16,12 +16,12 @@ const steps = [
   [
     'Browse and manage catalogs',
     'Search catalog metadata, tags, status, license, source, and descriptions; narrow results by resource type or license. Preview and audit current local inventory files from their detail views.',
-    'N add catalog · F filter · D details',
+    'I Inventory · B Browse resources · M Manage catalogs',
   ],
   [
     'Choose and confirm actions',
     'Install, update, or uninstall selected resources. Kitia protects files it does not manage and asks before dashboard actions.',
-    'A install · U update · Delete uninstall',
+    'Enter install · U update · Delete uninstall',
   ],
   [
     'Keep Kitia up to date',

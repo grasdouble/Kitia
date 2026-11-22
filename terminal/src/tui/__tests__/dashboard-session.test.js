@@ -133,7 +133,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
     dashboardFinished = true;
   });
   await waitForFrame((frame) => frame.includes('INSTALLED RESOURCES'), 'initial inventory');
-  input.write('a');
+  input.write('b');
   await waitForFrame((frame) => frame.includes('CATALOG RESOURCES'), 'catalog resources');
   input.write('v');
   await waitForFrame(
@@ -239,7 +239,7 @@ test('dashboard shows the loading popup for consecutive actions', async () => {
   let finished = false;
   try {
     await waitFor((frame) => frame.includes('INSTALLED RESOURCES'), 'render Inventory');
-    input.write('a');
+    input.write('b');
     await waitFor((frame) => frame.includes('CATALOG RESOURCES'), 'open catalog');
     input.write('p');
     await waitFor((frame) => frame.includes('LOADING'), 'show the first loading popup');

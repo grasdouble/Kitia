@@ -734,16 +734,17 @@ export function useCatalogManagement(actions: DashboardActions, activity: Dashbo
   const handleShortcut = (input: string, key: Key) => {
     const action = key.delete
       ? 'remove-catalog'
-      : (
-          {
-            a: 'add-catalog',
-            p: 'presets',
-            e: 'edit-catalog',
-            r: 'refresh-catalog',
-            i: 'import-catalogs',
-            x: 'export-catalogs',
-          } as Record<string, string>
-        )[input.toLocaleLowerCase()];
+      : input === 'I'
+        ? 'import-catalogs'
+        : (
+            {
+              a: 'add-catalog',
+              p: 'presets',
+              e: 'edit-catalog',
+              r: 'refresh-catalog',
+              x: 'export-catalogs',
+            } as Record<string, string>
+          )[input.toLocaleLowerCase()];
     if (!action) return false;
     activateAction(action);
     return true;

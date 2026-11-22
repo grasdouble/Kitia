@@ -36,7 +36,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   });
   const repository = 'https://github.com/example/test';
   const userCatalogsReadyFrame =
-    /^(?=[\s\S]*CONNECTED CATALOGS)(?=[\s\S]*ESC inventory)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|EDIT CATALOG|REMOVE CATALOG|CONFIRM CATALOG REMOVAL|IMPORT CATALOGS|EXPORT CATALOGS|REFRESH CATALOG|CATALOG REFRESH ERRORS))/;
+    /^(?=[\s\S]*CONNECTED CATALOGS)(?=[\s\S]*Navigation: I Inventory)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|EDIT CATALOG|REMOVE CATALOG|CONFIRM CATALOG REMOVAL|IMPORT CATALOGS|EXPORT CATALOGS|REFRESH CATALOG|CATALOG REFRESH ERRORS))/;
   const driveRefresh = async (keys, refreshCatalog, extraActions = {}, exitFrames = ['INSTALLED RESOURCES']) => {
     const input = new PassThrough();
     input.isTTY = true;
@@ -327,7 +327,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const transferManager = await driveRefresh(
     [
       ['m', userCatalogsReadyFrame],
-      ['i', /Paste the JSON catalog configuration below/],
+      ['I', /Paste the JSON catalog configuration below/],
       [pastedConfiguration, /two","mode":"basic","entries":\[\]\}\]\}/],
       ['\x13', /SPACE\/ENTER TOGGLE/],
       ['\x1b[B', /› \[x\] Catalog Two/],
@@ -365,7 +365,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const cancelImportManager = await driveRefresh(
     [
       ['m', userCatalogsReadyFrame],
-      ['i', /CTRL\+S REVIEW/],
+      ['I', /CTRL\+S REVIEW/],
       [pastedConfiguration, /two","mode":"basic","entries":\[\]\}\]\}/],
       ['\x13', /SPACE\/ENTER TOGGLE/],
       ['\x1b', /Paste the JSON catalog configuration below/],
@@ -588,7 +588,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   assert.match(initialDashboard.renderedOutput, /F filter/);
   assert.match(initialDashboard.renderedOutput, /↑↓ navigate/);
   const ignoredInventoryRefresh = await driveRefresh(
-    [['g', null], ['3', userCatalogsReadyFrame], ['1', /INSTALLED RESOURCES[\s\S]*Q quit/], 'q'],
+    [['g', null], ['m', userCatalogsReadyFrame], ['i', /INSTALLED RESOURCES[\s\S]*Q quit/], 'q'],
     refresh,
   );
   assert.equal(ignoredInventoryRefresh.result, true);

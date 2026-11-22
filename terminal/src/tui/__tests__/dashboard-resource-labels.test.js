@@ -152,7 +152,7 @@ test('catalog browser renders custom source folders in SOURCE and detail labels'
       { name: 'Basic', repository: 'basic/skills', mode: 'basic', entries: [] },
     ],
   });
-  input.write('a');
+  input.write('b');
   await waitForOutput(
     output,
     () => renderedOutput,
@@ -222,7 +222,7 @@ test('catalog browser renders mapped source folders and keeps repository-less na
     (text) => text.includes('INSTALLED RESOURCES'),
     'initial inventory',
   );
-  input.write('a');
+  input.write('b');
   await waitForOutput(
     output,
     () => plain(),

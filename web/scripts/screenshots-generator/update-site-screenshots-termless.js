@@ -58,32 +58,30 @@ function screenRows(screen) {
 function missingInventory(screen) {
   const lines = screenRows(screen);
   const requirements = [
-    ['project current ask-matt row', /CURRENT.*PROJECT.*skill.*ask-matt.*MattPucock\[engineering\]/],
-    ['unmanaged user unmanaged row', /UNMANAGED.*USER.*skill.*unmanaged/],
-    ['current user grill-me row', /CURRENT.*USER.*skill.*grill-me.*MattPucock\[productivity\]/],
-    ['side-by-side inventory and ask-matt detail titles', /INVENTORY.*SKILL - ask-matt/],
+    ['selected project ask-matt row', /›\s+ask-matt\s+skill\s+project\s+Current\b/],
+    ['unmanaged user unmanaged row', /\bunmanaged\s+skill\s+user\s+Unmanaged\b/],
+    ['current user grill-me row', /\bgrill-me\s+skill\s+user\s+Current\b/],
+    ['side-by-side inventory and detail titles', /INSTALLED RESOURCES.*3 results.*SELECTION DETAILS/],
+    ['inventory summary cards', /│PROJECT\s+1│\s+│USER\s+2│\s+│UPDATES\s+0│/],
+    ['inventory navigation shortcuts', /I Inventory.*B Browse resources.*M Manage catalogs/],
   ];
   const missing = requirements
     .filter(([, pattern]) => !lines.some((line) => pattern.test(line)))
     .map(([label]) => label);
-  if (!screen.includes('2 current')) missing.push('two-managed summary');
-  if (!screen.includes('1 unmanaged')) missing.push('one-unmanaged summary');
-  for (const value of [
-    'MattPucock[engineering]',
-    'PROJECT',
-    '[ CURRENT ]',
-    'https://github.com/demo/skills',
-    '4ae2317',
-  ]) {
+  for (const value of ['MattPucock[engineering]', 'Route repository questions']) {
     if (!screen.includes(value)) missing.push(`selected ask-matt detail ${JSON.stringify(value)}`);
   }
   return missing;
 }
 
 function missingCatalog(screen) {
-  return ['CATALOG RESOURCES', 'ask-matt', 'grill-me', 'plan-review', 'release-helper', 'review-guide']
+  const missing = ['CATALOG RESOURCES', 'ask-matt', 'grill-me', 'plan-review', 'release-helper', 'review-guide']
     .filter((value) => !screen.includes(value))
     .map((value) => `catalog ${JSON.stringify(value)}`);
+  if (!/I Inventory[\s\S]*B Browse resources[\s\S]*M Manage catalogs/.test(screen)) {
+    missing.push('Browse navigation shortcuts');
+  }
+  return missing;
 }
 
 async function validatePng(filePath, label) {
@@ -216,14 +214,14 @@ async function main(args) {
     session = await launchShowcaseDashboard(temporaryDirectory);
     const staged = captures.map(({ png }) => path.join(temporaryDirectory, png));
 
-    const inventoryAnsi = await waitForInkOutput(session, 'unknown · INVENTORY');
+    const inventoryAnsi = await waitForInkOutput(session, 'B Browse resources');
     await session.flushTerminal();
     const inventoryGrid = session.terminal.screen.getText();
     await fs.writeFile(staged[0], await screenshotTermlessTerminal(session.terminal));
 
     const catalogStart = session.rawBytes().length;
-    session.input.write('a');
-    const catalogAnsi = await waitForInkOutput(session, 'CATALOG RESOURCES', catalogStart);
+    session.input.write('b');
+    const catalogAnsi = await waitForInkOutput(session, 'M Manage catalogs', catalogStart);
     await session.flushTerminal();
     const catalogGrid = session.terminal.screen.getText();
     await fs.writeFile(staged[1], await screenshotTermlessTerminal(session.terminal));
