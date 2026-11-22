@@ -1,5 +1,5 @@
 import { render, useInput, useWindowSize } from 'ink';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ScanError } from '../core/inventory/checks.js';
 import type { CatalogResource } from '../core/resources/model.js';
@@ -308,6 +308,14 @@ export function Dashboard({
                 ]
               : []),
           ];
+  const scrollList = (direction: -1 | 1) => {
+    const move = (length: number, setIndex: typeof setSelectedIndex) => {
+      if (length) setIndex((current) => Math.max(0, Math.min(length - 1, Math.min(current, length - 1) + direction)));
+    };
+    if (controlSection === 'inventory') move(visibleInventory.length, setSelectedIndex);
+    else if (controlSection === 'browse') move(visibleCatalog.length, setCatalogIndex);
+    else move(userCatalogs.length, setCatalogManagementIndex);
+  };
   const controlsBase: Omit<ControlsProps, 'modalActive'> = {
     columns,
     rows,
@@ -337,6 +345,7 @@ export function Dashboard({
     actions: controlActions,
     actionIndex: controlActionIndex,
     mouse,
+    scrollList,
   };
 
   const navigateToSection = (section: DashboardSection) => {
@@ -478,7 +487,9 @@ export function Dashboard({
       setControlFocus('list');
     } else if (target.type === 'action') activateControlAction(target.action);
   };
-  mouse?.setHandler(handleMouseTarget);
+  useLayoutEffect(() => {
+    mouse?.setHandler(handleMouseTarget);
+  });
   const controlFocusOrder: DashboardControlFocus[] = [
     'tabs',
     ...(controlsBase.showSearch ? ['search' as const] : []),
@@ -816,7 +827,19 @@ export function Dashboard({
   const screenModalActive = Boolean(
     modal || versionNotice || tourStep !== null || actionPending || inspection || screenMode === 'install-options',
   );
-  mouse?.beginFrame();
+  useLayoutEffect(() => {
+    if (!mouse || !inspection) return;
+    mouse.setScrollRegions([
+      {
+        left: 1,
+        right: columns,
+        top: 1,
+        bottom: rows,
+        move: (direction) => inspector.scroll(direction, columns, rows),
+      },
+    ]);
+    return () => mouse.setScrollRegions([]);
+  });
   if (inspection) {
     baseScreen = h(InspectionScreen, {
       ...inspection,

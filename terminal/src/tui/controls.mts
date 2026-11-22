@@ -25,8 +25,13 @@ export function Controls(props: ControlsProps) {
     });
   };
   const children = ControlLayout({ controls: props, layout, onRegion });
+  React.useLayoutEffect(() => {
+    if (!props.mouse) return;
+    const owner = props.menuOverlayOnly ? 'filter-popover' : props.part ? `controls-${props.part}` : 'controls';
+    props.mouse.replace(owner, regions);
+    return () => props.mouse?.replace(owner, []);
+  });
   if (props.menuOverlayOnly) {
-    props.mouse?.replace('filter-popover', regions);
     if (!layout.menu) return null;
     return h(
       Box,
@@ -42,7 +47,6 @@ export function Controls(props: ControlsProps) {
       ...children,
     );
   }
-  props.mouse?.replace(props.part ? `controls-${props.part}` : 'controls', regions);
   return h(
     Box,
     {

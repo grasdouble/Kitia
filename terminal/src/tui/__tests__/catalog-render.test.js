@@ -1840,6 +1840,161 @@ test('detail paging hints follow list focus without taking search input', async 
   }
 });
 
+test('mouse wheel scrolls the pane under the pointer in split and stacked workspaces', async () => {
+  const resources = ['wheel-first', 'wheel-second'].map((id) => ({
+    catalog: 'sample',
+    kind: 'skill',
+    id,
+    scope: 'project',
+    managed: true,
+    status: 'current',
+    description: 'Details extend beyond the viewport so the wheel can reveal more. '.repeat(30),
+  }));
+  for (const dimensions of [
+    { columns: 120, rows: 40 },
+    { columns: 72, rows: 40 },
+  ]) {
+    const { input, frame, wait, stop } = await startInteractiveDashboard(
+      resources,
+      { catalogResources: resources },
+      dimensions,
+    );
+    try {
+      for (const heading of ['INSTALLED RESOURCES', 'CATALOG RESOURCES']) {
+        if (heading === 'CATALOG RESOURCES') input.write('2');
+        const original = await wait((next) => next.includes(heading) && next.includes('PgUp/PgDn'), heading);
+        const details = detailBodyText(original);
+        const { x, y } = renderedTextCell(original, 'SELECTION DETAILS');
+        input.write(`\u001b[<69;${x};${y}M\u001b[<65;`);
+        input.write(`${x};${y}M`);
+        const scrolled = await wait((next) => detailBodyText(next) !== details, 'details move down one line');
+        assert.match(scrolled, /›\s+wheel-first/);
+        input.write(`\u001b[<64;${x};${y}M`);
+        await wait((next) => detailBodyText(next) === details, 'one wheel step returns to the original details');
+        const list = renderedTextCell(frame(), heading);
+        input.write(`\u001b[<65;${list.x};${list.y}M`);
+        await wait((next) => /›\s+wheel-second/.test(next), 'list wheel selects the next resource');
+        input.write(`\u001b[<64;${list.x};${list.y}M`);
+        await wait((next) => /›\s+wheel-first/.test(next), 'list wheel selects the previous resource');
+      }
+    } finally {
+      await stop();
+    }
+  }
+});
+
+test('clicking a visible resource after scrolling keeps the same rows in place', async () => {
+  const resources = Array.from({ length: 60 }, (_, index) => ({
+    catalog: 'sample',
+    kind: 'skill',
+    id: `viewport-${String(index).padStart(2, '0')}`,
+    scope: 'project',
+    managed: true,
+  }));
+  const { input, wait, stop } = await startInteractiveDashboard(resources, { catalogResources: resources }, {
+    columns: 120,
+    rows: 30,
+  });
+  const listRows = (frame) =>
+    [...frame.matchAll(/^[^│\n]*│\s*›?\s*(viewport-\d+)\b/gm)].map((match) => match[1]);
+  try {
+    for (const heading of ['INSTALLED RESOURCES', 'CATALOG RESOURCES']) {
+      if (heading === 'CATALOG RESOURCES') input.write('2');
+      const initial = await wait((frame) => frame.includes(heading), heading);
+      const { x, y } = renderedTextCell(initial, heading);
+      input.write(`\u001b[<65;${x};${y}M`.repeat(32));
+      const scrolled = await wait((frame) => /›\s+viewport-32/.test(frame), 'wheel selection reaches row 32');
+      const visible = listRows(scrolled);
+      assert.notEqual(visible[0], resources[0].id, 'the initial viewport has scrolled out of view');
+      assert.equal(visible.at(-1), resources[32].id);
+
+      const clicked = visible[1];
+      assert.ok(clicked);
+      clickRenderedText(input, scrolled, clicked);
+      const selected = await wait((frame) => frame.includes(`›  ${clicked}`), 'click selects the visible row');
+      assert.deepEqual(listRows(selected), visible);
+      assert.equal(renderedTextCell(selected, clicked).y, renderedTextCell(scrolled, clicked).y);
+
+      input.write('\u001b[A');
+      const atTop = await wait((frame) => frame.includes(`›  ${visible[0]}`), 'keyboard reaches the first visible row');
+      assert.deepEqual(listRows(atTop), visible);
+      const preceding = resources[resources.findIndex(({ id }) => id === visible[0]) - 1].id;
+      input.write('\u001b[A');
+      const revealed = await wait((frame) => frame.includes(`›  ${preceding}`), 'keyboard reveals the preceding row');
+      assert.deepEqual(listRows(revealed), [preceding, ...visible.slice(0, -1)]);
+    }
+  } finally {
+    await stop();
+  }
+});
+
+test('mouse input survives reaching the list boundary and clicking the active tab', async () => {
+  const resources = ['first-wheel-row', 'last-wheel-row'].map((id) => ({ catalog: 'sample', kind: 'skill', id }));
+  const { input, wait, stop } = await startInteractiveDashboard([], { catalogResources: resources });
+  const waitForSelection = (id) =>
+    wait((frame) => frame.includes('CATALOG RESOURCES') && frame.includes(`›  ${id}`), `${id} selected`);
+  const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    input.write('2');
+    const first = await waitForSelection('first-wheel-row');
+    const { x, y } = renderedTextCell(first, 'CATALOG RESOURCES');
+    const down = `\u001b[<65;${x};${y}M`;
+    const up = `\u001b[<64;${x};${y}M`;
+    input.write(down);
+    await waitForSelection('last-wheel-row');
+    input.write(down.repeat(3));
+    await nextTurn();
+    input.write(up);
+    const backAtFirst = await waitForSelection('first-wheel-row');
+
+    clickRenderedText(input, backAtFirst, 'Browse resources 2');
+    await nextTurn();
+    clickRenderedText(input, backAtFirst, 'last-wheel-row');
+    await waitForSelection('last-wheel-row');
+    input.write(up);
+    await waitForSelection('first-wheel-row');
+  } finally {
+    await stop();
+  }
+});
+
+test('mouse wheel keeps separate page positions for the active preview panes', async () => {
+  const resource = {
+    catalog: 'sample',
+    kind: 'skill',
+    id: 'long-preview',
+    scope: 'project',
+    managed: true,
+    source_repository: 'example/sample',
+    source_path: 'skills/long-preview',
+  };
+  const { input, wait, stop } = await startInteractiveDashboard([resource], {
+    execute: async () => ({
+      code: 0,
+      previewFiles: [{ path: 'SKILL.md', content: 'A line of source text.\n'.repeat(100) }],
+      previewAuditLines: Array.from({ length: 100 }, (_, index) => `Audit finding ${index}`),
+    }),
+  });
+  try {
+    input.write('p');
+    await wait((frame) => /› SOURCE · PAGE 1\/\d+/.test(frame), 'source preview opens on page one');
+    input.write('\u001b[<65;10;12M');
+    await wait((frame) => /› SOURCE · PAGE 2\/\d+/.test(frame), 'wheel pages down in source');
+    input.write('a');
+    await wait((frame) => /› AUDIT REPORT · PAGE 1\/\d+/.test(frame), 'audit starts on its own first page');
+    input.write('\u001b[<65;10;12M');
+    await wait((frame) => /› AUDIT REPORT · PAGE 2\/\d+/.test(frame), 'wheel pages down in the active audit pane');
+    input.write('s');
+    await wait((frame) => /› SOURCE · PAGE 2\/\d+/.test(frame), 'source retains its previous page');
+    input.write('\u001b[<64;10;12M');
+    await wait((frame) => /› SOURCE · PAGE 1\/\d+/.test(frame), 'wheel pages back up in source');
+  } finally {
+    input.write('\r');
+    await wait((frame) => frame.includes('INSTALLED RESOURCES'), 'preview closes');
+    await stop();
+  }
+});
+
 test('mouse selects rendered resources and modal buttons preserve install safety', async () => {
   const candidates = ['candidate-one', 'candidate-two'].map((id) => ({
     catalog: 'sample',

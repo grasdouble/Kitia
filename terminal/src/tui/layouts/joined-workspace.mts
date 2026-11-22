@@ -5,6 +5,7 @@ import React, { type ReactNode } from 'react';
 
 import { DASHBOARD_THEME } from '../colors.js';
 import { fitText } from '../helpers.mjs';
+import type { DashboardMouseRegions, DashboardScrollRegion } from '../input-transport.mjs';
 
 export interface JoinedWorkspaceLayout {
   innerWidth: number;
@@ -76,6 +77,7 @@ export function JoinedWorkspace({
   details,
   detailsFooter,
   detailsHint,
+  scroll,
   color = DASHBOARD_THEME.semantic.accents.detailPanel,
 }: {
   width: number;
@@ -90,6 +92,12 @@ export function JoinedWorkspace({
   details: ReactNode[];
   detailsFooter?: ReactNode;
   detailsHint?: string;
+  scroll?: {
+    mouse: DashboardMouseRegions;
+    top: number;
+    list?: (direction: -1 | 1) => void;
+    details?: (direction: -1 | 1) => void;
+  };
   color?: string;
 }) {
   const horizontal = (leftWidth: number, rightWidth = 0) =>
@@ -115,6 +123,32 @@ export function JoinedWorkspace({
   const titleMetaWidth = Math.min(layout.listWidth, Math.max(12, Math.floor(layout.listWidth * 0.32)));
   const titleWidth = Math.max(1, layout.listWidth - titleMetaWidth - 1);
   const listColumnHeight = sideBySide || !showDetails ? layout.contentHeight : 3 + layout.listRows;
+  React.useLayoutEffect(() => {
+    if (!scroll) return;
+    const regions: DashboardScrollRegion[] = [];
+    const listTop = scroll.top + 1;
+    if (scroll.list) {
+      regions.push({
+        left: 3,
+        right: layout.listWidth + 2,
+        top: listTop,
+        bottom: listTop + listColumnHeight - 1,
+        move: scroll.list,
+      });
+    }
+    if (showDetails && scroll.details) {
+      const detailsTop = sideBySide ? listTop : listTop + listColumnHeight + 1;
+      regions.push({
+        left: sideBySide ? 3 + layout.listWidth + layout.dividerWidth : 3,
+        right: layout.innerWidth + 2,
+        top: detailsTop,
+        bottom: detailsTop + 1 + layout.detailsRows,
+        move: scroll.details,
+      });
+    }
+    scroll.mouse.setScrollRegions(regions);
+    return () => scroll.mouse.setScrollRegions([]);
+  });
   const listColumn = h(
     Box,
     {

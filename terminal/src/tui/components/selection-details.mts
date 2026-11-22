@@ -71,14 +71,16 @@ export function useDashboardDetailPaging({
   useEffect(() => {
     if (offset !== visibleOffset) setOffset(visibleOffset);
   }, [offset, visibleOffset]);
-  const canPage = enabled && !filterMode && !menuFilter && (focus === 'list' || focus === 'actions') && maxOffset > 0;
+  const canScroll = enabled && !menuFilter && maxOffset > 0;
+  const canPage = canScroll && !filterMode && (focus === 'list' || focus === 'actions');
+  const move = (delta: number) => setOffset((current) => Math.max(0, Math.min(maxOffset, current + delta)));
   useInput(
     (input, key) => {
       const step = Math.max(1, viewport - 1);
       if (key.pageUp || input === '\u001b[5~') {
-        setOffset((current) => Math.max(0, Math.min(current, maxOffset) - step));
+        move(-step);
       } else if (key.pageDown || input === '\u001b[6~') {
-        setOffset((current) => Math.min(maxOffset, Math.min(current, maxOffset) + step));
+        move(step);
       }
     },
     { isActive: canPage },
@@ -87,5 +89,6 @@ export function useDashboardDetailPaging({
     visibleLines: lines.slice(visibleOffset, visibleOffset + Math.max(0, viewport)),
     isClipped: maxOffset > 0,
     canPage,
+    scroll: canScroll ? move : undefined,
   };
 }

@@ -12,7 +12,7 @@ import { detailField } from '../components/detail-fields.mjs';
 import { ResourceBrowserChrome, resourceBrowserPlan } from '../components/resource-browser.mjs';
 import { SelectionDetails, useDashboardDetailPaging } from '../components/selection-details.mjs';
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
-import { resourceTableRows, resourceTableWindow } from '../components/table/resource-table.mjs';
+import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
 import type { InventoryCatalogConfiguration } from '../helpers.mjs';
 import { filterCatalogResources, fitText, inventoryCatalogLabels, tableLine } from '../helpers.mjs';
@@ -132,7 +132,7 @@ export function CatalogScreen({
         },
         { contentWidth: compactTable ? 8 : 10, minWidth: compactTable ? 4 : 6, growWeight: 1 },
       ]);
-  const tableWindow = resourceTableWindow<CatalogResource>(visible, activeIndex, workspaceLayout.listRows);
+  const tableWindow = useResourceTableWindow(visible, activeIndex, workspaceLayout.listRows);
   const [markerWidth, resourceWidth, kindWidth, catalogWidth, installedWidth] = widths;
   const tableHeader = ultraCompactTable
     ? fitText('RESOURCE', listContentWidth)
@@ -250,22 +250,21 @@ export function CatalogScreen({
   });
   const actionButtons = actionRows ? ActionButtons({ controls: controlsState, width: detailsContentWidth }) : null;
   const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
-  controls.mouse?.replace(
-    'browse-rows',
-    modalActive || !workspaceHeight
-      ? []
-      : tableWindow.items.map((_, index) => ({
-          left: 3,
-          right: workspaceLayout.listWidth + 2,
-          top: firstResourceRow + index,
-          bottom: firstResourceRow + index,
-          target: {
-            type: 'row' as const,
-            screen: 'browse' as const,
-            index: tableWindow.first + index,
-          },
-        })),
-  );
+  React.useLayoutEffect(() => {
+    const mouse = controls.mouse;
+    if (!mouse || modalActive || !workspaceHeight) return;
+    mouse.replace(
+      'browse-rows',
+      tableWindow.items.map((_, index) => ({
+        left: 3,
+        right: workspaceLayout.listWidth + 2,
+        top: firstResourceRow + index,
+        bottom: firstResourceRow + index,
+        target: { type: 'row', screen: 'browse', index: tableWindow.first + index },
+      })),
+    );
+    return () => mouse.replace('browse-rows', []);
+  });
   return h(
     Box,
     { width: columns, height: rows, flexDirection: 'column', paddingX: 1, position: 'relative' },
@@ -288,6 +287,10 @@ export function CatalogScreen({
             details: detailPaging.visibleLines,
             detailsFooter: actionButtons,
             detailsHint: detailPaging.canPage ? 'PgUp/PgDn' : undefined,
+            scroll:
+              controls.mouse && !modalActive && !controls.menuFilter
+                ? { mouse: controls.mouse, top: workspaceTop, list: controls.scrollList, details: detailPaging.scroll }
+                : undefined,
             color:
               tourStep === 1
                 ? DASHBOARD_THEME.semantic.inventoryStatus.attention

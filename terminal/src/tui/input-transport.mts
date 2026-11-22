@@ -8,6 +8,8 @@ export type DashboardSection = 'inventory' | 'browse' | 'catalogs';
 export type DashboardFilter = 'catalog' | 'kind' | 'license';
 export type DashboardControlFocus = 'tabs' | 'search' | DashboardFilter | 'actions' | 'list';
 
+type ScrollDirection = -1 | 1;
+
 export type DashboardMouseTarget =
   | { type: 'section'; section: DashboardSection }
   | { type: 'focus'; focus: DashboardControlFocus }
@@ -19,30 +21,41 @@ export type DashboardMouseTarget =
   | { type: 'row'; screen: DashboardSection; index: number }
   | { type: 'action'; action: string };
 
-export interface DashboardMouseRegion {
+interface MouseBounds {
   left: number;
   right: number;
   top: number;
   bottom: number;
+}
+
+export interface DashboardMouseRegion extends MouseBounds {
   target: DashboardMouseTarget;
+}
+
+export interface DashboardScrollRegion extends MouseBounds {
+  move: (direction: ScrollDirection) => void;
 }
 
 export interface DashboardMouseReport {
   x: number;
   y: number;
-  button: number;
+  button: 0 | 64 | 65;
   modifiers: { shift: boolean; alt: boolean; ctrl: boolean };
 }
 export class DashboardMouseRegions {
   private readonly owners = new Map<string, DashboardMouseRegion[]>();
+  private scrollRegions: DashboardScrollRegion[] = [];
   private handler?: (target: DashboardMouseTarget) => void;
 
-  beginFrame() {
-    this.owners.clear();
-  }
+  private clickPending = false;
 
   replace(owner: string, regions: DashboardMouseRegion[]) {
-    this.owners.set(owner, regions);
+    if (regions.length) this.owners.set(owner, regions);
+    else this.owners.delete(owner);
+  }
+
+  setScrollRegions(regions: DashboardScrollRegion[]) {
+    this.scrollRegions = regions;
   }
 
   setHandler(handler: (target: DashboardMouseTarget) => void) {
@@ -52,30 +65,47 @@ export class DashboardMouseRegions {
   getRegions() {
     return [...this.owners.values()].flat();
   }
+
+  private dispatchClick(target: DashboardMouseTarget) {
+    if (target.type !== 'row') {
+      // One action per input burst, even if React has not committed the next screen yet.
+      this.clickPending = true;
+      queueMicrotask(() => {
+        this.clickPending = false;
+      });
+    }
+    this.handler?.(target);
+  }
+
   dispatch({ x, y, button, modifiers }: DashboardMouseReport) {
-    // Shift-click is a common terminal text-selection override. Never turn a
-    // modified report into an application click or feed it to text inputs.
-    if (button !== 0 || modifiers.shift || modifiers.alt || modifiers.ctrl) return;
+    // Modified reports are reserved for terminal shortcuts such as text selection.
+    if (modifiers.shift || modifiers.alt || modifiers.ctrl) return;
+    const contains = ({ left, right, top, bottom }: MouseBounds) => x >= left && x <= right && y >= top && y <= bottom;
+    if (button === 64 || button === 65) {
+      this.scrollRegions.find(contains)?.move(button === 64 ? -1 : 1);
+      return;
+    }
+    if (this.clickPending) return;
+    const modal = this.owners.get('modal')?.find(contains);
+    if (modal) {
+      this.dispatchClick(modal.target);
+      return;
+    }
     for (const regions of this.owners.values()) {
       for (const region of regions) {
         if (
           (region.target.type === 'filter-option' || region.target.type === 'filter-dismiss') &&
-          x >= region.left &&
-          x <= region.right &&
-          y >= region.top &&
-          y <= region.bottom
+          contains(region)
         ) {
-          this.owners.clear();
-          this.handler?.(region.target);
+          this.dispatchClick(region.target);
           return;
         }
       }
     }
     for (const regions of this.owners.values()) {
-      const region = regions.find(({ left, right, top, bottom }) => x >= left && x <= right && y >= top && y <= bottom);
+      const region = regions.find(contains);
       if (region) {
-        if (region.target.type !== 'row') this.owners.clear();
-        this.handler?.(region.target);
+        this.dispatchClick(region.target);
         return;
       }
     }
@@ -144,12 +174,12 @@ function parseMouseReports(input: string, onMouse: (report: DashboardMouseReport
       const x = Number(match[2]);
       const y = Number(match[3]);
       const modifierBits = button & 28;
-      const isMotion = (button & 32) !== 0;
-      const isWheel = (button & 64) !== 0;
-      const leftButton = (button & 3) === 0 || (button & 3) === 3;
-      if (match[4] === 'm' && x > 0 && y > 0 && leftButton && !isMotion && !isWheel) {
+      const baseButton = button & ~28;
+      const leftRelease = match[4] === 'm' && (baseButton === 0 || baseButton === 3);
+      const wheelPress = match[4] === 'M' && (baseButton === 64 || baseButton === 65);
+      if (x > 0 && y > 0 && (leftRelease || wheelPress)) {
         onMouse({
-          button: 0,
+          button: wheelPress ? baseButton : 0,
           x,
           y,
           modifiers: {

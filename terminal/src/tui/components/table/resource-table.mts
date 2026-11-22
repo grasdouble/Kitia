@@ -1,7 +1,7 @@
 'use strict';
 
 import { Text } from 'ink';
-import React, { type ReactNode } from 'react';
+import React, { type ReactNode, useLayoutEffect, useRef } from 'react';
 
 import { DASHBOARD_THEME } from '../../colors.js';
 
@@ -12,9 +12,26 @@ export interface ResourceTableWindow<T> {
   items: T[];
 }
 
-export function resourceTableWindow<T>(items: T[], selectedIndex: number, viewport: number): ResourceTableWindow<T> {
-  const first = Math.max(0, Math.min(selectedIndex - viewport + 1, items.length - viewport));
+export function resourceTableWindow<T>(
+  items: T[],
+  selectedIndex: number,
+  viewport: number,
+  previousFirst = 0,
+): ResourceTableWindow<T> {
+  const first = Math.max(
+    0,
+    Math.min(Math.max(previousFirst, selectedIndex - viewport + 1), selectedIndex, items.length - viewport),
+  );
   return { first, items: items.slice(first, first + viewport) };
+}
+
+export function useResourceTableWindow<T>(items: T[], selectedIndex: number, viewport: number) {
+  const previousFirst = useRef(0);
+  const window = resourceTableWindow(items, selectedIndex, viewport, previousFirst.current);
+  useLayoutEffect(() => {
+    previousFirst.current = window.first;
+  }, [window.first]);
+  return window;
 }
 
 // ResourceTableRow: one text row; selected rows use the selected foreground/surface.

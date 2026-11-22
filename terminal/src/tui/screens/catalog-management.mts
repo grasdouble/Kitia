@@ -15,6 +15,7 @@ import {
 import { InventorySummaryCards } from '../components/inventory-summary-cards.mjs';
 import { Panel } from '../components/panel.mjs';
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
+import { useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
 import { fitText } from '../helpers.mjs';
 import { DASHBOARD_HEADER_ROWS } from '../sections/header.mjs';
@@ -152,8 +153,7 @@ export function CatalogManagementScreen({
   const fixedRows = DASHBOARD_HEADER_ROWS + controlsLayout.height + summaryRows + headingActionRows + shortcutRows + 2;
   const availableCardRows = Math.max(cardBaseRows + 1, rows - fixedRows - selectedExtraRows);
   const viewport = Math.max(1, Math.floor(availableCardRows / (cardBaseRows + 1)));
-  const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
-  const page = catalogs.slice(first, first + viewport);
+  const { first, items: page } = useResourceTableWindow(catalogs, activeIndex, viewport);
   const rowRegions: NonNullable<Parameters<NonNullable<ControlsProps['mouse']>['replace']>[1]> = [];
   let cardTop = DASHBOARD_HEADER_ROWS + controlsLayout.height + summaryRows + 2 + headingActionRows + 1;
   const cardNodes = page.map((catalog, index) => {
@@ -232,6 +232,19 @@ export function CatalogManagementScreen({
       mouse.replace('catalog-rows', []);
       return;
     }
+    const firstCardRegion = rowRegions[0];
+    const lastCardRegion = rowRegions.at(-1);
+    if (controls.scrollList && firstCardRegion && lastCardRegion) {
+      mouse.setScrollRegions([
+        {
+          left: firstCardRegion.left,
+          right: firstCardRegion.right,
+          top: firstCardRegion.top,
+          bottom: Math.min(rows, lastCardRegion.bottom),
+          move: controls.scrollList,
+        },
+      ]);
+    }
     const actionRanges = mouse
       .getRegions()
       .filter(({ target }) => target.type === 'action' && catalogCardActionIds.has(target.action))
@@ -256,7 +269,11 @@ export function CatalogManagementScreen({
       selectableRegions.push(...available.map((range) => ({ ...region, ...range })));
     }
     mouse.replace('catalog-rows', selectableRegions);
-  }, [controls.mouse, modalActive, rowRegions]);
+    return () => {
+      mouse.replace('catalog-rows', []);
+      mouse.setScrollRegions([]);
+    };
+  });
   const heading = h(
     Box,
     { flexDirection: 'column', width: columns - 2, marginTop: 1 },

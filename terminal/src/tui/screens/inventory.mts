@@ -13,7 +13,7 @@ import { detailField, detailLocations } from '../components/detail-fields.mjs';
 import { ResourceBrowserChrome, resourceBrowserPlan } from '../components/resource-browser.mjs';
 import { SelectionDetails, useDashboardDetailPaging } from '../components/selection-details.mjs';
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
-import { resourceTableRows, resourceTableWindow } from '../components/table/resource-table.mjs';
+import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
 import type { InventoryCatalogConfiguration } from '../helpers.mjs';
 import {
@@ -180,7 +180,7 @@ export function InventoryScreen({
         ['SCOPE', scopeWidth],
         ['STATUS', statusWidth],
       ]);
-  const tableWindow = resourceTableWindow<CatalogResource>(visible, activeIndex, workspaceLayout.listRows);
+  const tableWindow = useResourceTableWindow(visible, activeIndex, workspaceLayout.listRows);
   const tableRows = resourceTableRows({
     window: tableWindow,
     selectedIndex: activeIndex,
@@ -332,22 +332,21 @@ export function InventoryScreen({
   });
   const actionButtons = actionRows ? ActionButtons({ controls: controlsState, width: detailsContentWidth }) : null;
   const firstResourceRow = workspaceTop + workspaceLayout.firstResourceRowOffset;
-  controls.mouse?.replace(
-    'inventory-rows',
-    modalActive || !workspaceHeight
-      ? []
-      : tableWindow.items.map((_, index) => ({
-          left: 3,
-          right: workspaceLayout.listWidth + 2,
-          top: firstResourceRow + index,
-          bottom: firstResourceRow + index,
-          target: {
-            type: 'row' as const,
-            screen: 'inventory' as const,
-            index: tableWindow.first + index,
-          },
-        })),
-  );
+  React.useLayoutEffect(() => {
+    const mouse = controls.mouse;
+    if (!mouse || modalActive || !workspaceHeight) return;
+    mouse.replace(
+      'inventory-rows',
+      tableWindow.items.map((_, index) => ({
+        left: 3,
+        right: workspaceLayout.listWidth + 2,
+        top: firstResourceRow + index,
+        bottom: firstResourceRow + index,
+        target: { type: 'row', screen: 'inventory', index: tableWindow.first + index },
+      })),
+    );
+    return () => mouse.replace('inventory-rows', []);
+  });
   return h(
     Box,
     { width: columns, height: rows, flexDirection: 'column', paddingX: 1, position: 'relative' },
@@ -371,6 +370,10 @@ export function InventoryScreen({
             details: detailPaging.visibleLines,
             detailsFooter: actionButtons,
             detailsHint: detailPaging.canPage ? 'PgUp/PgDn' : undefined,
+            scroll:
+              controls.mouse && !modalActive && !controls.menuFilter
+                ? { mouse: controls.mouse, top: workspaceTop, list: controls.scrollList, details: detailPaging.scroll }
+                : undefined,
             color:
               tourStep === 0
                 ? DASHBOARD_THEME.semantic.inventoryStatus.attention

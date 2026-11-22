@@ -34,6 +34,15 @@ export function useInspection() {
         : {}),
     });
   };
+  const scroll = (direction: -1 | 1, columns: number, rows: number) => {
+    setInspection((current) => {
+      if (!current) return current;
+      const field = current.focus === 'audit' ? 'auditPage' : current.focus === 'tree' ? 'treePage' : 'page';
+      const pageCount = inspectionPageCount({ ...current, columns, rows });
+      const next = Math.max(0, Math.min(pageCount - 1, current[field] + direction));
+      return next === current[field] ? current : { ...current, [field]: next };
+    });
+  };
   const handleInput = (input: string, key: Key, columns: number, rows: number) => {
     const character = input.toLocaleLowerCase();
     if (key.tab || character === 's' || character === 'a' || character === 't') {
@@ -50,19 +59,10 @@ export function useInspection() {
         return { ...current, focus };
       });
     } else if (key.leftArrow || key.pageUp || key.rightArrow || key.pageDown) {
-      setInspection((current) => {
-        if (!current) return current;
-        const field = current.focus === 'audit' ? 'auditPage' : current.focus === 'tree' ? 'treePage' : 'page';
-        const pageCount = inspectionPageCount({ ...current, columns, rows });
-        const delta = key.leftArrow || key.pageUp ? -1 : 1;
-        return {
-          ...current,
-          [field]: Math.max(0, Math.min(pageCount - 1, current[field] + delta)),
-        };
-      });
+      scroll(key.leftArrow || key.pageUp ? -1 : 1, columns, rows);
     } else if (key.return || key.escape || input === ' ') {
       setInspection(null);
     }
   };
-  return { inspection, open, handleInput };
+  return { inspection, open, handleInput, scroll };
 }

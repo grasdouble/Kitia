@@ -48,6 +48,7 @@ export interface ControlsProps {
   actionsInToolbar?: boolean;
   actionIndex?: number;
   mouse?: DashboardMouseRegions;
+  scrollList?: (direction: -1 | 1) => void;
   part?: DashboardControlPart;
   /** Arrange search and filter controls on one row when they fit. */
   layout?: DashboardControlLayoutMode;
