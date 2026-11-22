@@ -49,6 +49,8 @@ Only the demo's operation handlers use in-memory fixtures: lifecycle actions, so
 
 Use the [dashboard-demo-maintenance skill](https://github.com/grasdouble/Kitia/blob/main/.agents/skills/dashboard-demo-maintenance/SKILL.md) when changing the demo or TUI behavior that affects it. It covers shared-renderer parity, fixture contracts, browser lifecycle, route preservation, and focused verification.
 
+The browser demo does not check the package registry or offer Kitia self-update. Verify that flow in the native dashboard with an isolated global npm or pnpm installation.
+
 ## Versioning and releases
 
 Use [Changesets](https://github.com/changesets/changesets) for user-facing package changes:

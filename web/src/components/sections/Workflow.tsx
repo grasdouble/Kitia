@@ -23,6 +23,11 @@ const steps = [
     'Install, update, or uninstall selected resources. Kitia protects files it does not manage and asks before dashboard actions.',
     'A install · U update · Delete uninstall',
   ],
+  [
+    'Keep Kitia up to date',
+    'For global npm or pnpm installs, run this command and confirm, or choose Update when the dashboard announces a new version. Restart Kitia after updating.',
+    'kitia self-update',
+  ],
 ] as const;
 
 export function Workflow() {

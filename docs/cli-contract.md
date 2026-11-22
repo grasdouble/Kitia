@@ -21,8 +21,10 @@ not machine interfaces.
 On interactive dashboard launch, Kitia checks npm for a newer stable release.
 The dashboard header shows the Kitia mascot, wordmark, and installed version.
 Section names and counts remain in the dashboard tabs and workspaces. A newer
-release is announced in a separate modal; failed checks are silent. Other
-commands and non-interactive launches skip the check.
+release is announced in a separate modal; failed checks are silent. On matching
+global npm or pnpm installations, choose **Update** to close the dashboard and
+run the package manager. Choose **Later** to keep using the installed version.
+Other commands and non-interactive dashboard launches skip the notice.
 
 | Command family | Contract |
 |---|---|
@@ -31,6 +33,7 @@ commands and non-interactive launches skip the check.
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
 | `versions <kind> <id>` | List up to 500 newest GitHub commits affecting a skill entrypoint or an agent/instruction Markdown file, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
+| `self-update [--yes]` | Install the latest Kitia release using the package manager that owns the running global npm or pnpm installation; confirm first unless `--yes` is passed |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
 | `validate` | Strict validation of all catalog sources |
@@ -43,6 +46,13 @@ Aggregate discovery loads each catalog index independently, retaining healthy
 results and reporting warnings for only unavailable or invalid catalogs.
 Targeted discovery loads only the selected index; explicit `validate` remains
 strict across the complete configured set.
+
+`kitia self-update` leaves local dependencies, one-off caches, linked
+checkouts, and installations of unknown or ambiguous origin untouched.
+Confirmation is required; pass `--yes` when no terminal is attached. If you
+run Kitia without installing it, use `npx --yes @grasdouble/kitia@latest` or
+`pnpm dlx @grasdouble/kitia@latest` instead. Restart Kitia after updating.
+This command updates Kitia itself, not installed skills, agents, or instructions.
 
 
 

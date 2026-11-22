@@ -34,6 +34,7 @@ import { formatAuditLines } from './inspection-format.js';
 import { loadCommandCatalogs } from './loading.js';
 import type { CliReport } from './report.js';
 import { formatSourceResource } from './resource-format.js';
+import { prepareSelfUpdate, runSelfUpdate } from './self-update.js';
 
 type LoadedCatalogs = { sourceResources: CatalogResource[]; unavailable: string[] };
 type DashboardWorkerMessage<Result> =
@@ -168,6 +169,9 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
     printHelp();
     return 0;
   }
+  if (options.command === 'self-update') {
+    return runSelfUpdate(Boolean(options.yes), Boolean(options.nonInteractive));
+  }
 
   if (options.command === 'collection') {
     if (options.action === 'export') {
@@ -289,9 +293,20 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
         const catalogs: SourceConfiguration[] = loadUserSourceConfiguration();
         return catalogs.map(({ name, repository, mode, entries }) => ({ name, repository, mode, entries }));
       };
+      let applySelfUpdate: (() => Promise<void>) | undefined;
       const dashboardActions: DashboardActions = {
         showOnboarding: options.showOnboarding,
         catalogResources: sourceResources,
+        prepareSelfUpdate: async () => {
+          const update = await prepareSelfUpdate();
+          if (!update) return null;
+          return {
+            manager: update.manager,
+            request: () => {
+              applySelfUpdate = update.apply;
+            },
+          };
+        },
         addCatalog: (request) => runDashboardWorker<CatalogMutationResult>({ task: 'catalog-add', request }),
         updateCatalog: (originalName, request) =>
           runDashboardWorker<CatalogMutationResult>({ task: 'catalog-update', originalName, request }),
@@ -331,6 +346,10 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
         result.errors,
         dashboardActions,
       );
+      if (completed && applySelfUpdate) {
+        await applySelfUpdate();
+        return 0;
+      }
       return unavailable.length || result.errors.length || !completed ? 1 : 0;
     }
     console.log(renderInstalledResources(rows, process.stdout, result.errors));

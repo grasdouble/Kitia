@@ -1,5 +1,6 @@
 import { DASHBOARD_THEME } from '../../colors.js';
-import { modalFrame } from '../../modals.mjs';
+import type { DashboardSelfUpdate } from '../../contracts.js';
+import { choiceGroup, modalFrame } from '../../modals.mjs';
 const { semantic } = DASHBOARD_THEME;
 const MODAL_FOREGROUND = semantic.modal.foreground;
 
@@ -79,6 +80,8 @@ export function versionAvailableModal(
   availableVersion: string,
   changelogUrl: string,
   columns: number,
+  selfUpdate: DashboardSelfUpdate | null | undefined,
+  selected: number,
 ) {
   return modalFrame(
     'NEW VERSION AVAILABLE',
@@ -91,7 +94,18 @@ export function versionAvailableModal(
       'Changelog for this version:',
       changelogUrl,
       '',
-      'ENTER / ESC CLOSE',
+      ...(selfUpdate
+        ? [
+            `Update the global installation with ${selfUpdate.manager}, then restart Kitia.`,
+            choiceGroup('', ['Later', 'Update'], selected),
+            'U UPDATE | ENTER SELECT | ESC CLOSE',
+          ]
+        : [
+            selfUpdate === undefined
+              ? 'Checking the global installation…'
+              : 'If self-update is unavailable, use your original installer or rerun npx or pnpm dlx with @grasdouble/kitia@latest.',
+            'ENTER / ESC CLOSE',
+          ]),
     ],
     columns,
     semantic.accents.success,

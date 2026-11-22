@@ -26,11 +26,11 @@ test('DashboardHeader shows the mascot, wordmark and version at wide and compact
     );
     assert.ok(frame.includes('(=o.o=)'));
     assert.ok(frame.includes(title));
-    assert.match(frame, /2\.0\.0[ \t]*$/m);
+    assert.match(frame, /Version 2\.0\.0[ \t]*$/m);
     const lines = frame.trimEnd().split(/\r?\n/);
     if (columns === 80) {
       assert.equal(lines.filter((line) => /[█▀▄]/.test(line)).length, 4);
-      assert.match(lines[DASHBOARD_HEADER_ROWS - 1], /2\.0\.0[ \t]*$/);
+      assert.match(lines[DASHBOARD_HEADER_ROWS - 1], /Version 2\.0\.0[ \t]*$/);
     }
   }
 });

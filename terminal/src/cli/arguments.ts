@@ -52,6 +52,7 @@ export interface CliOptions {
   onProgress?: (message: string) => void;
   spawnProcess?: typeof spawn;
   showOnboarding?: boolean;
+  yes?: boolean;
   output?: CliOutput;
 }
 export interface CliOutput {
@@ -236,6 +237,11 @@ function parseCommandArguments(args: string[]): ParsedCliOptions {
     if (remaining.length) throw new CatalogError('Usage: kitia onboarding');
     return { command, target: '.' };
   }
+  if (command === 'self-update') {
+    if (remaining.length === 0) return { command };
+    if (remaining.length === 1 && remaining[0] === '--yes') return { command, yes: true };
+    throw new CatalogError('Usage: kitia self-update [--yes]');
+  }
   if (command === 'validate') {
     if (remaining.length) throw new CatalogError('validate does not accept arguments');
     return { command };
@@ -383,6 +389,7 @@ function printHelp() {
   console.log(`Usage:
   Kitia onboarding                 Show the getting-started guide again
   Kitia [dashboard] [--non-interactive] (dashboard is the default command)
+  Kitia self-update [--yes]         Update the current global npm or pnpm installation
   Kitia list [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]
   Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]
   Kitia show [<kind>] <id>

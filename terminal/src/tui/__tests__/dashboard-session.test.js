@@ -394,7 +394,7 @@ test('dashboard revision picker applies a selected full SHA to a confirmed instr
   }
 });
 
-test('dashboard shows the installed and available versions with the changelog link', async () => {
+async function exerciseVersionNotice(decision) {
   const { PassThrough } = require('node:stream');
   const { runDashboard } = await import('../dashboard.mts');
   const previousVersion = process.env.KITIA_INSTALLED_VERSION;
@@ -415,55 +415,61 @@ test('dashboard shows the installed and available versions with the changelog li
     rendered += chunk.toString();
   });
   let done;
-  const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+  let requests = 0;
   try {
-    done = runDashboard([], input, output);
-    await waitForOutput(
+    done = runDashboard([], input, output, [], {
+      prepareSelfUpdate: async () => ({
+        manager: 'pnpm',
+        request: () => {
+          requests += 1;
+        },
+      }),
+    });
+    const frame = await waitForDashboardFrame(
       output,
-      plain,
-      (text) => text.includes('NEW VERSION AVAILABLE'),
-      'the available-version notice',
-      2_000,
+      () => rendered,
+      (text) => text.includes('NEW VERSION AVAILABLE') && text.includes('UPDATE │'),
+      'the available-version notice with an update button',
     );
-    assert.match(plain(), /NEW VERSION AVAILABLE/);
-    assert.match(selectedDetailsFrame(rendered).split('\n').slice(0, 5).join('\n'), /\s1\.0\.0[ \t]*$/m);
-    assert.match(plain(), /Installed: 1\.0\.0/);
-    assert.match(plain(), /Available: 1\.0\.2/);
-    assert.match(plain(), /github\.com\/grasdouble\/Kitia\/blob\/main\/terminal\/CHANGELOG\.md#102/);
+    assert.match(frame.split('\n').slice(0, 5).join('\n'), /Version 1\.0\.0[ \t]*$/m);
+    assert.match(frame, /Installed: 1\.0\.0/);
+    assert.match(frame, /Available: 1\.0\.2/);
+    assert.match(frame, /github\.com\/grasdouble\/Kitia\/blob\/main\/terminal\/CHANGELOG\.md#102/);
+    assert.match(frame, /global installation with pnpm/);
+    assert.equal(requests, 0);
+    if (decision === 'later') {
+      input.write('\r');
+      await waitForDashboardFrame(
+        output,
+        () => rendered,
+        (text) => inventoryFrameReady(text) && !text.includes('NEW VERSION AVAILABLE'),
+        'inventory after choosing Later',
+      );
+      assert.equal(requests, 0);
+      input.write('q');
+    } else if (decision === 'keyboard') {
+      input.write('u');
+    } else {
+      const lines = frame.split('\n');
+      const row = lines.findIndex((line) => line.includes('UPDATE │'));
+      const column = lines[row].indexOf('UPDATE │');
+      input.write(`\x1b[<0;${column + 1};${row + 1}M\x1b[<0;${column + 1};${row + 1}m`);
+    }
+    assert.equal(await done, true);
+    assert.equal(requests, decision === 'later' ? 0 : 1);
   } finally {
+    input.destroy();
     try {
-      if (done) {
-        const previousOutputLength = plain().length;
-        input.write('\x1b');
-        try {
-          await waitForOutput(
-            output,
-            () => plain().slice(previousOutputLength),
-            (text) => text.includes('INSTALLED RESOURCES'),
-            'inventory after Escape',
-            2_000,
-          );
-        } catch {
-          // Keep cleanup bounded if the dashboard cannot render its inventory screen.
-        }
-        input.write('q');
-        let cleanupTimeout;
-        await Promise.race([
-          done.then(
-            () => {},
-            () => {},
-          ),
-          new Promise((resolve) => {
-            cleanupTimeout = setTimeout(resolve, 2_000);
-          }),
-        ]).finally(() => clearTimeout(cleanupTimeout));
-      }
+      await done;
     } finally {
-      input.destroy();
       output.destroy();
       if (previousVersion === undefined) delete process.env.KITIA_INSTALLED_VERSION;
       else process.env.KITIA_INSTALLED_VERSION = previousVersion;
       global.fetch = previousFetch;
     }
   }
-});
+}
+
+for (const decision of ['later', 'keyboard', 'mouse']) {
+  test(`dashboard version notice handles ${decision}`, { timeout: 8_000 }, () => exerciseVersionNotice(decision));
+}

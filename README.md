@@ -22,6 +22,12 @@ After the dry run, remove `--dry-run` to install. Global installation adds the `
 
 By default, Kitia installs to the current project for Copilot. Choose `--tool claude`, `--tool copilot`, or `--tool both`; skills can also be installed for your user account with `--scope user`.
 
+## Update Kitia
+
+If you installed Kitia globally with npm or pnpm, run `kitia self-update` and confirm, or choose **Update** when the dashboard announces a new version. Restart Kitia after the update.
+
+For one-off runs, use `npx --yes @grasdouble/kitia@latest` or `pnpm dlx @grasdouble/kitia@latest` instead. For other installations, update Kitia with the tool you used to install it.
+
 ## Manage catalogs and resources
 
 Run `kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository. Without a global install, run `npx --yes @grasdouble/kitia dashboard` instead.

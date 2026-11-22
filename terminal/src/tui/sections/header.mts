@@ -32,11 +32,12 @@ export function dashboardCatArt(activity: DashboardCatActivity, frame: number): 
 }
 
 const h = React.createElement;
+const brandGap = 1;
 const kitiaWordmark = [
-  '█  ▄▀  ▀█▀  ▀▀█▀▀  ▀█▀  ▄▀▀▀▄',
-  '█▄▀     █     █     █   █▄▄▄█',
-  '█ ▀▄    █     █     █   █   █',
-  '▀   ▀  ▀▀▀    ▀    ▀▀▀  ▀   ▀',
+  '██ ▄█▀  ████  ██████  ████  ▄█▀▀█▄',
+  '███▀     ██     ██     ██   ██▄▄██',
+  '██▀█▄   ▄██▄    ██    ▄██▄  ██▀▀██',
+  '▀▀  ▀▀  ▀▀▀▀    ▀▀    ▀▀▀▀  ▀▀  ▀▀',
 ];
 const titleColorStops = DASHBOARD_THEME.titleGradientStops;
 const titleColors = Array.from({ length: 96 }, (_, index) => {
@@ -81,7 +82,7 @@ function AnimatedTitle({ width, versionLabel, phase }: { width: number; versionL
             fitText('KITIA', width),
           ),
         ]),
-    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary }, fitText(versionLabel, width)),
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary }, fitText(`Version ${versionLabel}`, width)),
   );
 }
 
@@ -106,7 +107,7 @@ function AnimatedBrand({
     { flexDirection: 'row', height: DASHBOARD_HEADER_ROWS, flexShrink: 0 },
     h(
       Box,
-      { width: catWidth, marginRight: 2, flexDirection: 'column' },
+      { width: catWidth, marginRight: brandGap, flexDirection: 'column' },
       ...art.map((line, row) =>
         h(
           Text,
@@ -135,7 +136,7 @@ export function DashboardHeader({ versionLabel, columns }: { versionLabel: strin
   });
   const availableWidth = Math.max(1, columns - 2);
   const catWidth = Math.min(18, Math.max(1, availableWidth - 3));
-  const textWidth = Math.max(1, availableWidth - catWidth - 2);
+  const textWidth = Math.max(1, availableWidth - catWidth - brandGap);
   useEffect(() => {
     let activityTimer: ReturnType<typeof setTimeout>;
     let frameTimer: ReturnType<typeof setInterval> | undefined;

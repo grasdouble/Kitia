@@ -12,4 +12,4 @@ Redesign Inventory, Browse, and Catalogs around compact summaries and focused te
     - Page through complete Inventory and Browse metadata with PageUp/PageDown when details exceed the terminal viewport, while keeping contextual actions reachable.
     - Show keyboard hints in a bordered Shortcuts panel on Inventory, Browse, and Catalogs.
     - Manage connected catalogs through selectable cards with contextual Add, Edit, Refresh, and Remove actions.
-    - Keep the header focused on the animated mascot, a taller KITIA wordmark, and the installed version. Section counts and filters stay in their own controls.
+    - Keep the header focused on the animated mascot, a bolder four-line KITIA wordmark, and a labeled installed version (for example, `Version 2.0.0`). Section counts and filters stay in their own controls.

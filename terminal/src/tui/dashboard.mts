@@ -8,7 +8,7 @@ import type {
   DashboardControlFilter,
   ControlsProps,
 } from './components/controls/control-layout-plan.mjs';
-import type { DashboardActions } from './contracts.js';
+import type { DashboardActions, DashboardSelfUpdate } from './contracts.js';
 import { useDashboardActivity } from './features/activity.mjs';
 import { useCatalogManagement } from './features/catalog-management/workflow.mjs';
 import { useInspection } from './features/inspection/workflow.mjs';
@@ -64,12 +64,20 @@ export function Dashboard({
   const installedVersion = process.env.KITIA_INSTALLED_VERSION || 'unknown';
   const versionLabel = suppliedVersion ?? installedVersion;
   const [versionNotice, setVersionNotice] = useState<VersionNotice | null>(null);
+  const [selfUpdate, setSelfUpdate] = useState<DashboardSelfUpdate | null>();
+  const [selfUpdateChoice, setSelfUpdateChoice] = useState(0);
+  const prepareSelfUpdate = actions.prepareSelfUpdate;
   useEffect(() => {
     if (installedVersion === 'unknown') return;
     let active = true;
     void checkInstalledVersion(installedVersion)
-      .then((notice) => {
-        if (active) setVersionNotice(notice);
+      .then(async (notice) => {
+        if (!active || !notice) return;
+        setVersionNotice(notice);
+        if (prepareSelfUpdate) {
+          const offer = await prepareSelfUpdate().catch(() => null);
+          if (active) setSelfUpdate(offer);
+        }
       })
       .catch(() => {
         // The local version remains visible when the registry is unavailable.
@@ -77,7 +85,7 @@ export function Dashboard({
     return () => {
       active = false;
     };
-  }, [installedVersion]);
+  }, [installedVersion, prepareSelfUpdate]);
   const [screenMode, setScreenMode] = useState('inventory');
   const [query, setQuery] = useState('');
   const [filterMode, setFilterMode] = useState(false);
@@ -418,9 +426,18 @@ export function Dashboard({
     if (controlSection !== 'catalogs') return;
     catalogs.activateAction(action);
   };
+  const chooseVersionUpdate = (index: number) => {
+    if (index === 1 && selfUpdate) {
+      selfUpdate.request();
+      onFinish(true);
+    } else {
+      setVersionNotice(null);
+    }
+  };
   const handleMouseTarget = (target: DashboardMouseTarget) => {
     if (target.type === 'modal-choice') {
-      if (confirmation) chooseConfirmation(target.index);
+      if (versionNotice && selfUpdate) chooseVersionUpdate(target.index);
+      else if (confirmation) chooseConfirmation(target.index);
       return;
     }
     if (target.type === 'modal-option') {
@@ -501,7 +518,10 @@ export function Dashboard({
       return;
     }
     if (versionNotice) {
-      if (key.return || key.escape || input === ' ') setVersionNotice(null);
+      if (selfUpdate && (key.leftArrow || key.rightArrow)) setSelfUpdateChoice(key.rightArrow ? 1 : 0);
+      else if (selfUpdate && character === 'u') chooseVersionUpdate(1);
+      else if (key.return || input === ' ') chooseVersionUpdate(selfUpdateChoice);
+      else if (key.escape) chooseVersionUpdate(0);
       return;
     }
     const activeTourStep = tourStepRef.current;
@@ -879,6 +899,8 @@ export function Dashboard({
       versionNotice.available,
       versionNotice.changelogUrl,
       columns,
+      prepareSelfUpdate ? selfUpdate : null,
+      selfUpdateChoice,
     );
   } else if (tourStep !== null && !actionFailure) {
     modal = onboardingModal(tourStep);

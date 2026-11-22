@@ -24,6 +24,8 @@ export type CatalogMutationResult = {
 
 export type SourceVersionOption = { sha: string; prefix: string; date: string; subject: string };
 
+export type DashboardSelfUpdate = { manager: 'npm' | 'pnpm'; request: () => void };
+
 export interface DashboardActions {
   catalogResources?: CatalogResource[];
   execute?: (
@@ -48,4 +50,5 @@ export interface DashboardActions {
   transferCatalogs?: (action: 'import' | 'export', content: string) => Promise<CatalogActionResult>;
   checkCatalogFreshness?: (names?: string[]) => Promise<CatalogFreshnessResult[]>;
   showOnboarding?: boolean;
+  prepareSelfUpdate?: () => Promise<DashboardSelfUpdate | null>;
 }
