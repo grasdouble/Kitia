@@ -80,11 +80,11 @@ function selectedListRow(frame) {
 }
 
 function inventoryFrameReady(frame) {
-  return frame.includes('INVENTORY') && frame.includes('Q quit');
+  return frame.includes('INSTALLED RESOURCES') && frame.includes('Q quit');
 }
 
 function browseFrameReady(frame) {
-  return frame.includes('INSTALL FROM CATALOG') && frame.includes('P preview/audit') && frame.includes('Q quit');
+  return frame.includes('CATALOG RESOURCES') && frame.includes('P preview/audit') && frame.includes('Q quit');
 }
 
 function detailBodyText(frame) {

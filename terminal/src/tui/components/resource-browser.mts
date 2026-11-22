@@ -31,7 +31,7 @@ export interface ResourceBrowserPlan {
   workspaceHeight: number;
   workspaceTop: number;
   showWorkspaceDetails: boolean;
-  showShortcutFooter: boolean;
+  showShortcuts: boolean;
   outerWorkspaceWidth: number;
   actionRows: number;
   toolbarActions?: ControlsProps;
@@ -46,7 +46,7 @@ export function resourceBrowserPlan({
   columns,
   rows,
   warningRows,
-  footerRows,
+  shortcutRows,
   showDetails,
 }: {
   controls: ControlsProps;
@@ -55,7 +55,7 @@ export function resourceBrowserPlan({
   rows: number;
   /** Inventory scan warnings reserve their actual rendered height; Browse passes zero. */
   warningRows: number;
-  footerRows: number;
+  shortcutRows: number;
   showDetails: boolean;
 }): ResourceBrowserPlan {
   let controlsState = { ...controls, modalActive, actionPairs: true, hideActionHeading: true };
@@ -71,10 +71,11 @@ export function resourceBrowserPlan({
     rowOffset: tabsLayout.height + summaryRows,
   };
   const filterLayout = dashboardControlsLayout(filterProps);
-  const workspaceGap = columns >= 45 && columns < 76 ? 0 : 1;
+  const workspaceGap = rows < 30 || (columns >= 45 && columns < 76) ? 0 : 1;
   const chromeRows = DASHBOARD_HEADER_ROWS + tabsLayout.height + summaryRows + filterLayout.height;
   const availableWorkspaceHeight = rows - chromeRows - warningRows - workspaceGap;
-  let workspaceHeight = Math.max(1, availableWorkspaceHeight - footerRows);
+  let showShortcuts = shortcutRows > 0 && availableWorkspaceHeight - shortcutRows >= minimumWorkspaceHeight;
+  let workspaceHeight = Math.max(1, availableWorkspaceHeight - (showShortcuts ? shortcutRows : 0));
   const stackedWorkspace = columns < 94;
   const outerWorkspaceWidth = columns - 2;
   const layoutWorkspace = (details: boolean, actionRows = 0) =>
@@ -84,7 +85,6 @@ export function resourceBrowserPlan({
   let actionRows = showDetails ? dashboardActionButtonRows(controlsState, detailsContentWidth) : 0;
   let toolbarActions: ControlsProps | undefined;
   let toolbarActionRows = 0;
-  let showShortcutFooter = true;
   if (actionRows) {
     workspaceLayout = layoutWorkspace(true, actionRows);
     if (actionRows > workspaceLayout.detailsRows || workspaceHeight < minimumWorkspaceHeight) {
@@ -96,10 +96,10 @@ export function resourceBrowserPlan({
         // the full-width resource toolbar instead, with their own height budget.
         toolbarActions = { ...controlsState, actionPairs: false };
         toolbarActionRows = dashboardActionButtonRows(toolbarActions, outerWorkspaceWidth);
-        workspaceHeight = availableWorkspaceHeight - footerRows - toolbarActionRows;
-        if (workspaceHeight < minimumWorkspaceHeight && footerRows) {
-          workspaceHeight += footerRows;
-          showShortcutFooter = false;
+        workspaceHeight = availableWorkspaceHeight - (showShortcuts ? shortcutRows : 0) - toolbarActionRows;
+        if (workspaceHeight < minimumWorkspaceHeight && showShortcuts) {
+          workspaceHeight += shortcutRows;
+          showShortcuts = false;
         }
         if (workspaceHeight < minimumWorkspaceHeight) workspaceHeight = 0;
         actionRows = 0;
@@ -121,7 +121,7 @@ export function resourceBrowserPlan({
     workspaceHeight,
     workspaceTop: chromeRows + toolbarActionRows + warningRows + workspaceGap + 1,
     showWorkspaceDetails,
-    showShortcutFooter,
+    showShortcuts,
     outerWorkspaceWidth,
     actionRows,
     toolbarActions,

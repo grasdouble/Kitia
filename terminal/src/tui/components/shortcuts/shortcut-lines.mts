@@ -29,22 +29,3 @@ export function wrappedShortcutLines(lines: string[], width?: number) {
     return wrapped.flatMap((row) => wrapText(row, contentWidth));
   });
 }
-
-export function shortcutFooterLines(lines: string[], width: number): string[] {
-  const headings = new Set(['Actions', 'Filters', 'Display', 'Navigation']);
-  const shortcuts = lines.filter((line) => !headings.has(line)).flatMap((line) => line.split(' · '));
-  const lineWidth = Math.max(1, width);
-  const rows: string[] = [];
-  let current = '';
-  for (const shortcut of shortcuts) {
-    const next = current ? `${current} · ${shortcut}` : shortcut;
-    if (current && next.length > lineWidth) {
-      rows.push(current);
-      current = shortcut;
-    } else {
-      current = next;
-    }
-  }
-  if (current) rows.push(current);
-  return rows.flatMap((line) => (line.length > lineWidth ? wrapText(line, lineWidth) : [line]));
-}

@@ -49,33 +49,30 @@ export function Dashboard({
   resources,
   errors = [],
   actions = {},
+  versionLabel: suppliedVersion,
   onFinish,
   mouse,
 }: {
   resources: CatalogResource[];
   errors?: ScanError[];
   actions?: DashboardActions;
+  versionLabel?: string;
   onFinish: (success: boolean) => void;
   mouse?: DashboardMouseRegions;
 }) {
   const { columns = 80, rows = 24 } = useWindowSize();
   const installedVersion = process.env.KITIA_INSTALLED_VERSION || 'unknown';
-  const [versionLabel, setVersionLabel] = useState('Checking version update');
+  const versionLabel = suppliedVersion ?? installedVersion;
   const [versionNotice, setVersionNotice] = useState<VersionNotice | null>(null);
   useEffect(() => {
-    if (installedVersion === 'unknown') {
-      setVersionLabel(installedVersion);
-      return;
-    }
+    if (installedVersion === 'unknown') return;
     let active = true;
     void checkInstalledVersion(installedVersion)
-      .then(({ label, notice }) => {
-        if (!active) return;
-        setVersionLabel(label);
-        setVersionNotice(notice);
+      .then((notice) => {
+        if (active) setVersionNotice(notice);
       })
       .catch(() => {
-        if (active) setVersionLabel(installedVersion);
+        // The local version remains visible when the registry is unavailable.
       });
     return () => {
       active = false;
@@ -128,12 +125,11 @@ export function Dashboard({
   } = operations;
   const [loadingFrame, setLoadingFrame] = useState(0);
   const loadingFrames = ['|', '/', '-', '\\'];
-  const loading = actionPending || versionLabel === 'Checking version update';
   useEffect(() => {
-    if (!loading) return;
+    if (!actionPending) return;
     const timer = setInterval(() => setLoadingFrame((frame) => (frame + 1) % loadingFrames.length), 100);
     return () => clearInterval(timer);
-  }, [loading]);
+  }, [actionPending]);
   const migrationScopes = [
     ...new Set(
       scanErrors
@@ -334,9 +330,6 @@ export function Dashboard({
     actionIndex: controlActionIndex,
     mouse,
   };
-  const headerVersionLabel = loading
-    ? `${loadingFrames[loadingFrame]} ${actionPending ? actionMessage || 'Loading' : versionLabel}`
-    : versionLabel;
 
   const navigateToSection = (section: DashboardSection) => {
     setFilterMenu(null);
@@ -800,12 +793,14 @@ export function Dashboard({
   } else {
     modal = operations.modal(columns, rows, screenMode === 'install-options');
   }
-  const screenModalActive = Boolean(modal || versionNotice || tourStep !== null || actionPending || inspection);
+  const screenModalActive = Boolean(
+    modal || versionNotice || tourStep !== null || actionPending || inspection || screenMode === 'install-options',
+  );
   mouse?.beginFrame();
   if (inspection) {
     baseScreen = h(InspectionScreen, {
       ...inspection,
-      versionLabel: headerVersionLabel,
+      versionLabel,
       columns,
       rows,
     });
@@ -821,7 +816,7 @@ export function Dashboard({
       canEdit: typeof actions.updateCatalog === 'function' && userCatalogs.length > 0,
       canRefresh: typeof actions.refreshCatalog === 'function' && userCatalogs.length > 0,
       canTransfer: typeof actions.transferCatalogs === 'function',
-      versionLabel: headerVersionLabel,
+      versionLabel,
       showDetails,
       columns,
       rows,
@@ -840,8 +835,7 @@ export function Dashboard({
       kindFilter: catalogKindFilter,
       licenseFilter: catalogLicenseFilter,
       selectedIndex: activeCatalogIndex,
-      versionLabel: headerVersionLabel,
-      screenName: screenMode === 'install-options' ? 'INSTALL OPTIONS' : 'INSTALL FROM CATALOG',
+      versionLabel,
       showDetails,
       columns,
       rows,
@@ -859,7 +853,7 @@ export function Dashboard({
       kindFilter: inventoryKindFilter,
       licenseFilter: inventoryLicenseFilter,
       selectedIndex: activeInventoryIndex,
-      versionLabel: headerVersionLabel,
+      versionLabel,
       actionMessage,
       catalogAvailable: candidates.length > 0,
       showDetails,

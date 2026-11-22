@@ -252,9 +252,9 @@ function inspectionLayout(
   const width = Math.max(1, columns - 2);
   const shortcutOnly = rows < 12;
   const compact = rows < 24;
-  const headerRows = shortcutOnly ? 0 : compact ? 1 : DASHBOARD_HEADER_ROWS;
+  const headerRows = shortcutOnly ? 0 : compact ? 1 : DASHBOARD_HEADER_ROWS + 1;
   const shortcutRows = wrappedShortcutLines(inspectionShortcuts, width).length + 4;
-  const bodyMarginTop = rows >= 18 ? 1 : 0;
+  const bodyMarginTop = compact && rows >= 18 ? 1 : 0;
   const shortcutsMarginTop = rows >= 18 ? 1 : 0;
   const bodyRows = shortcutOnly
     ? 0
@@ -425,14 +425,8 @@ export function InspectionScreen({
   return h(
     Box,
     { flexDirection: 'column', paddingX: 1, height: rows, flexShrink: 0 },
-    layout.compact
-      ? h(Text, { bold: true, wrap: 'truncate-end' }, fitText(`SOURCE PREVIEW · ${layout.metadata}`, columns - 2))
-      : h(DashboardHeader, {
-          versionLabel,
-          screenName: 'SOURCE PREVIEW',
-          metadata: layout.metadata,
-          columns,
-        }),
+    layout.compact ? null : h(DashboardHeader, { versionLabel, columns }),
+    h(Text, { bold: true, wrap: 'truncate-end' }, fitText(`SOURCE PREVIEW · ${layout.metadata}`, columns - 2)),
     h(
       Box,
       { marginTop: layout.bodyMarginTop, height: layout.bodyRows, flexShrink: 0 },

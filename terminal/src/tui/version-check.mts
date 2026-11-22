@@ -4,11 +4,6 @@ export type VersionNotice = {
   changelogUrl: string;
 };
 
-export type VersionCheckResult = {
-  label: string;
-  notice: VersionNotice | null;
-};
-
 function compareVersions(left: string, right: string): number {
   const leftParts = left.split('.').map(Number);
   const rightParts = right.split('.').map(Number);
@@ -22,7 +17,7 @@ function compareVersions(left: string, right: string): number {
 export async function checkInstalledVersion(
   installed: string,
   request: typeof fetch = fetch,
-): Promise<VersionCheckResult> {
+): Promise<VersionNotice | null> {
   const response = await request('https://registry.npmjs.org/@grasdouble%2Fkitia/latest', {
     signal: AbortSignal.timeout(1500),
     headers: { accept: 'application/json' },
@@ -32,13 +27,10 @@ export async function checkInstalledVersion(
   if (installed !== 'unknown' && compareVersions(version, installed) > 0) {
     const heading = version.toLowerCase().replace(/[^a-z0-9-]/g, '');
     return {
-      label: `${installed} - New version available`,
-      notice: {
-        installed,
-        available: version,
-        changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#${heading}`,
-      },
+      installed,
+      available: version,
+      changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#${heading}`,
     };
   }
-  return { label: installed, notice: null };
+  return null;
 }

@@ -12,8 +12,7 @@ import type { ControlsProps } from '../components/controls/control-layout-plan.m
 import { detailField, detailLocations } from '../components/detail-fields.mjs';
 import { ResourceBrowserChrome, resourceBrowserPlan } from '../components/resource-browser.mjs';
 import { SelectionDetails, useDashboardDetailPaging } from '../components/selection-details.mjs';
-import { ShortcutFooter } from '../components/shortcuts/shortcut-footer.mjs';
-import { categorizedShortcutLines, shortcutFooterLines } from '../components/shortcuts/shortcut-lines.mjs';
+import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, resourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
 import type { InventoryCatalogConfiguration } from '../helpers.mjs';
@@ -87,40 +86,36 @@ export function InventoryScreen({
   const selected = visible[activeIndex];
   const detailPagingFocus =
     !modalActive && !filterMode && !controls.menuFilter && (controls.focus === 'list' || controls.focus === 'actions');
-  const shortcutLines = modalActive
+  const shortcuts = modalActive
     ? []
     : filterMode
-      ? categorizedShortcutLines({
-          Filters: ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear'],
-          Navigation: ['↑↓ navigate'],
-        })
-      : categorizedShortcutLines({
-          Actions: [
-            ...(catalogAvailable ? ['A install'] : []),
-            ...(canExecute &&
-            selected &&
-            selected.scope &&
-            (selected.managed === false
-              ? Boolean(selected.paths?.length)
-              : Boolean(selected.source_repository && selected.source_path))
-              ? ['P preview']
-              : []),
-            ...(canExecute && selected && selected.managed !== false && dashboardStatus(selected) === 'update'
-              ? ['U update']
-              : []),
-            ...(canExecute && selected ? [selected.managed === false ? 'Delete remove' : 'Delete uninstall'] : []),
-          ],
-          Filters: ['F filter', ...(resources.length ? ['C catalog', 'K kind', 'L license'] : [])],
-          Display: ['D details'],
-          Navigation: [
-            '1/2/3 sections · M catalogs',
-            '↑↓ navigate',
-            ...(showDetails && selected && detailPagingFocus ? ['PgUp/PgDn details'] : []),
-            '? guide',
-            'Q quit',
-          ],
-        });
-  const footerRows = shortcutFooterLines(shortcutLines, columns - 2).length + Number(Boolean(shortcutLines.length));
+      ? ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear', '↑↓ navigate']
+      : [
+          ...(catalogAvailable ? ['A install'] : []),
+          ...(canExecute &&
+          selected &&
+          selected.scope &&
+          (selected.managed === false
+            ? Boolean(selected.paths?.length)
+            : Boolean(selected.source_repository && selected.source_path))
+            ? ['P preview']
+            : []),
+          ...(canExecute && selected && selected.managed !== false && dashboardStatus(selected) === 'update'
+            ? ['U update']
+            : []),
+          ...(canExecute && selected ? [selected.managed === false ? 'Delete remove' : 'Delete uninstall'] : []),
+          'F filter',
+          ...(resources.length ? ['C catalog', 'K kind', 'L license'] : []),
+          'D details',
+          '1/2/3 sections',
+          'M catalogs',
+          '↑↓ navigate',
+          ...(showDetails && selected && detailPagingFocus ? ['PgUp/PgDn details'] : []),
+          '? guide',
+          'Q quit',
+        ];
+  const shortcutLines = shortcuts.length ? [shortcuts.join(' · ')] : [];
+  const compactShortcuts = rows < 30;
   const warningLines = errors.flatMap((error) =>
     wrapText(`${error.scope.toUpperCase()} · ${error.code}: ${error.message}`, Math.max(1, columns - 2)),
   );
@@ -131,7 +126,7 @@ export function InventoryScreen({
     columns,
     rows,
     warningRows: warningBlockRows,
-    footerRows,
+    shortcutRows: shortcutsPanelRows(shortcutLines, columns - 2, compactShortcuts),
     showDetails,
   });
   const {
@@ -140,15 +135,13 @@ export function InventoryScreen({
     workspaceHeight,
     workspaceTop,
     showWorkspaceDetails,
-    showShortcutFooter,
+    showShortcuts,
     outerWorkspaceWidth,
     actionRows,
     workspaceLayout,
     listContentWidth,
     detailsContentWidth,
   } = browserPlan;
-  const footer =
-    showShortcutFooter && !modalActive ? h(ShortcutFooter, { lines: shortcutLines, width: columns - 2 }) : null;
   const warnings = warningLines.length
     ? h(
         Box,
@@ -358,12 +351,7 @@ export function InventoryScreen({
   return h(
     Box,
     { width: columns, height: rows, flexDirection: 'column', paddingX: 1, position: 'relative' },
-    h(DashboardHeader, {
-      versionLabel,
-      screenName: 'INVENTORY',
-      metadata: `RESOURCES ${visible.length}/${resources.length} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()} · LICENSE ${licenseFilter.toUpperCase()}`,
-      columns,
-    }),
+    h(DashboardHeader, { versionLabel, columns }),
     h(ResourceBrowserChrome, { plan: browserPlan, resources, columns }),
     warnings,
     workspaceHeight
@@ -390,7 +378,7 @@ export function InventoryScreen({
           }),
         )
       : null,
-    footer,
+    showShortcuts ? h(ShortcutsPanel, { lines: shortcutLines, width: columns - 2, compact: compactShortcuts }) : null,
     controls.menuFilter ? h(Controls, { ...browserPlan.filterProps, menuOverlayOnly: true }) : null,
   );
 }

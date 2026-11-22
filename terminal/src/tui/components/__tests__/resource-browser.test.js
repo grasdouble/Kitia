@@ -21,7 +21,7 @@ test('resource browser plan preserves responsive thresholds and warning reservat
       columns,
       rows,
       warningRows,
-      footerRows: 2,
+      shortcutRows: 5,
       showDetails: true,
     });
 

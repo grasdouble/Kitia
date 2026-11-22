@@ -14,8 +14,7 @@ import {
 } from '../components/controls/control-layout-plan.mjs';
 import { InventorySummaryCards } from '../components/inventory-summary-cards.mjs';
 import { Panel } from '../components/panel.mjs';
-import { ShortcutFooter } from '../components/shortcuts/shortcut-footer.mjs';
-import { shortcutFooterLines } from '../components/shortcuts/shortcut-lines.mjs';
+import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { Controls } from '../controls.mjs';
 import { fitText } from '../helpers.mjs';
 import { DASHBOARD_HEADER_ROWS } from '../sections/header.mjs';
@@ -143,14 +142,14 @@ export function CatalogManagementScreen({
         '? guide',
         'Q quit',
       ].join(' · ');
-  const footerLines = shortcutLine ? shortcutFooterLines([shortcutLine], Math.max(1, columns - 2)) : [];
-  const footerRows = footerLines.length + Number(Boolean(footerLines.length));
+  const shortcutLines = shortcutLine ? [shortcutLine] : [];
+  const shortcutRows = shortcutsPanelRows(shortcutLines, columns - 2);
   const ultraCompactSummary = rows < 40;
-  const summaryRows = ultraCompactSummary ? 1 : columns < 80 ? 4 : 5;
+  const compactSummary = columns < 80 || rows < 50;
+  const summaryRows = ultraCompactSummary ? 1 : compactSummary ? 4 : 5;
   const cardBaseRows = 5;
   const selectedExtraRows = selected ? (showDetails ? detailsContent.length : 0) + cardActionRows : 0;
-  const fixedRows =
-    DASHBOARD_HEADER_ROWS + controlsLayout.height + summaryRows + 1 + headingActionRows + footerRows + 2;
+  const fixedRows = DASHBOARD_HEADER_ROWS + controlsLayout.height + summaryRows + headingActionRows + shortcutRows + 2;
   const availableCardRows = Math.max(cardBaseRows + 1, rows - fixedRows - selectedExtraRows);
   const viewport = Math.max(1, Math.floor(availableCardRows / (cardBaseRows + 1)));
   const first = Math.max(0, Math.min(activeIndex - viewport + 1, catalogs.length - viewport));
@@ -274,7 +273,6 @@ export function CatalogManagementScreen({
     ActionButtons({ controls: headingActions, width: contentWidth }),
   );
   const empty = catalogs.length ? null : h(Text, { dimColor: true }, 'No user catalogs connected.');
-  const footer = shortcutLine ? h(ShortcutFooter, { lines: [shortcutLine], width: columns - 2 }) : null;
   return h(
     Box,
     {
@@ -285,22 +283,18 @@ export function CatalogManagementScreen({
       position: 'relative',
       flexShrink: 0,
     },
-    h(DashboardHeader, {
-      versionLabel,
-      screenName: 'CATALOG MANAGEMENT',
-      metadata: `USER CATALOGS ${catalogs.length}`,
-      columns,
-    }),
+    h(DashboardHeader, { versionLabel, columns }),
     h(Controls, { ...tabControls, modalActive }),
     h(InventorySummaryCards, {
       resources: installedResources,
       width: columns - 2,
-      compact: columns < 80 || rows < 50,
+      compact: compactSummary,
       ultraCompact: ultraCompactSummary,
       marginTop: ultraCompactSummary ? 0 : 1,
     }),
     heading,
     ...(page.length ? cardNodes : empty ? [empty] : []),
-    footer,
+    shortcutRows ? h(Box, { flexGrow: 1 }) : null,
+    shortcutRows ? h(ShortcutsPanel, { lines: shortcutLines, width: columns - 2 }) : null,
   );
 }

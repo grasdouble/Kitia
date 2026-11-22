@@ -37,7 +37,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const repository = 'https://github.com/example/test';
   const userCatalogsReadyFrame =
     /^(?=[\s\S]*CONNECTED CATALOGS)(?=[\s\S]*ESC inventory)(?=[\s\S]*Q quit)(?![\s\S]*(?:ADD CATALOG|EDIT CATALOG|REMOVE CATALOG|CONFIRM CATALOG REMOVAL|IMPORT CATALOGS|EXPORT CATALOGS|REFRESH CATALOG|CATALOG REFRESH ERRORS))/;
-  const driveRefresh = async (keys, refreshCatalog, extraActions = {}, exitFrames = ['INVENTORY']) => {
+  const driveRefresh = async (keys, refreshCatalog, extraActions = {}, exitFrames = ['INSTALLED RESOURCES']) => {
     const input = new PassThrough();
     input.isTTY = true;
     input.setRawMode = () => {};
@@ -211,7 +211,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const presetRequests = [];
   const presetManager = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['p', /PRESET/],
       ['\x1b[B', /› Matt Pocock/],
       ['\r', /ADD CATALOG RESULT/],
@@ -237,7 +237,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   ]);
   const anthropicRequests = [];
   const anthropicManager = await driveRefresh(
-    [['m', /USER CATALOGS/], ['p', /PRESET/], ['\r', /ADD CATALOG RESULT/], ['\r', userCatalogsReadyFrame], 'q'],
+    [['m', userCatalogsReadyFrame], ['p', /PRESET/], ['\r', /ADD CATALOG RESULT/], ['\r', userCatalogsReadyFrame], 'q'],
     refresh,
     {
       addCatalog: async (request) => {
@@ -259,7 +259,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const githubPresetRequests = [];
   const githubPresetManager = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['p', /PRESET/],
       ['\x1b[B', /› Matt Pocock/],
       ['\x1b[B', /› GitHub Awesome Copilot/],
@@ -286,7 +286,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   ]);
   let cancelledPresetAdded = false;
   const cancelledPreset = await driveRefresh(
-    [['m', /USER CATALOGS/], ['p', /ADD CATALOG PRESET/], ['\x1b', userCatalogsReadyFrame], 'q'],
+    [['m', userCatalogsReadyFrame], ['p', /ADD CATALOG PRESET/], ['\x1b', userCatalogsReadyFrame], 'q'],
     refresh,
     {
       addCatalog: async () => {
@@ -326,7 +326,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   };
   const transferManager = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['i', /Paste the JSON catalog configuration below/],
       [pastedConfiguration, /two","mode":"basic","entries":\[\]\}\]\}/],
       ['\x13', /SPACE\/ENTER TOGGLE/],
@@ -364,7 +364,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   let cancelledImport = false;
   const cancelImportManager = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['i', /CTRL\+S REVIEW/],
       [pastedConfiguration, /two","mode":"basic","entries":\[\]\}\]\}/],
       ['\x13', /SPACE\/ENTER TOGGLE/],
@@ -411,7 +411,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   });
   assert.match(outdatedManager.renderedOutput, /OUTDATED/);
   const addFromManager = await driveRefresh(
-    [['m', /USER CATALOGS/], ['a', /ADD CATALOG/], ['\x1b', userCatalogsReadyFrame], 'q'],
+    [['m', userCatalogsReadyFrame], ['a', /ADD CATALOG/], ['\x1b', userCatalogsReadyFrame], 'q'],
     refresh,
     {
       addCatalog: async () => ({ catalog: 'New', count: 0 }),
@@ -528,7 +528,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const managerRefreshed = [];
   const refreshedInManager = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['r', /REFRESH CATALOGS/],
       ['\r', /Choose a user catalog to refresh/],
       ['\r', /Refreshed Test · 1 resource indexed/],
@@ -550,7 +550,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   const freshnessChecks = [];
   const targetedFreshness = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['r', /REFRESH CATALOGS/],
       ['\r', /Choose a user catalog to refresh/],
       ['\x1b[B', /› Beta/],
@@ -595,7 +595,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   assert.deepEqual(refreshed, []);
   const refreshedOne = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['r', /REFRESH CATALOGS/],
       ['\r', /Choose a user catalog to refresh/],
       ['\r', /Refreshed Test · 2 resources indexed/],
@@ -608,7 +608,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   assert.deepEqual(refreshed, ['Test']);
   const refreshedAll = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['r', /REFRESH CATALOGS/],
       ['\x1b[C', /REFRESH CATALOGS/],
       ['\r', /Refreshed 1 catalog · 2 resources indexed/],
@@ -621,7 +621,7 @@ test('dashboard manages user catalogs and refreshes one or all catalogs', async 
   assert.deepEqual(refreshed, ['Test', undefined]);
   const failedRefresh = await driveRefresh(
     [
-      ['m', /USER CATALOGS/],
+      ['m', userCatalogsReadyFrame],
       ['r', /REFRESH CATALOGS/],
       ['\r', /Choose a user catalog to refresh/],
       ['\r', /Catalog Test was not refreshed/],
@@ -672,7 +672,7 @@ test('dashboard toggles catalog management details with D', async (t) => {
   await waitForOutput(
     output,
     () => rendered,
-    (text) => text.includes('INVENTORY'),
+    (text) => text.includes('INSTALLED RESOURCES'),
     'initial inventory',
   );
   input.write('m');
@@ -680,12 +680,11 @@ test('dashboard toggles catalog management details with D', async (t) => {
     output,
     () => rendered,
     (text) =>
-      selectedDetailsFrame(text).includes('USER CATALOGS 1') &&
+      selectedDetailsFrame(text).includes('CONNECTED CATALOGS 1') &&
       selectedDetailsFrame(text).includes('REPOSITORY example/sample'),
     'catalog management details',
   );
   const managementFrame = selectedDetailsFrame(rendered);
-  assert.match(managementFrame, /USER CATALOGS 1/);
   assert.match(managementFrame, /Sample/);
   assert.match(managementFrame, /REPOSITORY example\/sample/);
   assert.match(managementFrame, /FRESHNESS UP TO DATE/);

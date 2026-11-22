@@ -11,12 +11,9 @@ test('version check returns an update notice and changelog link for a newer rele
     return new Response(JSON.stringify({ version: '1.0.2' }), { status: 200 });
   });
   assert.deepEqual(result, {
-    label: '1.0.0 - New version available',
-    notice: {
-      installed: '1.0.0',
-      available: '1.0.2',
-      changelogUrl: 'https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#102',
-    },
+    installed: '1.0.0',
+    available: '1.0.2',
+    changelogUrl: 'https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#102',
   });
   assert.equal(requestedUrl[0], 'https://registry.npmjs.org/@grasdouble%2Fkitia/latest');
   assert.equal(requestedUrl[1].headers.accept, 'application/json');
@@ -24,14 +21,8 @@ test('version check returns an update notice and changelog link for a newer rele
 
 test('version check leaves current and unknown versions without a notice', async () => {
   const fetchVersion = async () => new Response(JSON.stringify({ version: '1.0.0' }), { status: 200 });
-  assert.deepEqual(await checkInstalledVersion('1.0.0', fetchVersion), {
-    label: '1.0.0',
-    notice: null,
-  });
-  assert.deepEqual(await checkInstalledVersion('unknown', fetchVersion), {
-    label: 'unknown',
-    notice: null,
-  });
+  assert.equal(await checkInstalledVersion('1.0.0', fetchVersion), null);
+  assert.equal(await checkInstalledVersion('unknown', fetchVersion), null);
 });
 
 test('version check reports registry failures to the caller', async () => {

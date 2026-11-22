@@ -19,14 +19,10 @@ Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
 On interactive dashboard launch, Kitia checks npm for a newer stable release.
-Every dashboard screen uses a compact three-row header: a three-line cat at left
-and `KITIA`, the version/screen name, and screen-specific metadata at right.
-The cat and title use semantic theme colors, not an animated gradient. After a
-randomized 10–20-second rest, the cat randomly shows a lick or scratch for 2–4
-seconds or a wink for 180 ms; it stays in place. While the version check is
-pending, the version slot reads `Checking version update`; afterward it shows
-the installed version or `<installed> - New version available`. Check failures
-are silent. Other commands and non-interactive launches skip the check.
+The dashboard header shows the Kitia mascot, wordmark, and installed version.
+Section names and counts remain in the dashboard tabs and workspaces. A newer
+release is announced in a separate modal; failed checks are silent. Other
+commands and non-interactive launches skip the check.
 
 | Command family | Contract |
 |---|---|

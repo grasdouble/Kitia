@@ -132,7 +132,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
   void done.then(() => {
     dashboardFinished = true;
   });
-  await waitForFrame((frame) => frame.includes('INVENTORY'), 'initial inventory');
+  await waitForFrame((frame) => frame.includes('INSTALLED RESOURCES'), 'initial inventory');
   input.write('a');
   await waitForFrame((frame) => frame.includes('CATALOG RESOURCES'), 'catalog resources');
   input.write('v');
@@ -238,7 +238,7 @@ test('dashboard shows the loading popup for consecutive actions', async () => {
     waitForOutput(output, latestFrame, predicate, `dashboard to ${message}`, 5_000);
   let finished = false;
   try {
-    await waitFor((frame) => frame.includes('INVENTORY'), 'render Inventory');
+    await waitFor((frame) => frame.includes('INSTALLED RESOURCES'), 'render Inventory');
     input.write('a');
     await waitFor((frame) => frame.includes('CATALOG RESOURCES'), 'open catalog');
     input.write('p');
@@ -372,7 +372,7 @@ test('dashboard revision picker applies a selected full SHA to a confirmed instr
       'Inventory after the confirmed update',
     );
     let details = detailBodyText(updated);
-    for (let page = 0; page < 4 && !details.includes('MESSAGEUpdatedselectedrevision.'); page += 1) {
+    for (let page = 0; page < 12 && !details.includes('MESSAGEUpdatedselectedrevision.'); page += 1) {
       const previous = detailBodyText(updated);
       updated = await press(
         '\x1b[6~',
@@ -426,9 +426,10 @@ test('dashboard shows the installed and available versions with the changelog li
       2_000,
     );
     assert.match(plain(), /NEW VERSION AVAILABLE/);
+    assert.match(selectedDetailsFrame(rendered).split('\n').slice(0, 5).join('\n'), /\s1\.0\.0[ \t]*$/m);
     assert.match(plain(), /Installed: 1\.0\.0/);
     assert.match(plain(), /Available: 1\.0\.2/);
-    assert.match(plain(), /github\.com\/grasdouble\/Kitia\/blob\/main\/CHANGELOG\.md#102/);
+    assert.match(plain(), /github\.com\/grasdouble\/Kitia\/blob\/main\/terminal\/CHANGELOG\.md#102/);
   } finally {
     try {
       if (done) {
@@ -438,7 +439,7 @@ test('dashboard shows the installed and available versions with the changelog li
           await waitForOutput(
             output,
             () => plain().slice(previousOutputLength),
-            (text) => text.includes('INVENTORY'),
+            (text) => text.includes('INSTALLED RESOURCES'),
             'inventory after Escape',
             2_000,
           );

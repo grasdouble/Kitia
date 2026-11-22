@@ -34,7 +34,8 @@ export function dashboardCatArt(activity: DashboardCatActivity, frame: number): 
 const h = React.createElement;
 const kitiaWordmark = [
   '█  ▄▀  ▀█▀  ▀▀█▀▀  ▀█▀  ▄▀▀▀▄',
-  '█▀▀▄    █     █     █   █▀▀▀█',
+  '█▄▀     █     █     █   █▄▄▄█',
+  '█ ▀▄    █     █     █   █   █',
   '▀   ▀  ▀▀▀    ▀    ▀▀▀  ▀   ▀',
 ];
 const titleColorStops = DASHBOARD_THEME.titleGradientStops;
@@ -51,19 +52,7 @@ const titleColors = Array.from({ length: 96 }, (_, index) => {
     .join('')}`;
 });
 
-function AnimatedTitle({
-  width,
-  versionLabel,
-  screenName,
-  metadata,
-  phase,
-}: {
-  width: number;
-  phase: number;
-  versionLabel: string;
-  screenName: string;
-  metadata: string;
-}) {
+function AnimatedTitle({ width, versionLabel, phase }: { width: number; versionLabel: string; phase: number }) {
   const pixelTitle = width >= kitiaWordmark[0].length;
   return h(
     Box,
@@ -89,16 +78,10 @@ function AnimatedTitle({
           h(
             Text,
             { key: 'compact', color: DASHBOARD_THEME.semantic.accents.primary, bold: true },
-            fitText(`KITIA  ${versionLabel}`, width),
+            fitText('KITIA', width),
           ),
         ]),
-    h(
-      Text,
-      { color: DASHBOARD_THEME.semantic.accents.primary, bold: pixelTitle },
-      fitText(pixelTitle ? `${versionLabel} · ${screenName}` : screenName, width),
-    ),
-    h(Text, { dimColor: true }, fitText(metadata, width)),
-    ...(!pixelTitle ? [h(Text, { key: 'blank-1' }, ' '), h(Text, { key: 'blank-2' }, ' ')] : []),
+    h(Text, { color: DASHBOARD_THEME.semantic.accents.primary }, fitText(versionLabel, width)),
   );
 }
 
@@ -107,15 +90,11 @@ function AnimatedBrand({
   catWidth,
   textWidth,
   versionLabel,
-  screenName,
-  metadata,
 }: {
   art: string[];
   catWidth: number;
   textWidth: number;
   versionLabel: string;
-  screenName: string;
-  metadata: string;
 }) {
   const [phase, setPhase] = useState(0);
   useEffect(() => {
@@ -145,30 +124,11 @@ function AnimatedBrand({
         ),
       ),
     ),
-    h(AnimatedTitle, { width: textWidth, versionLabel, screenName, metadata, phase }),
+    h(AnimatedTitle, { width: textWidth, versionLabel, phase }),
   );
 }
 
-// DashboardHeader
-// ┌────────────────────────────────────────────────────────┐
-// │ cat art │ KITIA wordmark (or compact title)             │
-// │         │ screen/version                                │
-// │         │ metadata                                      │
-// │         │                                               │
-// └────────────────────────────────────────────────────────┘
-// Compact titles add two blank rows below metadata.
-export function DashboardHeader({
-  versionLabel,
-  screenName,
-  metadata,
-  columns,
-}: {
-  versionLabel: string;
-  screenName: string;
-  metadata: string;
-  columns: number;
-  activeSection?: 'inventory' | 'browse' | 'catalogs';
-}) {
+export function DashboardHeader({ versionLabel, columns }: { versionLabel: string; columns: number }) {
   const [grooming, setGrooming] = useState<{ activity: DashboardCatActivity; frame: number }>({
     activity: 'idle',
     frame: 0,
@@ -209,5 +169,5 @@ export function DashboardHeader({
     };
   }, []);
   const art = dashboardCatArt(grooming.activity, grooming.frame);
-  return h(AnimatedBrand, { art, catWidth, textWidth, versionLabel, screenName, metadata });
+  return h(AnimatedBrand, { art, catWidth, textWidth, versionLabel });
 }

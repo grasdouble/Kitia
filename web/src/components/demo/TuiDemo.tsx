@@ -1,3 +1,4 @@
+import { version as terminalVersion } from '@grasdouble/kitia/package.json';
 import { DASHBOARD_THEME } from '@grasdouble/kitia/src/tui/colors.ts';
 import { Dashboard } from '@grasdouble/kitia/src/tui/dashboard.mts';
 import { Link } from '@tanstack/react-router';
@@ -75,7 +76,7 @@ export function TuiDemo() {
     const session = createTuiDemoSession();
     void mountDashboardTerminal(
       container.current!,
-      (mouse, finish) => <Dashboard {...session} mouse={mouse} onFinish={finish} />,
+      (mouse, finish) => <Dashboard {...session} versionLabel={terminalVersion} mouse={mouse} onFinish={finish} />,
       {
         signal,
         onExit(exit) {

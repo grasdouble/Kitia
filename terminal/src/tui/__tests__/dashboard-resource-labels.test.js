@@ -219,7 +219,7 @@ test('catalog browser renders mapped source folders and keeps repository-less na
   await waitForOutput(
     output,
     () => plain(),
-    (text) => text.includes('INVENTORY'),
+    (text) => text.includes('INSTALLED RESOURCES'),
     'initial inventory',
   );
   input.write('a');
@@ -253,10 +253,9 @@ test('catalog browser renders mapped source folders and keeps repository-less na
   await waitForOutput(
     output,
     () => plain(),
-    (text) => text.includes('AVAILABLE 1/2'),
+    (text) => /CATALOG RESOURCES[^\n]*\b1 results\b/.test(text),
     'filtered catalog result',
   );
-  assert.match(plain(), /AVAILABLE\s+1\/2/);
   assert.ok(
     plain()
       .split(/\r?\n/)

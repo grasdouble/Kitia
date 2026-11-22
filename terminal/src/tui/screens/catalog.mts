@@ -11,8 +11,7 @@ import type { ControlsProps } from '../components/controls/control-layout-plan.m
 import { detailField } from '../components/detail-fields.mjs';
 import { ResourceBrowserChrome, resourceBrowserPlan } from '../components/resource-browser.mjs';
 import { SelectionDetails, useDashboardDetailPaging } from '../components/selection-details.mjs';
-import { ShortcutFooter } from '../components/shortcuts/shortcut-footer.mjs';
-import { categorizedShortcutLines, shortcutFooterLines } from '../components/shortcuts/shortcut-lines.mjs';
+import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, resourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
 import type { InventoryCatalogConfiguration } from '../helpers.mjs';
@@ -31,7 +30,6 @@ export function CatalogScreen({
   licenseFilter,
   selectedIndex,
   versionLabel,
-  screenName,
   showDetails,
   columns,
   rows,
@@ -49,7 +47,6 @@ export function CatalogScreen({
   licenseFilter: string;
   selectedIndex: number;
   versionLabel: string;
-  screenName: string;
   showDetails: boolean;
   columns: number;
   rows: number;
@@ -69,35 +66,36 @@ export function CatalogScreen({
   const selected = visible[activeIndex];
   const detailPagingFocus =
     !modalActive && !filterMode && !controls.menuFilter && (controls.focus === 'list' || controls.focus === 'actions');
-  const catalogShortcutLines =
-    modalActive || screenName === 'INSTALL OPTIONS'
+  const shortcuts =
+    modalActive
       ? []
       : filterMode
-        ? categorizedShortcutLines({
-            Filters: ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear'],
-            Navigation: ['↑↓ navigate'],
-          })
-        : categorizedShortcutLines({
-            Actions: ['ENTER install', 'V revisions', 'P preview/audit'],
-            Filters: ['F filter', 'C catalog', 'K kind', 'L license'],
-            Display: ['D details'],
-            Navigation: [
-              '1/2/3 sections · ESC back',
-              '↑↓ navigate',
-              ...(showDetails && selected && detailPagingFocus ? ['PgUp/PgDn details'] : []),
-              '? guide',
-              'Q quit',
-            ],
-          });
-  const footerRows =
-    shortcutFooterLines(catalogShortcutLines, columns - 2).length + Number(Boolean(catalogShortcutLines.length));
+        ? ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear', '↑↓ navigate']
+        : [
+            'ENTER install',
+            'V revisions',
+            'P preview/audit',
+            'F filter',
+            'C catalog',
+            'K kind',
+            'L license',
+            'D details',
+            '1/2/3 sections',
+            'ESC back',
+            '↑↓ navigate',
+            ...(showDetails && selected && detailPagingFocus ? ['PgUp/PgDn details'] : []),
+            '? guide',
+            'Q quit',
+          ];
+  const shortcutLines = shortcuts.length ? [shortcuts.join(' · ')] : [];
+  const compactShortcuts = rows < 30;
   const browserPlan = resourceBrowserPlan({
     controls,
     modalActive,
     columns,
     rows,
     warningRows: 0,
-    footerRows,
+    shortcutRows: shortcutsPanelRows(shortcutLines, columns - 2, compactShortcuts),
     showDetails,
   });
   const {
@@ -106,17 +104,13 @@ export function CatalogScreen({
     workspaceHeight,
     workspaceTop,
     showWorkspaceDetails,
-    showShortcutFooter,
+    showShortcuts,
     outerWorkspaceWidth,
     actionRows,
     workspaceLayout,
     listContentWidth,
     detailsContentWidth,
   } = browserPlan;
-  const footer =
-    showShortcutFooter && catalogShortcutLines.length
-      ? h(ShortcutFooter, { lines: catalogShortcutLines, width: columns - 2 })
-      : null;
   const visibleSourceWidth = visible.reduce((width, resource) => Math.max(width, candidateLabel(resource).length), 8);
   const visibleIdWidth = visible.reduce((width, resource) => Math.max(width, resource.id.length), 8);
   const compactTable = listContentWidth < 58;
@@ -275,12 +269,7 @@ export function CatalogScreen({
   return h(
     Box,
     { width: columns, height: rows, flexDirection: 'column', paddingX: 1, position: 'relative' },
-    h(DashboardHeader, {
-      versionLabel,
-      screenName,
-      metadata: `AVAILABLE ${visible.length}/${candidates.length} · CATALOG ${catalogFilter.toUpperCase()} · KIND ${kindFilter.toUpperCase()} · LICENSE ${licenseFilter.toUpperCase()}`,
-      columns,
-    }),
+    h(DashboardHeader, { versionLabel, columns }),
     h(ResourceBrowserChrome, { plan: browserPlan, resources, columns }),
     workspaceHeight
       ? h(
@@ -306,7 +295,7 @@ export function CatalogScreen({
           }),
         )
       : null,
-    footer,
+    showShortcuts ? h(ShortcutsPanel, { lines: shortcutLines, width: columns - 2, compact: compactShortcuts }) : null,
     controls.menuFilter ? h(Controls, { ...browserPlan.filterProps, menuOverlayOnly: true }) : null,
   );
 }

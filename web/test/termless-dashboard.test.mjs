@@ -330,19 +330,22 @@ const previewShortcutHints = [
   'ENTER/ESC close',
 ];
 
-function shortcutFooter(grid, columns) {
+function screenShortcutsFrame(grid, columns) {
   const lines = grid.trimEnd().split('\n');
-  const separator = lines.findLastIndex((line) => line.trim() === '─'.repeat(columns - 2));
-  if (separator < 0) return;
-  if (lines.length === separator + 1) return;
+  const left = 1;
+  const right = columns - 2;
+  const row = lines.findIndex((line) => line.startsWith(' │ SHORTCUTS ') && line[right] === '│');
+  if (row < 1 || lines[row - 1][left] !== '┌' || lines[row - 1][right] !== '┐') return;
+  const hasHeaderRule = /^─+$/.test(lines[row + 1]?.slice(left + 1, right).trim());
+  const bodyStart = row + (hasHeaderRule ? 2 : 1);
+  const lastRow = lines.findIndex((line, index) => index > row && line[left] === '└' && line[right] === '┘');
+  if (lastRow <= bodyStart) return;
+  const body = lines.slice(bodyStart, lastRow);
+  if (!body.every((line) => line[left] === '│' && line[right] === '│')) return;
   return {
-    row: separator,
-    lastRow: lines.length - 1,
-    text: lines
-      .slice(separator + 1)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim(),
+    row: row - 1,
+    lastRow,
+    text: body.map((line) => line.slice(left + 1, right).trim()).join(' '),
   };
 }
 
@@ -392,15 +395,12 @@ async function assertTableSurface(
     ids = query ? [query] : key === 'a' ? catalogIds : inventoryIds,
     visible = ids,
     selected = ids[0],
-    total = key === 'a' ? catalogIds.length : inventoryIds.length,
     details = true,
     hints = editing ? searchShortcutHints : screenShortcutHints[key],
     dismissed = [],
   } = {},
 ) {
   const title = key === 'a' ? 'CATALOG RESOURCES' : 'INSTALLED RESOURCES';
-  const countLabel = key === 'a' ? 'AVAILABLE' : 'RESOURCES';
-  const summary = `${countLabel} ${ids.length}/${total} · CATALOG ${catalog} · KIND ${kind} · LICENSE ${license}`;
   const search = editing ? `${query}▏` : query || 'Search resources…';
   let frame;
   let searchField;
@@ -411,17 +411,13 @@ async function assertTableSurface(
       const workspace = workspaceFrame(grid, title);
       if (!workspace || (workspace.detailsRow !== -1) !== details) return false;
       const { lines, row, col, listRight, entries, bodyRow } = workspace;
-      const footer = shortcutFooter(grid, session.output.columns);
+      const shortcuts = screenShortcutsFrame(grid, session.output.columns);
       if (
-        footer?.lastRow !== session.output.rows - 1 ||
-        footer.row <= workspace.bottom ||
-        !hasHints(footer.text, hints)
+        shortcuts?.lastRow !== session.output.rows - 1 ||
+        shortcuts.row <= workspace.bottom ||
+        !hasHints(shortcuts.text, hints)
       )
         return false;
-      const metadata = lines.slice(0, row).find((line) => line.includes(`${countLabel} `));
-      if (!metadata) return false;
-      const label = metadata.slice(metadata.indexOf(`${countLabel} `)).trimEnd();
-      if (summary !== label && !(label.endsWith('...') && summary.startsWith(label.slice(0, -3)))) return false;
       if (!lines[row].slice(col, listRight).includes(`${ids.length} results`)) return false;
       if (selected !== undefined && !entries.some((entry) => entry.id === selected && entry.selected)) return false;
       if (entries.length !== visible.length || !visible.every((id) => entries.some((entry) => entry.id === id)))
@@ -461,7 +457,7 @@ async function assertTableSurface(
       frame = workspace;
       return true;
     },
-    `${title} renders ${summary}, search ${JSON.stringify(search)} and the expected rows: ${ids.join(', ')}`,
+    `${title} renders search ${JSON.stringify(search)} and the expected rows: ${ids.join(', ')}`,
   );
   const { lines, row, col, left, right, bottom, listRight, bodyRow, entries, detailsRow, detailsCol } = frame;
   assert.match(lines[row + 1].slice(col, listRight), /^─+$/, 'the list divider separates title and headings');
@@ -672,7 +668,8 @@ for (const [name, key, nextId] of [
         }
         for (const size of layoutSizes) {
           resizeDashboard(session, size);
-          const surface = await assertTableSurface(session, key);
+          const viewport = key && size.columns === 72 ? { visible: catalogIds.slice(0, 3) } : {};
+          const surface = await assertTableSurface(session, key, viewport);
           const detail = assertWorkspaceDetail(surface, 'ask-matt', size.columns === 120);
           if (key) {
             assert.match(surface.entries[0].line, /MattPucock\[engineering\]\s+project$/);
@@ -684,14 +681,23 @@ for (const [name, key, nextId] of [
             }
           } else {
             assert.match(surface.entries[0].line, /project\s+Current$/);
-            if (size.rows >= 40) assert.ok(detail.some((line) => line.startsWith('Route repository questions')));
+            const hasDescription = (lines) => lines.some((line) => line.startsWith('Route repository questions'));
+            if (size.rows >= 40 && !hasDescription(detail)) {
+              assert.match(surface.lines[surface.detailsRow], /PgUp\/PgDn/);
+              session.input.write('\x1b[6~');
+              await waitForGrid(
+                session,
+                (grid) => hasDescription(workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES'))),
+                'paging Inventory details reveals the description when the shortcut panel reduces the viewport',
+              );
+            }
           }
           assertSelectedRow(session, 'ask-matt');
           session.input.write('d');
           await assertTableSurface(session, key, { details: false });
           assertSelectedRow(session, 'ask-matt');
           session.input.write('d');
-          assertWorkspaceDetail(await assertTableSurface(session, key), 'ask-matt', size.columns === 120);
+          assertWorkspaceDetail(await assertTableSurface(session, key, viewport), 'ask-matt', size.columns === 120);
         }
         session.input.write('\x1b[B');
         const nextHints = key
@@ -787,9 +793,9 @@ test(
         const grid = await waitForGrid(
           session,
           (grid) => {
-            if (!grid.includes('CONNECTED CATALOGS 2') || !grid.includes('USER CATALOGS 2')) return false;
-            const footer = shortcutFooter(grid, session.output.columns);
-            if (footer?.lastRow !== session.output.rows - 1 || !hasHints(footer.text, screenShortcutHints.m))
+            if (!grid.includes('CONNECTED CATALOGS 2')) return false;
+            const shortcuts = screenShortcutsFrame(grid, session.output.columns);
+            if (shortcuts?.lastRow !== session.output.rows - 1 || !hasHints(shortcuts.text, screenShortcutHints.m))
               return false;
             return (
               catalogs.every(({ name }, index) => {
@@ -882,7 +888,7 @@ test(
       const actionLabels = ['Install resource', 'Preview / audit', 'Revisions', 'Update resource'];
       const assertBrowseActionFrame = async (dismissed = []) => {
         const frame = await assertTableSurface(session, 'a', {
-          visible: catalogIds.slice(0, 4),
+          visible: catalogIds.slice(0, 3),
           dismissed,
         });
         const { lines, row, left, right, bottom, col, listRight, detailsRow, detailsCol } = frame;
@@ -1347,7 +1353,6 @@ test(
       session.input.write('\x1b');
       await assertTableSurface(session, '', {
         ids: [],
-        total: 0,
         hints: [
           'A install',
           'F filter',
@@ -1434,11 +1439,11 @@ test(
           session,
           (grid) => {
             const frame = workspaceFrame(grid, 'INSTALLED RESOURCES');
-            const footer = shortcutFooter(grid, session.output.columns);
+            const shortcuts = screenShortcutsFrame(grid, session.output.columns);
             return (
               frame &&
-              footer?.lastRow === session.output.rows - 1 &&
-              footer.text.includes('Q quit') &&
+              shortcuts?.lastRow === session.output.rows - 1 &&
+              shortcuts.text.includes('Q quit') &&
               (!id || frame.entries.some((entry) => entry.id === id && entry.selected)) &&
               !/PREVIEW FAILED|ENTER \/ ESC CLOSE|SOURCE · PAGE|SOURCE TREE|AUDIT REPORT|TYPE to search/.test(grid)
             );
@@ -1916,13 +1921,12 @@ test('Termless Catalog Catalog/Kind/License filters match visible candidates', {
     session.input.write('l');
     await assertTableSurface(session, '');
     session.input.write('a');
-    await assertTableSurface(session, 'a', { ids: all, total: all.length });
+    await assertTableSurface(session, 'a', { ids: all });
     session.input.write('d');
     const assertView = (ids, dismissed = []) =>
       assertTableSurface(session, 'a', {
         ...state,
         ids,
-        total: all.length,
         details: false,
         dismissed,
       });

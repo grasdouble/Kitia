@@ -322,6 +322,8 @@ for (const [screen, dimensions] of [
             detailsVisible && rows >= 30,
           );
         }
+        const shortcuts = plain.match(/^ *┌─+┐\r?\n *│ SHORTCUTS +│\r?\n(?: *│[^\r\n]*│\r?\n)+ *└─+┘/m)?.[0];
+        assert.ok(shortcuts, 'the shortcut panel retains its complete frame');
         const shortcutTokens =
           screen === 'inventory'
             ? [
@@ -353,7 +355,7 @@ for (const [screen, dimensions] of [
                   'Q quit',
                 ]
               : ['D details', 'ESC inventory', '1/2/3 sections', '↑↓ navigate', '? guide', 'Q quit'];
-        for (const token of shortcutTokens) assert.ok(plain.includes(token), `shortcut remains reachable: ${token}`);
+        for (const token of shortcutTokens) assert.ok(shortcuts.includes(token), `shortcut remains reachable: ${token}`);
       };
       const assertSelection = (value, index) => {
         assertListAndShortcuts(value);

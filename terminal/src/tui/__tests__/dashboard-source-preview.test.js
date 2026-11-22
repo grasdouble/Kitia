@@ -3,12 +3,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { test } = require('node:test');
-const {
-  waitForDashboardFrame,
-  selectedListRow,
-  inventoryFrameReady,
-  browseFrameReady,
-} = require('./dashboard-frames.js');
+const { waitForDashboardFrame, selectedListRow } = require('./dashboard-frames.js');
 
 test('preview starts with source files and keeps audit and tree pages separate', async () => {
   const { inspectionPageCount, inspectionPageView } = await import('../screens.mts');
@@ -429,8 +424,10 @@ for (const [kind, columns, rows, hasAudit] of [
       );
     };
     try {
-      await waitForDashboardFrame(output, () => rendered, inventoryFrameReady, 'initial inventory before preview');
-      await press('2', (frame) => browseFrameReady(frame) && selectedListRow(frame) === 'reviewer', 'Browse selection');
+      const inventoryVisible = (frame) => frame.includes('INSTALLED RESOURCES');
+      const browseVisible = (frame) => frame.includes('CATALOG RESOURCES');
+      await waitForDashboardFrame(output, () => rendered, inventoryVisible, 'initial inventory before preview');
+      await press('2', (frame) => browseVisible(frame) && selectedListRow(frame) === 'reviewer', 'Browse selection');
       const initial = await navigate('p', 'source', 0);
       assert.match(initial, /SOURCE PREVIEW/);
       assert.match(initial, new RegExp(`FILE ${kind === 'skill' ? 'SKILL\\.md' : 'reviewer\\.md'}`));
@@ -464,10 +461,10 @@ for (const [kind, columns, rows, hasAudit] of [
       assert.deepEqual(calls, ['preview']);
       await press(
         '\r',
-        (frame) => browseFrameReady(frame) && !frame.includes('SOURCE PREVIEW'),
+        (frame) => browseVisible(frame) && !frame.includes('SOURCE PREVIEW'),
         'Browse after preview',
       );
-      await press('\x1b', (frame) => inventoryFrameReady(frame) && !browseFrameReady(frame), 'Inventory after Browse');
+      await press('\x1b', (frame) => inventoryVisible(frame) && !browseVisible(frame), 'Inventory after Browse');
       input.write('q');
       assert.equal(await done, true);
     } finally {

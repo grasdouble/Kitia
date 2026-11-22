@@ -165,7 +165,7 @@ async function captureDashboardFrame(
         key === 'v'
           ? 'RESOURCE REVISIONS'
           : key === '1'
-            ? 'INVENTORY'
+            ? 'INSTALLED RESOURCES'
             : key === '2'
               ? 'CATALOG RESOURCES'
               : key === '3'
@@ -181,8 +181,7 @@ async function captureDashboardFrame(
       const previousFrame = latestFrame();
       input.write(key);
       await waitForFrame(
-        (nextFrame) =>
-          nextFrame !== previousFrame && nextFrame.includes('INVENTORY') && !nextFrame.includes('RESOURCE REVISIONS'),
+        (nextFrame) => nextFrame !== previousFrame && !nextFrame.includes('RESOURCE REVISIONS'),
         'the inventory frame after dashboard cleanup',
       );
     }
@@ -433,7 +432,6 @@ function catalogProps(resource) {
     licenseFilter: 'all',
     selectedIndex: 0,
     versionLabel: 'test',
-    screenName: 'Catalog',
     showDetails: true,
     columns: 300,
     rows: 40,
@@ -494,7 +492,7 @@ test('dashboard colors rows by kind and selection in ANSI', async () => {
     };
     const frames = [];
     for (const [component, props] of [
-      [CatalogScreen, { candidates: resources, resources: [], catalogs: [], screenName: "Catalog",
+      [CatalogScreen, { candidates: resources, resources: [], catalogs: [],
         licenseFilter: "all", controls: { columns: 120, section: "browse", focus: "list", query: "", searchActive: false, filters: [], actions: [] } }],
       [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true,
         controls: { columns: 120, section: "inventory", focus: "list", query: "", searchActive: false, filters: [], actions: [] } }],
@@ -776,7 +774,7 @@ test('dashboard section shortcuts switch directly between inventory, catalog, an
   const catalogs = await captureDashboardFrame([], actions, ['3'], dimensions);
   assert.ok(catalogs.includes('CONNECTED CATALOGS'));
   const inventory = await captureDashboardFrame([], actions, ['3', '2', '1'], dimensions);
-  assert.ok(inventory.includes('INVENTORY'));
+  assert.ok(inventory.includes('INSTALLED RESOURCES'));
 });
 
 test('dashboard keyboard focus follows Search, Kind, Catalog, and License controls', async () => {
@@ -829,7 +827,7 @@ test('dashboard keyboard focus follows Search, Kind, Catalog, and License contro
     dashboard.input.write('\u001b[B');
     await dashboard.wait((frame) => /›\s+agent/.test(frame), 'kind option highlighted');
     dashboard.input.write('\r');
-    await dashboard.wait((frame) => frame.includes('KIND AGENT'), 'kind filter committed');
+    await dashboard.wait((frame) => frame.includes('agent▾') && frame.includes('1 results'), 'kind filter committed');
 
     beforeFocus = dashboard.rawFrame();
     dashboard.input.write('\t');
@@ -1804,7 +1802,7 @@ test('detail paging hints follow list focus without taking search input', async 
         );
       } else {
         await dashboard.wait(
-          (frame) => frame.includes('INVENTORY') && frame.includes('SELECTION DETAILS'),
+          (frame) => frame.includes('INSTALLED RESOURCES') && frame.includes('SELECTION DETAILS'),
           'Inventory details',
         );
       }
@@ -1964,7 +1962,14 @@ test('Inventory Remove button accepts the production xterm cell click', async ()
   }
 });
 
-test('inventory action hitboxes follow Ink layout across descriptions, focus, and widths', async () => {
+test('inventory action hitboxes follow Ink layout across descriptions, focus, and widths', async (t) => {
+  const inkRequire = require('node:module').createRequire(require.resolve('ink'));
+  const { default: chalk } = await import(require('node:url').pathToFileURL(inkRequire.resolve('chalk')).href);
+  const previousLevel = chalk.level;
+  chalk.level = 1;
+  t.after(() => {
+    chalk.level = previousLevel;
+  });
   const cases = [
     { columns: 160, rows: 40, description: 'Preview this resource.', focusActions: true },
     {
@@ -2022,9 +2027,8 @@ test('inventory action hitboxes follow Ink layout across descriptions, focus, an
         );
       }
       if (focusActions) {
-        const beforeFocus = dashboard.rawFrame();
-        dashboard.input.write('\t'.repeat(6));
-        await dashboard.waitRaw((frame) => frame !== beforeFocus, 'keyboard Tab focus updates the action layout');
+        dashboard.input.write('\x1b[Z');
+        await dashboard.waitRaw((frame) => frame.includes('\x1b[4m'), 'Shift+Tab underlines the focused action');
       }
       const position = clickRenderedTarget(
         dashboard,
@@ -2169,7 +2173,7 @@ test('mouse preserves cancel and two-stage unmanaged removal confirmations', asy
     await dashboard.wait((frame) => frame.includes('CONFIRM REMOVE'), 'first unmanaged removal confirmation');
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 0, 'CANCEL');
     await dashboard.wait(
-      (frame) => frame.includes('INVENTORY') && !frame.includes('CONFIRM REMOVE'),
+      (frame) => frame.includes('INSTALLED RESOURCES') && !frame.includes('CONFIRM REMOVE'),
       'cancelled removal confirmation',
     );
     assert.deepEqual(calls, [], 'mouse cancel preserves the unmanaged resource');
@@ -2187,7 +2191,7 @@ test('mouse preserves cancel and two-stage unmanaged removal confirmations', asy
       '│ REMOVE PERMANENT │',
     );
     await dashboard.wait(
-      (frame) => frame.includes('INVENTORY') && !frame.includes('CONFIRM PERMANENT REMOVAL'),
+      (frame) => frame.includes('INSTALLED RESOURCES') && !frame.includes('CONFIRM PERMANENT REMOVAL'),
       'unmanaged removal completes after its second confirmation',
     );
     assert.deepEqual(calls, ['remove-unmanaged']);
@@ -2385,7 +2389,7 @@ test('inventory keeps full resource context available across viewport sizes', as
   const wideRow = widePlain.split(/\r?\n/).find((line) => line.includes(id));
   assert.ok(wideRow, 'inventory row should show the complete resource ID');
   assert.ok(wideRow.length >= 70, 'inventory columns should use most of the list panel width');
-  assert.ok(widePlain.includes(`CATALOG ${catalog}`), 'catalog stays in selection details');
+  assert.ok(detailBodyText(widePlain).includes(`CATALOG${catalog}`), 'catalog stays in selection details');
   const largeResource = {
     ...resource,
     category: 'Release Engineering',
@@ -2509,13 +2513,13 @@ test('Inventory and Browse keep shared browser chrome aligned at layout breakpoi
   for (const size of sizes) {
     const inventory = (await captureDashboardFrame([], {}, [], size, [], [warning])).replace(ansi, '');
     const browse = (await captureDashboardFrame([], actions, ['2'], size)).replace(ansi, '');
-    assert.ok(inventory.includes('INVENTORY') && inventory.includes('INSTALLED RESOURCES'));
+    assert.ok(inventory.includes('INSTALLED RESOURCES'));
     assert.ok(inventory.includes('SCAN_FAILED'));
     assert.ok(
       inventory.indexOf('SCAN_FAILED') < inventory.indexOf('INSTALLED RESOURCES'),
       'Inventory scan warnings stay above and reserve space before the workspace',
     );
-    assert.ok(browse.includes('CATALOG RESOURCES') && browse.includes('AVAILABLE 1/1'));
+    assert.match(browse, /CATALOG RESOURCES[^\n]*1 results/);
     for (const label of ['PROJECT', 'USER', 'UPDATES']) {
       assert.ok(inventory.includes(label), `Inventory keeps ${label} summary visible at ${size.columns}×${size.rows}`);
       assert.ok(browse.includes(label), `Browse keeps ${label} summary visible at ${size.columns}×${size.rows}`);
@@ -2653,7 +2657,7 @@ test('dashboard lists widen when detail columns are hidden', async () => {
     source_ref: 'a'.repeat(40),
   };
   for (const entry of [
-    { resources: [resource], actions: {}, keys: [], label: 'INVENTORY' },
+    { resources: [resource], actions: {}, keys: [], label: 'INSTALLED RESOURCES' },
     {
       resources: [],
       actions: { catalogResources: [resource] },
@@ -2920,12 +2924,6 @@ test('inventory detail pages preserve update paths and keep shortcuts inside sho
     status: 'attention',
     issues: [{ code: 'UPDATE_AVAILABLE', paths: [path] }],
   };
-  const strip = (frame) =>
-    frame
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-      .replace(/\u001b\]8;;/g, '')
-      .replace(/\u001b\\/g, '')
-      .replace(/│/g, '');
   for (const { columns, rows } of [
     { columns: 40, rows: 36 },
     { columns: 100, rows: 56 },
@@ -2934,8 +2932,8 @@ test('inventory detail pages preserve update paths and keep shortcuts inside sho
     try {
       let frame = dashboard.frame();
       let allPages = '';
-      for (let page = 0; page < 8; page += 1) {
-        allPages += strip(frame).replace(/\s/g, '');
+      for (let page = 0; page < 20; page += 1) {
+        allPages = appendDetailPage(allPages, frame);
         if (allPages.includes(issue.replace(/\s/g, ''))) break;
         const previousDetails = selectedDetailsFrame(frame);
         dashboard.input.write('\u001b[6~');
@@ -2949,10 +2947,10 @@ test('inventory detail pages preserve update paths and keep shortcuts inside sho
           throw error;
         }
       }
-      allPages += strip(frame).replace(/\s/g, '');
+      allPages = appendDetailPage(allPages, frame);
       assert.ok(
         allPages.includes(issue.replace(/\s/g, '')),
-        `complete update path remains available at ${columns}x${rows}`,
+        `complete update path remains available at ${columns}x${rows}: ${allPages}\n${frame}`,
       );
       const frameLines = frame.split(/\r?\n/);
       assert.equal(frameLines.length, rows, `the rendered frame should occupy ${rows} rows`);
@@ -2960,7 +2958,9 @@ test('inventory detail pages preserve update paths and keep shortcuts inside sho
         frame.includes('1/2/3 sections') && frame.includes('F filter'),
         'section and filter navigation stay visible',
       );
-      assert.match(frameLines[rows - 1], /Q quit/, 'the horizontal footer stays bottom-anchored');
+      const shortcuts = separatedPanelFrame(frame, 'SHORTCUTS');
+      assert.equal(shortcuts.bottomIndex, rows - 1, 'the shortcut panel stays bottom-anchored');
+      assert.ok(shortcuts.body.some((line) => line.includes('Q quit')));
       if (columns === 40) {
         assert.ok(
           frame.includes('PROJECT') && frame.includes('USER') && frame.includes('UPDATES'),
@@ -3334,7 +3334,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
             input.write('\x1b');
             await waitForFrame(
               (frame) =>
-                frame.includes('INVENTORY') && frame.includes('↑↓ navigate') && !frame.includes('UPDATE FAILED'),
+                frame.includes('INSTALLED RESOURCES') && frame.includes('↑↓ navigate') && !frame.includes('UPDATE FAILED'),
               'dismissed same-agent failure',
             );
             input.write('q');
@@ -3364,7 +3364,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
         } else {
           input.write(response === 'escape' ? '\x1b' : '\r');
           await waitForFrame(
-            (frame) => frame.includes('INVENTORY') && frame.includes('↑↓ navigate') && !frame.includes(promptTitle),
+            (frame) => frame.includes('INSTALLED RESOURCES') && frame.includes('↑↓ navigate') && !frame.includes(promptTitle),
             'cancelled force prompt',
           );
           assert.equal(calls.length, 1, 'declining must not retry');
@@ -3472,10 +3472,10 @@ test('failed managed updates show an actionable error modal in compact and norma
 
       input.write('\x1b');
       const dismissed = await waitForFrame(
-        (frame) => !frame.includes('UPDATE FAILED') && frame.includes('INVENTORY'),
+        (frame) => !frame.includes('UPDATE FAILED') && frame.includes('INSTALLED RESOURCES'),
         'the dashboard after dismissing the error',
       );
-      assert.ok(dismissed.includes('INVENTORY'));
+      assert.ok(dismissed.includes('INSTALLED RESOURCES'));
       input.write('q');
       assert.equal(await waitForDone(), false, 'a failed CLI status must remain nonzero after dismissal');
     } finally {
@@ -3543,7 +3543,7 @@ test('joined Inventory keeps row selection geometry stable across detail lengths
       heading,
       detailsHeading,
       tableHeader,
-      bottomShortcut: lines.at(-1),
+      shortcuts: separatedPanelFrame(plain, 'SHORTCUTS'),
       plain,
     };
   };
@@ -3565,7 +3565,8 @@ test('joined Inventory keeps row selection geometry stable across detail lengths
       'list and details headings share the same joined workspace row',
     );
     assert.ok(viewport.tableHeader.includes('RESOURCE') && viewport.tableHeader.includes('STATUS'));
-    assert.ok(viewport.bottomShortcut.includes('Q quit'), 'the horizontal footer stays bottom-anchored');
+    assert.equal(viewport.shortcuts.bottomIndex, dimensions.rows - 1, 'the shortcut panel stays bottom-anchored');
+    assert.ok(viewport.shortcuts.body.some((line) => line.includes('Q quit')));
   }
 
   const extremeDetails = resources.map((resource) =>
@@ -3618,7 +3619,7 @@ test('InventoryScreen renders supported shortcuts in the spacious details column
     output,
     () => rendered,
     (text) => text.includes('A install') && text.includes('\u001b[?2026l'),
-    'initial horizontal shortcuts footer',
+    'initial shortcuts panel',
   );
   input.write('q');
   assert.equal(await done, true);
@@ -3642,7 +3643,7 @@ test('InventoryScreen renders supported shortcuts in the spacious details column
   ]) {
     assert.ok(plain.includes(shortcut), `missing rendered shortcut: ${shortcut}`);
   }
-  assert.ok(plain.includes('INVENTORY'));
+  assert.ok(plain.includes('INSTALLED RESOURCES'));
   assert.ok(plain.includes('Update available:'));
 });
 
@@ -3789,7 +3790,7 @@ test('Catalogs mouse selection scopes card actions and blocks background clicks 
     checkCatalogFreshness: async () => [],
   };
   for (const { columns, rows, selectBeta, hideDetails, label } of [
-    { columns: 160, rows: 40, selectBeta: true, hideDetails: false, label: 'desktop' },
+    { columns: 160, rows: 44, selectBeta: true, hideDetails: false, label: 'desktop' },
     { columns: 80, rows: 40, selectBeta: true, hideDetails: false, label: 'compact' },
     {
       columns: 80,
