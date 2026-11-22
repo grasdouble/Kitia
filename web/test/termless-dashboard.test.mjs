@@ -1389,14 +1389,7 @@ test(
       session.input.write('\x1b');
       await assertTableSurface(session, '', {
         ids: [],
-        hints: [
-          'F filter',
-          '? guide',
-          'D details',
-          ...sectionNavigationHints,
-          '↑↓ navigate',
-          'Q quit',
-        ],
+        hints: ['F filter', '? guide', 'D details', ...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
         dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE'],
       });
       session.input.write('q');

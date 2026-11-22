@@ -190,10 +190,14 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
     const tabMetrics = sectionTabMetrics(width);
     const sections = ['inventory', 'browse', 'catalogs'] as const;
     const tabWidth = (section: DashboardSection) =>
-      sectionNames[section].length + String(props.sectionCounts?.[section] ?? 0).length + 1 + tabMetrics.itemPadding * 2;
+      sectionNames[section].length +
+      String(props.sectionCounts?.[section] ?? 0).length +
+      1 +
+      tabMetrics.itemPadding * 2;
     const availableTabWidth = Math.max(1, width - 2 - tabMetrics.inset * 2);
     // Leave room for the focus marker so focusing a tab does not wrap the strip.
-    const preferredTabWidth = () => sections.reduce((total, section) => total + tabWidth(section), 2 + 2 * tabMetrics.gap);
+    const preferredTabWidth = () =>
+      sections.reduce((total, section) => total + tabWidth(section), 2 + 2 * tabMetrics.gap);
     if (preferredTabWidth() > availableTabWidth) sectionNames.browse = 'Browse';
     if (preferredTabWidth() > availableTabWidth) sectionNames.catalogs = 'Manage…';
     const tabs: LayoutItem[] = sections.map((section) => ({
@@ -203,14 +207,7 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
       width: tabWidth(section) + Number(props.focus === 'tabs' && props.section === section) * 2,
       target: { type: 'section', section },
     }));
-    const tabLines = splitControlLines(
-      tabs,
-      availableTabWidth,
-      row,
-      'tabs',
-      3,
-      tabMetrics.gap,
-    );
+    const tabLines = splitControlLines(tabs, availableTabWidth, row, 'tabs', 3, tabMetrics.gap);
     for (const tabLine of tabLines) {
       lines.push(
         { ...tabLine, kind: 'tab-top' },

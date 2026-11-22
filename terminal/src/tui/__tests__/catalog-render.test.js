@@ -1453,7 +1453,11 @@ test('Inventory details order installed metadata and pair only contextual action
       false,
       'contextual buttons directly follow details without a redundant heading',
     );
-    assert.match(frame, /Navigation: I Inventory · B Browse resources/, 'Inventory and Browse are navigation shortcuts');
+    assert.match(
+      frame,
+      /Navigation: I Inventory · B Browse resources/,
+      'Inventory and Browse are navigation shortcuts',
+    );
     assert.equal(
       frame.includes('Install resource'),
       false,
@@ -1950,12 +1954,15 @@ test('clicking a visible resource after scrolling keeps the same rows in place',
     scope: 'project',
     managed: true,
   }));
-  const { input, wait, stop } = await startInteractiveDashboard(resources, { catalogResources: resources }, {
-    columns: 120,
-    rows: 30,
-  });
-  const listRows = (frame) =>
-    [...frame.matchAll(/^[^│\n]*│\s*›?\s*(viewport-\d+)\b/gm)].map((match) => match[1]);
+  const { input, wait, stop } = await startInteractiveDashboard(
+    resources,
+    { catalogResources: resources },
+    {
+      columns: 120,
+      rows: 30,
+    },
+  );
+  const listRows = (frame) => [...frame.matchAll(/^[^│\n]*│\s*›?\s*(viewport-\d+)\b/gm)].map((match) => match[1]);
   try {
     for (const heading of ['INSTALLED RESOURCES', 'CATALOG RESOURCES']) {
       if (heading === 'CATALOG RESOURCES') input.write('b');
@@ -3263,7 +3270,10 @@ test('managed inventory U confirms an update and renders the successful result',
     for (let page = 0; page < 10 && !completed.includes('Update complete'); page += 1) {
       const previousDetails = detailBodyText(completed);
       input.write('\u001b[6~');
-      completed = await waitForFrame((frame) => detailBodyText(frame) !== previousDetails, 'the next update details page');
+      completed = await waitForFrame(
+        (frame) => detailBodyText(frame) !== previousDetails,
+        'the next update details page',
+      );
     }
     assert.ok(completed.includes('Update complete'), 'the success message is reachable in the updated details');
     assert.equal(executions.length, 1);
@@ -3554,7 +3564,9 @@ test('local conflicts and GH force-required updates require explicit retry conse
             input.write('\x1b');
             await waitForFrame(
               (frame) =>
-                frame.includes('INSTALLED RESOURCES') && frame.includes('↑↓ navigate') && !frame.includes('UPDATE FAILED'),
+                frame.includes('INSTALLED RESOURCES') &&
+                frame.includes('↑↓ navigate') &&
+                !frame.includes('UPDATE FAILED'),
               'dismissed same-agent failure',
             );
             input.write('q');
@@ -3584,7 +3596,8 @@ test('local conflicts and GH force-required updates require explicit retry conse
         } else {
           input.write(response === 'escape' ? '\x1b' : '\r');
           await waitForFrame(
-            (frame) => frame.includes('INSTALLED RESOURCES') && frame.includes('↑↓ navigate') && !frame.includes(promptTitle),
+            (frame) =>
+              frame.includes('INSTALLED RESOURCES') && frame.includes('↑↓ navigate') && !frame.includes(promptTitle),
             'cancelled force prompt',
           );
           assert.equal(calls.length, 1, 'declining must not retry');

@@ -459,11 +459,7 @@ for (const [kind, columns, rows, hasAudit] of [
       if (treePages > 1) await navigate('\x1b[D', 'tree', 0);
       await navigate('\t', 'source', 0);
       assert.deepEqual(calls, ['preview']);
-      await press(
-        '\r',
-        (frame) => browseVisible(frame) && !frame.includes('SOURCE PREVIEW'),
-        'Browse after preview',
-      );
+      await press('\r', (frame) => browseVisible(frame) && !frame.includes('SOURCE PREVIEW'), 'Browse after preview');
       await press('i', (frame) => inventoryVisible(frame) && !browseVisible(frame), 'Inventory after Browse');
       input.write('q');
       assert.equal(await done, true);

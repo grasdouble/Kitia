@@ -19,11 +19,14 @@ test('DashboardHeader shows the mascot, wordmark and version at wide and compact
   assert.notDeepEqual(dashboardCatArt('lick', 0), dashboardCatArt('lick', 1));
   assert.notDeepEqual(dashboardCatArt('scratch', 0), dashboardCatArt('scratch', 1));
 
-  for (const [columns, title] of [[80, '█'], [34, 'KITIA']]) {
-    const frame = await renderTerminal(
-      React.createElement(DashboardHeader, { versionLabel: '2.0.0', columns }),
-      { columns, rows: 8 },
-    );
+  for (const [columns, title] of [
+    [80, '█'],
+    [34, 'KITIA'],
+  ]) {
+    const frame = await renderTerminal(React.createElement(DashboardHeader, { versionLabel: '2.0.0', columns }), {
+      columns,
+      rows: 8,
+    });
     assert.ok(frame.includes('(=o.o=)'));
     assert.ok(frame.includes(title));
     assert.match(frame, /Version 2\.0\.0[ \t]*$/m);

@@ -57,7 +57,11 @@ test('dashboard renders the resource list and selection panel at wide and narrow
       'selected inventory details',
     );
     assert.match(frame, /INSTALLED RESOURCES/);
-    const fields = ['INSTALLEDREVISIONabcdef0', 'https://github.com/example/manual-skill', 'SOURCEPATHskills/manual-skill'];
+    const fields = [
+      'INSTALLEDREVISIONabcdef0',
+      'https://github.com/example/manual-skill',
+      'SOURCEPATHskills/manual-skill',
+    ];
     let details = detailBodyText(frame);
     assert.ok(details.startsWith('skillmanual-skillAmanuallymaintainedskill.'));
     const initial = frame;
@@ -357,7 +361,8 @@ for (const [screen, dimensions] of [
                   'Q quit',
                 ]
               : ['D details', ...navigation, '↑↓ navigate', '? guide', 'Q quit'];
-        for (const token of shortcutTokens) assert.ok(shortcuts.includes(token), `shortcut remains reachable: ${token}`);
+        for (const token of shortcutTokens)
+          assert.ok(shortcuts.includes(token), `shortcut remains reachable: ${token}`);
       };
       const assertSelection = (value, index) => {
         assertListAndShortcuts(value);

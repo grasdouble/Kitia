@@ -93,10 +93,7 @@ export class DashboardMouseRegions {
     }
     for (const regions of this.owners.values()) {
       for (const region of regions) {
-        if (
-          (region.target.type === 'filter-option' || region.target.type === 'filter-dismiss') &&
-          contains(region)
-        ) {
+        if ((region.target.type === 'filter-option' || region.target.type === 'filter-dismiss') && contains(region)) {
           this.dispatchClick(region.target);
           return;
         }
