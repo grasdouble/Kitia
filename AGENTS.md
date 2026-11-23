@@ -7,6 +7,6 @@
 
 ## Dashboard colors
 
-- Source dashboard colors from `cli/src/dashboard/colors.ts`; screens and components MUST use theme tokens instead of defining color literals locally.
+- Source dashboard colors from `terminal/src/tui/colors.ts`; screens and components MUST use theme tokens instead of defining color literals locally.
 - Add or change semantic color roles in `DASHBOARD_THEME.semantic`, preserving their meaning; keep renderer-specific ANSI mappings in `terminalAnsi` and title-gradient stops in `titleGradientStops`.
 - Selected rows MUST use the theme's selected color, overriding the row's semantic or fallback color.

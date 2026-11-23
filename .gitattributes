@@ -1,0 +1,2 @@
+# Match the formatter on all platforms, including Windows checkouts.
+* text=auto eol=lf

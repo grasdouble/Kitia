@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
 import { JSDOM } from 'jsdom';
 import { createServer } from 'vite';
+
 import { createComponentRouter } from '../../../test/router-fixture.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../');
@@ -38,7 +40,9 @@ test('mobile navigation follows router state, closes on selection, and preserves
     scrollY: 0,
     IS_REACT_ACT_ENVIRONMENT: true,
   };
-  const previousGlobals = new Map(Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+  const previousGlobals = new Map(
+    Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+  );
   for (const [name, value] of Object.entries(globals)) {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
@@ -50,7 +54,9 @@ test('mobile navigation follows router state, closes on selection, and preserves
     const { createRoot } = await import('react-dom/client');
     const { RouterProvider } = await import('@tanstack/react-router');
     const { Header } = await vite.ssrLoadModule('/src/components/core/Header.tsx');
-    const router = await createComponentRouter(React.createElement(Header), { initialEntries: ['/demo/'] });
+    const router = await createComponentRouter(React.createElement(Header), {
+      initialEntries: ['/demo/'],
+    });
     const container = document.querySelector('#root');
     reactRoot = createRoot(container);
     await React.act(async () => reactRoot.render(React.createElement(RouterProvider, { router })));
@@ -69,7 +75,11 @@ test('mobile navigation follows router state, closes on selection, and preserves
     assert.equal(currentLink(), '/demo');
     assert.equal(nav.querySelectorAll('a[aria-current="page"]').length, 1);
 
-    for (const [href, event] of [['/', 'nav_home'], ['/demo', 'nav_demo'], ['/changelog', 'nav_changelog']]) {
+    for (const [href, event] of [
+      ['/', 'nav_home'],
+      ['/demo', 'nav_demo'],
+      ['/changelog', 'nav_changelog'],
+    ]) {
       await click(button);
       assert.equal(button.getAttribute('aria-expanded'), 'true');
       assert.equal(button.getAttribute('aria-label'), 'Close navigation menu');
@@ -95,16 +105,23 @@ test('mobile navigation follows router state, closes on selection, and preserves
 
     for (const options of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
       let defaultPrevented;
-      document.addEventListener('click', (event) => {
-        defaultPrevented = event.defaultPrevented;
-        event.preventDefault();
-      }, { once: true });
+      document.addEventListener(
+        'click',
+        (event) => {
+          defaultPrevented = event.defaultPrevented;
+          event.preventDefault();
+        },
+        { once: true },
+      );
       await click(nav.querySelector('a[href="/demo"]'), options);
       assert.equal(defaultPrevented, false);
       assert.equal(router.state.location.pathname, '/');
       assert.equal(router.state.location.hash, 'top');
     }
-    assert.equal(container.querySelector('a[data-ga-event="header_github"]').getAttribute('href'), 'https://github.com/grasdouble/Kitia');
+    assert.equal(
+      container.querySelector('a[data-ga-event="header_github"]').getAttribute('href'),
+      'https://github.com/grasdouble/Kitia',
+    );
   } finally {
     if (reactRoot) await React.act(async () => reactRoot.unmount());
     dom.window.close();

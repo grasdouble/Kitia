@@ -1,11 +1,20 @@
-const interruptionEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown', 'resize', 'popstate', 'hashchange'] as const;
+const interruptionEvents = [
+  'wheel',
+  'touchstart',
+  'pointerdown',
+  'keydown',
+  'resize',
+  'popstate',
+  'hashchange',
+] as const;
 
 /** Scroll to a section in 800ms, respecting sticky offsets and direct user input. */
 export function scrollToSection(target: HTMLElement): () => void {
   const startY = window.scrollY;
   const rootStyle = window.getComputedStyle(document.documentElement);
   const targetStyle = window.getComputedStyle(target);
-  const offset = (Number.parseFloat(rootStyle.scrollPaddingTop) || 0) + (Number.parseFloat(targetStyle.scrollMarginTop) || 0);
+  const offset =
+    (Number.parseFloat(rootStyle.scrollPaddingTop) || 0) + (Number.parseFloat(targetStyle.scrollMarginTop) || 0);
   const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
   const destinationY = Math.max(0, Math.min(maxY, startY + target.getBoundingClientRect().top - offset));
   const distance = destinationY - startY;

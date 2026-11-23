@@ -1,9 +1,9 @@
-"use strict";
+'use strict';
 
 const minimum = [26, 0, 0];
 
 function supportsTermless(version = process.versions.node) {
-  const current = version.split(".").map(Number);
+  const current = version.split('.').map(Number);
   for (let index = 0; index < minimum.length; index += 1) {
     if ((current[index] || 0) > minimum[index]) return true;
     if ((current[index] || 0) < minimum[index]) return false;
@@ -13,9 +13,7 @@ function supportsTermless(version = process.versions.node) {
 
 function assertTermlessRuntime(version = process.versions.node) {
   if (!supportsTermless(version)) {
-    throw new Error(
-      `Kitia's Termless dashboard tooling requires Node.js >=26.0.0; current version is ${version}.`,
-    );
+    throw new Error(`Kitia's Termless dashboard tooling requires Node.js >=26.0.0; current version is ${version}.`);
   }
 }
 

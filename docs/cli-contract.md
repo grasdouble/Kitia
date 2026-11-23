@@ -7,32 +7,24 @@ package version.
 
 ## Public surface and defaults
 
-The public surface consists of command syntax, documented options and defaults,
-JSON output, exit codes, and the supported installation-inventory formats.
-`cli/src/**/*.ts` and `cli/src/**/*.mts` compile into the matching directory
-under `dist/`; these modules are implementation details, not a supported
-JavaScript SDK. The `cli/bin/` entry point is the supported executable.
+The public surface consists of the `kitia` command, documented options and
+defaults, and the machine-readable output described below. In a repository
+checkout, the executable is `terminal/dist/kitia.js`; in the published package
+archive it is `dist/kitia.js`. Direct callers of `terminal/bin/kitia.js` must
+switch to the checkout path or invoke the installed `kitia` command. In a
+checkout, run `pnpm --filter @grasdouble/kitia run build` before using
+the executable. The other JavaScript modules in `terminal/dist/` are implementation
+details, not a supported JavaScript SDK.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
 
 On interactive dashboard launch, Kitia checks npm for a newer stable release.
-Every dashboard screen uses a five-line header with a stationary ASCII cat on
-the left. On wider terminals, a three-line pixel-block KITIA wordmark appears on
-the right, followed by the version/screen name and screen-specific metadata.
-The mascot and pixel wordmark share a smoothly cycling cyan/violet/pink gradient
-and a single 60 ms animation clock. The mascot remains animated in compact-title
-mode; the clock stops when the header unmounts.
-Narrow terminals use a compact text title instead, retaining the same header height.
-After a random 10–20 seconds of rest,
-it chooses with equal probability to lick a raised paw, scratch its ear, or wink.
-Licking and scratching alternate two poses every 300 ms for 2–4 seconds;
-a wink lasts 180 ms. Each animation finishes before the next rest period starts.
-The mascot stays in the same position throughout; there is no walking animation.
-While the request is pending, the
-version line is `Kitia - Checking version update`; afterward it shows
-`Kitia - <version>` or `Kitia - <version> - New version available`. Check
-failures are silent. Other commands and non-interactive launches skip the
-check.
+The dashboard header shows the Kitia mascot, wordmark, and installed version.
+Section names and counts remain in the dashboard tabs and workspaces. A newer
+release is announced in a separate modal; failed checks are silent. On matching
+global npm or pnpm installations, choose **Update** to close the dashboard and
+run the package manager. Choose **Later** to keep using the installed version.
+Other commands and non-interactive dashboard launches skip the notice.
 
 | Command family | Contract |
 |---|---|
@@ -41,10 +33,27 @@ check.
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
 | `versions <kind> <id>` | List up to 500 newest GitHub commits affecting a skill entrypoint or an agent/instruction Markdown file, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
+| `self-update [--yes]` | Install the latest Kitia release using the package manager that owns the running global npm or pnpm installation; confirm first unless `--yes` is passed |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
 | `validate` | Strict validation of all catalog sources |
 | `collection export`, `collection import` | Share versioned pinned references to selected resources; collections contain no resource content and do not install resources |
+
+Top-level `kitia --help` prints help before configuration loading. `doctor
+--network` enables GitHub authentication/repository probes; `check --network`
+is an invalid argument.
+Aggregate discovery loads each catalog index independently, retaining healthy
+results and reporting warnings for only unavailable or invalid catalogs.
+Targeted discovery loads only the selected index; explicit `validate` remains
+strict across the complete configured set.
+
+`kitia self-update` leaves local dependencies, one-off caches, linked
+checkouts, and installations of unknown or ambiguous origin untouched.
+Confirmation is required; pass `--yes` when no terminal is attached. If you
+run Kitia without installing it, use `npx --yes @grasdouble/kitia@latest` or
+`pnpm dlx @grasdouble/kitia@latest` instead. Restart Kitia after updating.
+This command updates Kitia itself, not installed skills, agents, or instructions.
+
 
 
 Installation defaults to Copilot and the target defaults to the current
@@ -52,6 +61,10 @@ directory. Updates preserve registered runtimes; they do not silently remove
 resources absent from the current catalog. `--force` remains explicit and does
 not bypass path safety, operation locks or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
+
+Explicit `uninstall --catalog` resolves its selector against the selected
+target's installed inventory, including catalogs no longer registered; other
+catalog selectors remain limited to registered sources.
 
 `kitia versions <kind> <id> [--catalog <name>]` supports skills, agents, and
 instructions. It uses `gh api` against the GitHub commits endpoint, filtered
@@ -79,6 +92,21 @@ pin comparison. Path-history checks require GitHub CLI authentication and
 network access. If either lookup fails or is invalid, `check` reports an error
 (dashboard inventory reports a scope scan error); it must not report the
 resource as current.
+An audited `install --ref` replacement of a tracked resource audits the selected
+revision before any destination or inventory write. If the audit blocks, every
+tracked runtime in the chosen scope remains unchanged.
+An ordinary agent or instruction install cannot advance a shared resource pin
+while omitting a runtime already tracked for that resource, even with `--force`.
+Use `--tool both` to install both runtimes or use `update` to preserve tracked
+runtime coverage.
+Instruction scope is parsed from the pinned Markdown (`apply_to`, `applyTo`, or
+`paths`); without frontmatter, the global default is `["**"]`. Destination
+paths remain ID-scoped; runtime metadata and inventory describe the selected
+content. Agent and instruction destination writes and inventory publication are
+one staged transaction: inventory is published last, and a failure restores
+previous destination bytes and modes. Bulk updates reuse one verified checkout
+for each repository and commit within the operation.
+
 `--audit` is opt-in and applies only to `preview` and `install` of pinned
 source-catalog resources; it is not an update check. It is rejected for other
 commands and for resources without pinned source metadata. Preview reports
@@ -101,6 +129,12 @@ project-only. Inventories and operation locks are target-local, so the two
 scopes are managed independently. Inventory format upgrades are explicit; see
 the [inventory migration guide](inventory-migrations.md).
 Read-only commands and previews do not create home configuration directories.
+Kitia uses `~/.config/kitia` unless `KITIA_CONFIG_DIR` names another directory.
+Kitia no longer reads or copies `~/.config/kiti` automatically and leaves the
+old files untouched. To keep using that configuration, copy `~/.config/kiti`
+to `~/.config/kitia` only if the destination does not exist, or set
+`KITIA_CONFIG_DIR` to the old directory instead. `kitia migrate` upgrades
+installation inventories, not home configuration.
 `dashboard` reads both scopes; if one inventory is unsupported, it displays the
 other scope and reports the failing scope explicitly instead of rewriting it.
 Dashboard actions require confirmation and use normal lifecycle checks,
@@ -109,6 +143,11 @@ Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
 Operations that can block run in a worker thread so rendering and animation
 continue during the work.
+When Inventory or Browse selection details are clipped, PageUp/PageDown moves the
+detail viewport without changing the selected resource. Paging is available
+while list or contextual-action focus is active; Search, filter menus, and modals
+retain their own keyboard input. The footer and panel hint show the paging
+shortcut only while the details pager can receive it.
 Preview uses a dedicated screen below the dashboard header and opens directly
 on source-file content, not an initial tree page. With enough terminal width
 and height, source files occupy the main pane on the left; the right sidebar
@@ -165,44 +204,50 @@ blockquote or list containers. Shell aliases use the Bash grammar, and SQL uses
 a generic SQL grammar rather than dialect-specific parsing. These lexical source
 colors are not a rendered CommonMark or MDX view.
 This presentation does not change CLI output, JSON output or command syntax.
-Inventory, catalog browser, and catalog management distribute available list
-width across their columns. Catalog tables limit padding for short status and
-count fields, leaving more room for source names, IDs, and repository URLs.
-The dashboard colors each inventory and catalog row by resource kind: yellow for
-skills, cyan for agents, and green for instructions. Statuses remain labeled in
-text. Selecting a row overrides its kind color with blue highlighting and
-marks it with `›` in the fixed-width leading marker column on inventory, catalog
-browser, and catalog management screens. Unknown kinds retain the
-existing status-based inventory color or proprietary-license catalog
-highlighting, when applicable. CLI tables retain their existing presentation.
-On wide terminals, an open details panel shares the viewport; hiding it lets
-the table expand. Selected-content details in inventory, the catalog browser,
-and catalog management separate their existing title from the body with one
-theme-colored divider row. The title text and colors, selected-row highlighting,
-metadata, and keyboard actions remain unchanged; filename and page labels remain
-Preview-only. This applies to skills, agents, and instructions alike, including
-stacked details on narrow terminals. The Inventory, Catalog Resources, Connected
-Catalogs, and Resource Revisions table panels group their existing title first
-and their existing metadata next, above one theme-colored divider. Inventory
-and Catalog Resources show `RESOURCES n/total · range`, then the shared
-`Filter query · Catalog value · Kind value · License value` line, wrapping
-this full summary above the same divider as needed. Connected Catalogs has no
-separate metadata lines: its count remains in the title. Resource Revisions
-keeps its resource/action context and, when paginated, its existing Showing
-range above the divider; no column labels are added to revisions. Existing
-table column headings and data rows remain below the divider. Moving these
-metadata lines reserves header rows
-and can reduce the responsive list row budget; selected-row visibility and
-pagination reflect the available body rows. Framed `SHORTCUTS` panels, including
-modal shortcut frames, place each nonempty category—Actions, Filters, Display,
-and Navigation—in order on its own purple heading line, followed by its
-shortcuts. Search mode shows only applicable categories. The panels retain their
-metadata-free title/divider/body structure and complete keyboard hints,
-including conditional controls. Shortcut keys, selection colors, navigation,
-filters, and the `D` details toggle are unchanged. Summary cards, warnings,
-non-table modal main title bars, and the five-line global dashboard header are
-unchanged.
-Preview uses the same framed `SHORTCUTS` panel: `Display` lists source, audit,
+The compact header is followed by section tabs, summary cards, and a responsive
+controls row. The terminal-rendered tabs are `Inventory`, `Browse resources`,
+and `Catalogs`, with live counts of installed resources, available candidates,
+and connected catalogs respectively; the counts are unfiltered. The selected
+tab has a thin underline. Project and User cards report resource totals with
+managed and unmanaged counts; Updates reports its count plus current and warning
+totals.
+Inventory and Browse combine a bordered Search field with outlined Kind,
+Catalog, and License selectors, in that visual order. Rounded outlined action
+buttons use semantic primary, danger, and neutral emphasis. Keyboard navigation
+follows the visible control order. Below 40 terminal rows, these controls use
+compact single-row fields with side borders and no top or bottom borders; at
+shorter heights, dashboard summaries also switch to a compact presentation.
+These are terminal-rendering conventions, not pixel-identical browser controls.
+
+Inventory and Browse use joined list/details workspaces. Inventory columns are
+`RESOURCE`, `KIND`, `SCOPE`, and `STATUS`; Browse columns are `RESOURCE`, `KIND`,
+`CATALOG`, and `INSTALLED`. On wide terminals, the list and selection details
+share a divider; on narrow terminals, they stack. Inventory details include the
+catalog label, license, status, full revision, paths, source location, and
+resource metadata. Browse details include description, catalog, license,
+installed scopes, and pinned source. Long values wrap instead of being silently
+truncated; PageUp/PageDown paginate clipped details without changing selection.
+
+Catalogs is a selectable card list, not a table. Cards show repository, resource
+and installed counts, and freshness. The selected card contains its details and
+Edit, Refresh, and Remove actions; Add and Presets remain above the card list.
+
+Rows use semantic theme colors: skills are yellow, agents cyan, and instructions
+green. Selected rows use the blue selection surface and `›` marker in Inventory
+and Browse; the selected Catalogs card uses the same blue surface with a white
+foreground. Unknown kinds use the status-based Inventory fallback or the
+proprietary-license Browse warning color. CLI text tables retain their existing
+format.
+
+The dashboard groups keyboard hints into Actions, Filters, Display, and
+Navigation in the bordered `SHORTCUTS` panel. Short or narrow terminals pack
+groups onto the same line when there is room. Search shows its own filtering hints,
+and modals keep their context-specific shortcut panels.
+Use `I` for Inventory, `B` to browse resources, and `M` to manage catalogs from
+any dashboard section. Tabs remain available by mouse or keyboard. Use `Q`
+to quit the dashboard; `Esc` does not switch sections or quit. In Manage
+Catalogs, use `Shift+I` to import catalog configuration.
+Preview uses the same panel: `Display` lists source, audit,
 and tree controls; `Navigation` lists pane focus, pagination, and close
 controls. The panel reserves its full height before pane pagination is sized.
 Below 12 terminal rows, the shortcut frame temporarily occupies the screen;
@@ -259,11 +304,11 @@ not change CLI command syntax, options, output contracts, or audit semantics.
 Selected-resource details expose license status and, when source provenance is
 available, the pinned repository/path/commit. Missing license metadata is shown
 as undeclared; incomplete pin metadata may show as unknown.
-The inventory's Catalog column shows the configured source-catalog name for a
-tracked artifact with source-repository metadata. For a custom user catalog, it
-adds the folder selected by the saved path mapping, such as
-`MattPucock[engineering]`. Untracked artifacts and managed records without a
-source association display `-`.
+Inventory selection details show a `CATALOG` label for tracked artifacts with
+source-repository metadata. Custom user catalogs include the folder selected by
+the saved path mapping, such as `MattPucock[engineering]`. Browse keeps catalog
+identity in both its `CATALOG` column and selection details. Untracked artifacts
+and managed records without a source association display `-`.
 
 From inventory, uppercase `A`/`U` install or update resources, and `Delete`
 uninstalls the selection. Press `M` for catalog management; there, `A` adds a
@@ -416,8 +461,8 @@ a write failure.
 
 Machine-readable schemas ship with the package:
 
-- [Discovery arrays](../cli/schemas/cli-discovery-v1.schema.json)
-- [Reports, version 1](../cli/schemas/cli-report-v1.schema.json)
+- [Discovery arrays](../terminal/schemas/cli-discovery-v1.schema.json)
+- [Reports, version 1](../terminal/schemas/cli-report-v1.schema.json)
 - [Installation inventory formats and migrations](inventory-migrations.md)
 
 Discovery schema versions are identified by the schema filename; the public
@@ -499,7 +544,13 @@ so its ownership, conflict and path checks remain in force.
 | JSON `check` and `doctor` | `0` | `2` | `1` |
 | JSON lifecycle preview | `0` | N/A | `1` |
 | Discovery | `0` | `1` for incomplete sources | `1` |
-| Other commands | `0` | N/A | Nonzero; delegated `gh` failures may retain its exit code |
+| Other commands | `0` | N/A | Nonzero; other delegated `gh` failures may retain its exit code |
+
+For source-skill installation, a nonzero GitHub CLI result is reported as
+`GH_INSTALL_FAILED` and exits with status `1`; it does not reuse the delegated
+process status as the Kitia command's exit code. A failure to launch `gh` is
+reported as `GH_SPAWN_FAILED` and also exits with status `1`. The source-skill
+`preview` command may retain the delegated process status.
 
 A doctor finding such as an unavailable executable is a diagnostic result
 requiring attention, not necessarily a failure to execute doctor itself.
@@ -555,15 +606,15 @@ distributed.
 
 ## Regression gate
 
-`pnpm run cli:test:contract` exercises the CLI executable in isolated synthetic
-catalogs, validates complete JSON reports against the schemas and compares
-stable fields against committed version-1 expectations. Human-readable text
+`pnpm --filter @grasdouble/kitia run test:contract` exercises the CLI
+executable in isolated synthetic catalogs, validates complete JSON reports against
+the schemas and compares stable fields against committed version-1 expectations. Human-readable text
 and object/array ordering are deliberately not frozen.
 
 Historical version-1 inventories are read from committed fixtures rather than
 created by the current writer. Future-version and unsupported-kind scenarios
 verify that files remain byte-for-byte unchanged even when `--force` is used.
-The suite is included in `npm test` and therefore in the existing Node.js 26
+The suite is included in `pnpm test` and therefore in the existing Node.js 26
 Linux/macOS/Windows CI matrix.
 
 Do not update a baseline merely to make a regression green. Explain whether a

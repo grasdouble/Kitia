@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from '@tanstack/react-router';
+import React, { useEffect, useRef, useState } from 'react';
+
 import { Approach } from './components/sections/Approach';
 import { Automation } from './components/sections/Automation';
 import { Closing } from './components/sections/Closing';
@@ -7,8 +8,9 @@ import { DashboardPreview } from './components/sections/DashboardPreview';
 import { Hero } from './components/sections/Hero';
 import { TrustStrip } from './components/sections/TrustStrip';
 import { Workflow } from './components/sections/Workflow';
-import styles from './HomePage.module.css';
 import { scrollToSection } from './sectionScrolling';
+
+import styles from './HomePage.module.css';
 
 const sections = [
   ['approach', 'Approach', 'nav_approach'],
@@ -26,7 +28,9 @@ export function HomePage() {
   const [activeSection, setActiveSection] = useState('');
 
   useEffect(() => {
-    const targets = sections.map(([id]) => document.getElementById(id)).filter((target): target is HTMLElement => target !== null);
+    const targets = sections
+      .map(([id]) => document.getElementById(id))
+      .filter((target): target is HTMLElement => target !== null);
     const header = document.querySelector('header');
     const wideLayout = window.matchMedia('(min-width: 1180px)');
     let frame = 0;
@@ -70,31 +74,64 @@ export function HomePage() {
   }, []);
 
   function navigateToSection(event: React.MouseEvent<HTMLAnchorElement>, id: string) {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
     const target = document.getElementById(id);
     if (!target) return;
     event.preventDefault();
     const request = ++sectionRequest.current;
     cancelSectionScroll.current?.();
-    void router.navigate({
-      to: '/',
-      hash: id,
-      search: true,
-      replace: router.latestLocation.hash === id,
-      resetScroll: false,
-      hashScrollIntoView: false,
-    }).then(() => {
-      if (request === sectionRequest.current && content.current?.contains(target)) {
-        cancelSectionScroll.current = scrollToSection(target);
-      }
-    });
+    void router
+      .navigate({
+        to: '/',
+        hash: id,
+        search: true,
+        replace: router.latestLocation.hash === id,
+        resetScroll: false,
+        hashScrollIntoView: false,
+      })
+      .then(() => {
+        if (request === sectionRequest.current && content.current?.contains(target)) {
+          cancelSectionScroll.current = scrollToSection(target);
+        }
+      });
   }
 
-  return <main id="main" className={styles.layout}>
-    <nav ref={navigation} className={styles.sectionNav} aria-label="On this page">
-      <p>On this page</p>
-      <ol>{sections.map(([id, label, event]) => <li key={id}><a href={`#${id}`} aria-current={activeSection === id ? 'location' : undefined} data-ga-event={event} onClick={(click) => navigateToSection(click, id)}>{label}</a></li>)}</ol>
-    </nav>
-    <div ref={content} className={styles.content}><Hero /><TrustStrip /><Approach /><DashboardPreview /><Workflow /><Automation /><Closing /></div>
-  </main>;
+  return (
+    <main id="main" className={styles.layout}>
+      <nav ref={navigation} className={styles.sectionNav} aria-label="On this page">
+        <p>On this page</p>
+        <ol>
+          {sections.map(([id, label, event]) => (
+            <li key={id}>
+              <a
+                href={`#${id}`}
+                aria-current={activeSection === id ? 'location' : undefined}
+                data-ga-event={event}
+                onClick={(click) => navigateToSection(click, id)}
+              >
+                {label}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+      <div ref={content} className={styles.content}>
+        <Hero />
+        <TrustStrip />
+        <Approach />
+        <DashboardPreview />
+        <Workflow />
+        <Automation />
+        <Closing />
+      </div>
+    </main>
+  );
 }

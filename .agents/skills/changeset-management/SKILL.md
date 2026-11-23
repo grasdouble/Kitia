@@ -46,8 +46,8 @@ Use exactly two spaces before each group label and four spaces before each detai
 Run:
 
 ```sh
-pnpm run changeset:format
-pnpm changeset status
+pnpm changeset:format
+pnpm exec changeset status
 ```
 
 The first command checks the repository's summary-and-bullets style and permits empty-frontmatter no-bump Changesets. The second validates Changesets metadata, package references, and the computed release plan. For repository-only work, confirm the new entry has empty frontmatter; another Changeset on the branch may independently plan a package release.

@@ -1,0 +1,73 @@
+{
+  "name": "@grasdouble/kitia",
+  "version": "2.0.0",
+  "description": "Kitia — Your AI toolkit, in good hands.",
+  "keywords": [
+    "agents",
+    "ai",
+    "catalog",
+    "skills"
+  ],
+  "homepage": "https://github.com/grasdouble/Kitia#readme",
+  "bugs": {
+    "url": "https://github.com/grasdouble/Kitia/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grasdouble/Kitia.git",
+    "directory": "terminal"
+  },
+  "bin": {
+    "kitia": "dist/kitia.js"
+  },
+  "files": [
+    "dist/",
+    "schemas/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "docs/cli-contract.md",
+    "docs/inventory-migrations.md",
+    "docs/resource-audit.md",
+    "docs/resource-collections.md"
+  ],
+  "type": "commonjs",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.json",
+    "prepack": "pnpm run build && node scripts/stage-package-docs.js",
+    "postpack": "node scripts/stage-package-docs.js --clean",
+    "typecheck:tests": "tsc -p tsconfig.type-tests.json",
+    "test": "pnpm run typecheck:tests && pnpm run test:contract && node --test \"test/*.test.js\" && pnpm run test:source && pnpm run test:tui:source",
+    "test:contract": "pnpm run build && node --test test/contract/cli-contract.test.js",
+    "test:core:source": "tsx --test \"src/core/**/__tests__/*.test.js\"",
+    "test:source": "tsx --test \"src/cli/**/__tests__/*.test.js\" && pnpm run test:core:source",
+    "test:tui:source": "tsx --test \"src/tui/**/__tests__/*.test.js\"",
+    "test:package-smoke": "node scripts/package-smoke.js",
+    "validate": "pnpm run build && node dist/kitia.js validate"
+  },
+  "dependencies": {
+    "ink": "8.0.0",
+    "prismjs": "1.30.0",
+    "react": "19.3.1",
+    "spdx-expression-parse": "^4.0.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/prismjs": "1.26.6",
+    "@types/react": "19.3.0",
+    "ajv": "8.20.0",
+    "rimraf": "^6.1.4",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=26"
+  }
+}

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
 import { useRouter } from '@tanstack/react-router';
+import { useEffect } from 'react';
 
 const measurementId = 'G-9GDELT6HDR';
 
@@ -22,9 +22,11 @@ export function useGoogleAnalytics() {
     if (!existingTracking) {
       documents.set(document, tracking);
       window.dataLayer = window.dataLayer ?? [];
-      window.gtag = window.gtag ?? function () {
-        window.dataLayer?.push(arguments);
-      };
+      window.gtag =
+        window.gtag ??
+        function () {
+          window.dataLayer?.push(arguments);
+        };
       window.gtag('js', new Date());
       window.gtag('config', measurementId, { send_page_view: false });
 

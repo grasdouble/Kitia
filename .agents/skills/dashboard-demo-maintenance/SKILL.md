@@ -11,9 +11,9 @@ Keep `/demo` faithful to the local dashboard by running the shared Ink component
 
 Inspect the relevant current files before editing; follow their imports if the structure has changed.
 
-- `cli/src/dashboard/dashboard.mts`: shared Dashboard component, state transitions, action contracts, confirmations, and keyboard handlers.
-- `cli/src/dashboard/screens/`, `modals.mts`, `helpers.mts`, and `source-highlighting.mts`: shared layout, panels, filters, and syntax highlighting. Do not copy these implementations into the website.
-- `cli/src/dashboard/colors.ts`: shared TUI semantic roles and renderer-specific ANSI codes/palette under `terminalAnsi`. Do not add browser-specific semantic roles or component-local color literals; selected rows override kind/status colors.
+- `terminal/src/tui/dashboard.mts`: shared Dashboard component, state transitions, action contracts, confirmations, and keyboard handlers.
+- `terminal/src/tui/screens/`, `modals.mts`, `helpers.mts`, and `source-highlighting.mts`: shared layout, panels, filters, and syntax highlighting. Do not copy these implementations into the website.
+- `terminal/src/tui/colors.ts`: shared TUI semantic roles and renderer-specific ANSI codes/palette under `terminalAnsi`. Do not add browser-specific semantic roles or component-local color literals; selected rows override kind/status colors.
 - `web/src/components/demo/TuiDemo.tsx` and its CSS module: page wrapper, terminal lifecycle, reset/quit states, and on-screen key buttons.
 - `web/src/components/demo/browserTerminal.ts`, `terminalRuntime/`, and `web/browserInkPlugin.ts`: xterm/Ink bridge and scoped browser compatibility.
 - `web/src/components/demo/terminalTheme.ts`: ANSI-to-CSS resolution and xterm theme. Reuse the shared ANSI palette used by the TUI screenshots; page surfaces and borders use website CSS tokens, not another dashboard palette.
@@ -60,12 +60,12 @@ Run the narrowest relevant checks once after editing:
 
 ```sh
 node --test web/src/components/demo/tuiDemoSession.test.mjs
-pnpm run web:build
+pnpm --filter @grasdouble/kitia-web run build
 ```
 
-The first exercises fixture semantics; the second checks static routes and the browser bundle. Use `pnpm run web:test:components` instead of the individual test when navigation or other web components also changed. Add focused regression coverage for uncovered consumer-visible edge cases, not source-text assertions or wiring checks. If shared CLI behavior changed, run its relevant CLI/TUI tests too; browser simulation is not proof of real filesystem safety.
+The first exercises fixture semantics; the second checks static routes and the browser bundle. Use `pnpm --filter @grasdouble/kitia-web run test` instead of the individual test when navigation or other web components also changed. Add focused regression coverage for uncovered consumer-visible edge cases, not source-text assertions or wiring checks. If shared CLI behavior changed, run its relevant CLI/TUI tests too; browser simulation is not proof of real filesystem safety.
 
-Launch `pnpm run web:dev` and open the actual page. After a build, use `pnpm exec vite preview --config web/vite.config.ts` to inspect the production output. Use the displayed URL/port.
+Launch `pnpm dev` and open the actual page. After a build, use `pnpm --filter @grasdouble/kitia-web run preview` to inspect the production output. Use the displayed URL/port.
 
 Exercise the affected native TUI paths, including search/filter, selection, install options and confirmation, revision replacement, preview panes, update/uninstall, catalog actions, and guide when applicable. Verify on-screen key buttons, keyboard focus, reset during initialization, quit/restart, desktop-to-mobile resizing, and `/demo-keep` preservation when the change can affect them.
 

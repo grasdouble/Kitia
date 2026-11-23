@@ -1,104 +1,42 @@
 {
-  "name": "@grasdouble/kitia",
-  "version": "2.0.0",
-  "description": "Kitia — Your AI toolkit, in good hands.",
-  "license": "MIT",
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/grasdouble/Kitia.git"
-  },
-  "homepage": "https://github.com/grasdouble/Kitia#readme",
-  "bugs": {
-    "url": "https://github.com/grasdouble/Kitia/issues"
-  },
-  "keywords": [
-    "ai",
-    "agents",
-    "skills",
-    "catalog"
-  ],
-  "bin": {
-    "kitia": "cli/bin/kitia.js"
-  },
-  "files": [
-    "cli/dist/cli/",
-    "cli/dist/catalog/",
-    "cli/dist/dashboard/",
-    "cli/dist/table-layout.js",
-    "cli/bin/kitia.js",
-    "cli/migrations/",
-    "cli/schemas/",
-    "README.md",
-    "CHANGELOG.md",
-    "CONTRIBUTING.md",
-    "docs/cli-contract.md",
-    "docs/inventory-migrations.md",
-    "docs/resource-audit.md",
-    "docs/resource-collections.md"
-  ],
-  "engines": {
-    "node": ">=26"
-  },
+  "name": "kitia-workspace",
+  "private": true,
   "scripts": {
-    "build": "pnpm run cli:build && pnpm run web:build",
-    "prepare": "pnpm run cli:build && husky",
-    "test": "pnpm run docs:test && pnpm run typecheck:strict && pnpm run cli:test && pnpm run web:test:components",
-    "cli:build": "rimraf dist cli/dist && tsc -p tsconfig.json",
-    "typecheck:strict": "tsc -p tsconfig.strict.json",
-    "cli:test": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js cli/test/source-highlighting.test.js cli/test/dashboard-filters.test.js cli/test/source-history.test.js cli/test/version-check.test.js cli/test/catalog-freshness.test.js cli/test/action-retry.test.js cli/test/collections.test.js cli/test/migrations.test.js cli/test/audit.test.js cli/test/catalog-render.test.js cli/test/license.test.js",
-    "cli:test:contract": "pnpm run cli:build && node --test cli/test/source-catalogs.test.js cli/test/source-history.test.js",
-    "cli:test:package-smoke": "pnpm run cli:build && node cli/scripts/package-smoke.js",
-    "cli:validate": "pnpm run cli:build && node cli/bin/kitia.js validate",
-    "changeset": "changeset",
+    "format": "oxfmt \"{scripts,docs/test,terminal/{src,test,scripts},web/{src,test,scripts}}/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
+    "format:check": "pnpm run format --check",
+    "build": "pnpm -r run build",
+    "dev": "pnpm --filter @grasdouble/kitia-web run dev",
+    "prepare": "husky",
+    "test": "pnpm run docs:test && pnpm -r run test",
+    "docs:test": "node --test docs/test/documentation.test.js",
     "changeset:format": "node scripts/check-changeset-format.mjs",
     "changeset:version": "changeset version && pnpm install --lockfile-only --ignore-scripts",
     "release": "changeset publish",
-    "docs:test": "node --test docs/test/documentation.test.js",
-    "web:build": "vite build --config web/vite.config.ts",
-    "web:dev": "vite --config web/vite.config.ts",
-    "web:test:components": "node --conditions=development --test web/src/analytics.test.mjs web/src/HomePage.test.mjs web/src/sectionScrolling.test.mjs web/src/components/core/Header.test.mjs web/src/components/sections/Changelog.test.mjs web/src/components/demo/tuiDemoSession.test.mjs web/test/website-screenshots.test.mjs",
-    "web:test:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node --test web/test/termless-dashboard.test.mjs",
-    "web:screenshots:update:termless": "node web/scripts/screenshots-generator/termless-preflight.js && pnpm run cli:build && node web/scripts/screenshots-generator/update-site-screenshots-termless.js"
-  },
-  "dependencies": {
-    "ink": "8.0.0",
-    "prismjs": "1.30.0",
-    "react": "19.3.1",
-    "react-dom": "19.3.1",
-    "spdx-expression-parse": "^4.0.0",
-    "yaml": "2.9.1"
+    "terminal:build": "pnpm --filter @grasdouble/kitia run build",
+    "terminal:dev": "pnpm run terminal:build && node terminal/dist/kitia.js",
+    "terminal:prepack": "pnpm --filter @grasdouble/kitia run prepack",
+    "terminal:postpack": "pnpm --filter @grasdouble/kitia run postpack",
+    "terminal:typecheck:tests": "pnpm --filter @grasdouble/kitia run typecheck:tests",
+    "terminal:test": "pnpm --filter @grasdouble/kitia run test",
+    "terminal:test:contract": "pnpm --filter @grasdouble/kitia run test:contract",
+    "terminal:test:core:source": "pnpm --filter @grasdouble/kitia run test:core:source",
+    "terminal:test:source": "pnpm --filter @grasdouble/kitia run test:source",
+    "terminal:test:tui:source": "pnpm --filter @grasdouble/kitia run test:tui:source",
+    "terminal:test:package-smoke": "pnpm --filter @grasdouble/kitia run test:package-smoke",
+    "terminal:validate": "pnpm --filter @grasdouble/kitia run validate",
+    "web:build": "pnpm --filter @grasdouble/kitia-web run build",
+    "web:dev": "pnpm --filter @grasdouble/kitia-web run dev",
+    "web:preview": "pnpm --filter @grasdouble/kitia-web run preview",
+    "web:test": "pnpm --filter @grasdouble/kitia-web run test",
+    "web:test:termless": "pnpm --filter @grasdouble/kitia-web run test:termless",
+    "web:screenshots:update:termless": "pnpm --filter @grasdouble/kitia-web run screenshots:update:termless"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
-    "@resvg/resvg-js": "2.6.2",
-    "@rollup/plugin-inject": "^5.0.5",
-    "@tanstack/react-router": "^1.170.46",
-    "@termless/core": "0.10.2",
-    "@termless/xtermjs": "0.10.2",
-    "@types/node": "26.6.6",
-    "@types/prismjs": "1.26.6",
-    "@types/react": "19.3.0",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "ajv": "8.20.0",
-    "buffer": "^6.0.3",
-    "events": "^3.3.0",
     "husky": "^9.1.7",
-    "jsdom": "^31.0.0",
-    "path-browserify": "^1.0.1",
-    "process": "^0.11.10",
-    "readable-stream": "^4.8.0",
-    "rimraf": "^6.1.4",
-    "sharp": "^0.35.5",
-    "strip-ansi": "^7.2.0",
-    "typescript": "5.9.3",
-    "url": "^0.11.4",
-    "util": "^0.12.5",
-    "vite": "^6.4.1",
-    "vite-plugin-commonjs": "^0.10.4"
+    "oxfmt": "0.79.0"
+  },
+  "engines": {
+    "node": ">=26"
   }
 }

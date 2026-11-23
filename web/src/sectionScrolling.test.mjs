@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
 import { JSDOM } from 'jsdom';
 import { createServer } from 'vite';
 
@@ -16,9 +17,16 @@ after(() => vite.close());
 const { scrollToSection } = await vite.ssrLoadModule('/src/sectionScrolling.ts');
 
 function scrollFixture({ reducedMotion = false, targetTop = 2500 } = {}) {
-  const dom = new JSDOM('<!doctype html><html style="scroll-padding-top:88px"><body><section style="scroll-margin-top:32px"></section></body></html>');
-  const previous = new Map(['window', 'document'].map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
-  for (const [name, value] of Object.entries({ window: dom.window, document: dom.window.document })) {
+  const dom = new JSDOM(
+    '<!doctype html><html style="scroll-padding-top:88px"><body><section style="scroll-margin-top:32px"></section></body></html>',
+  );
+  const previous = new Map(
+    ['window', 'document'].map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+  );
+  for (const [name, value] of Object.entries({
+    window: dom.window,
+    document: dom.window.document,
+  })) {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   let y = 100;
@@ -28,20 +36,30 @@ function scrollFixture({ reducedMotion = false, targetTop = 2500 } = {}) {
   Object.defineProperty(window, 'innerHeight', { value: 1000 });
   Object.defineProperty(document.documentElement, 'scrollHeight', { value: 4000 });
   window.matchMedia = () => ({ matches: reducedMotion });
-  window.scrollTo = ({ top }) => { y = top; };
-  window.requestAnimationFrame = (callback) => { const id = nextId++; frames.set(id, callback); return id; };
+  window.scrollTo = ({ top }) => {
+    y = top;
+  };
+  window.requestAnimationFrame = (callback) => {
+    const id = nextId++;
+    frames.set(id, callback);
+    return id;
+  };
   window.cancelAnimationFrame = (id) => frames.delete(id);
   const target = document.querySelector('section');
   target.getBoundingClientRect = () => new dom.window.DOMRect(0, targetTop - y, 800, 400);
   return {
     target,
-    get position() { return y; },
+    get position() {
+      return y;
+    },
     advance(timestamp) {
       const callbacks = [...frames.values()];
       frames.clear();
       for (const callback of callbacks) callback(timestamp);
     },
-    interrupt(event) { window.dispatchEvent(new dom.window.Event(event)); },
+    interrupt(event) {
+      window.dispatchEvent(new dom.window.Event(event));
+    },
     restore() {
       dom.window.close();
       for (const [name, descriptor] of previous) {
@@ -68,7 +86,10 @@ test('section scrolling advances over time, eases at arrival, and respects stick
     assert.ok(100 < early && early < middle && middle < late && late < fixture.position);
     assert.ok(fixture.position - late < late - middle, 'the animation slows toward arrival');
     assert.equal(fixture.position, 2380, 'the destination accounts for both header padding and section margin');
-  } finally { cancel(); fixture.restore(); }
+  } finally {
+    cancel();
+    fixture.restore();
+  }
 });
 
 test('reduced motion jumps immediately and destinations cannot exceed the document boundary', () => {
@@ -79,7 +100,10 @@ test('reduced motion jumps immediately and destinations cannot exceed the docume
     fixture.advance(0);
     fixture.advance(800);
     assert.equal(fixture.position, 3000);
-  } finally { cancel(); fixture.restore(); }
+  } finally {
+    cancel();
+    fixture.restore();
+  }
 });
 
 test('manual input and navigation interrupt animation without later moving the viewport', () => {
@@ -94,7 +118,10 @@ test('manual input and navigation interrupt animation without later moving the v
       fixture.advance(800);
       fixture.advance(1600);
       assert.equal(fixture.position, interruptedAt, `${event} must return scroll control to the user`);
-    } finally { cancel(); fixture.restore(); }
+    } finally {
+      cancel();
+      fixture.restore();
+    }
   }
 });
 
@@ -118,5 +145,9 @@ test('a replacement animation starts at the current position and cannot be overw
     fixture.advance(1200);
     fixture.advance(2000);
     assert.equal(fixture.position, 712);
-  } finally { cancelFirst(); cancelSecond?.(); fixture.restore(); }
+  } finally {
+    cancelFirst();
+    cancelSecond?.();
+    fixture.restore();
+  }
 });
