@@ -13,7 +13,11 @@ function frontmatterParts(
   }
   const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
   if (end < 0) throw new CatalogError(`Unclosed YAML frontmatter in ${filePath}`);
-  const document = YAML.parseDocument(lines.slice(1, end).join('\n'), {
+  const yaml = lines
+    .slice(1, end)
+    .join('\n')
+    .replace(/\r(?=\n|$)/g, '');
+  const document = YAML.parseDocument(yaml, {
     uniqueKeys: true,
     schema: 'core',
   });

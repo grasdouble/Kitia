@@ -9,6 +9,7 @@ Stop automatically migrating legacy Kiti settings and improve resource and catal
     - Audit selected-revision replacements of installed skills, agents, and instructions before writing when an audit is requested.
     - Roll back agent and instruction files if inventory publication fails, and refuse to advance a shared revision while leaving a tracked client unchanged.
     - Install instructions without frontmatter globally and use the selected commit's instruction scope when installing or updating an older revision.
+    - Read resource frontmatter with Windows line endings without changing the Markdown body.
     - Keep healthy catalogs visible when another index is missing or invalid, preserve indexes during case-only renames, and reject reserved registry names.
     - Allow `uninstall --catalog` for resources from a removed catalog.
     - Make top-level `--help` and `doctor --network` work as documented.

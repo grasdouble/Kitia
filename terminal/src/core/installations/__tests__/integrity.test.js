@@ -62,6 +62,7 @@ function fixture(t) {
     fs.rmSync(root, { recursive: true, force: true });
   });
   execFileSync('git', ['init', '--quiet', upstream]);
+  write(upstream, '.gitattributes', '*.md text eol=lf\n');
   const git = (...args) => execFileSync('git', ['-C', upstream, ...args], { encoding: 'utf8' });
   return {
     commit(contents) {
