@@ -72,7 +72,6 @@ async function captureDashboardFrame(
   actions = {},
   keys = [],
   dimensions = { columns: 120, rows: 56 },
-  cleanupKeys = [],
   errors = [],
 ) {
   const { PassThrough } = require('node:stream');
@@ -97,7 +96,7 @@ async function captureDashboardFrame(
       return await Promise.race([
         done,
         new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error('Dashboard did not exit after q within 5 seconds')), 5_000);
+          timeout = setTimeout(() => reject(new Error('Dashboard did not exit after stdin closed')), 5_000);
         }),
       ]);
     } finally {
@@ -174,33 +173,12 @@ async function captureDashboardFrame(
         `the frame after ${JSON.stringify(key)}`,
       );
     }
-    const frame = latestFrame();
-    for (const key of cleanupKeys) {
-      const previousFrame = latestFrame();
-      input.write(key);
-      await waitForFrame(
-        (nextFrame) => nextFrame !== previousFrame && !nextFrame.includes('RESOURCE REVISIONS'),
-        'the inventory frame after dashboard cleanup',
-      );
-    }
-    input.write('q');
-    assert.equal(await waitForDashboardExit(), true);
-    return frame;
+    return latestFrame();
   } finally {
     input.destroy();
-    let cleanupTimeout;
     try {
-      await Promise.race([
-        done.then(
-          () => {},
-          () => {},
-        ),
-        new Promise((resolve) => {
-          cleanupTimeout = setTimeout(resolve, 1_000);
-        }),
-      ]);
+      await waitForDashboardExit();
     } finally {
-      clearTimeout(cleanupTimeout);
       output.destroy();
     }
   }
@@ -2732,7 +2710,7 @@ test('Inventory and Browse keep shared browser chrome aligned at layout breakpoi
   const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
   for (const size of sizes) {
-    const inventory = (await captureDashboardFrame([], {}, [], size, [], [warning])).replace(ansi, '');
+    const inventory = (await captureDashboardFrame([], {}, [], size, [warning])).replace(ansi, '');
     const browse = (await captureDashboardFrame([], actions, ['b'], size)).replace(ansi, '');
     assert.ok(inventory.includes('INSTALLED RESOURCES'));
     assert.ok(inventory.includes('SCAN_FAILED'));
@@ -2953,7 +2931,6 @@ test('source-version picker adapts SHA, date, and subject columns at 80 and 120 
       },
       ['v'],
       dimensions,
-      ['\u001b'],
     );
     const lines = frame.split(/\r?\n/);
     const revisions = separatedPanelFrame(frame, 'RESOURCE REVISIONS', true);
@@ -3020,7 +2997,6 @@ test('revision viewport keeps the selected commit and separated shortcuts bounde
       },
       ['v', ...Array(selectedIndex).fill('\u001b[B')],
       dimensions,
-      ['\u001b'],
     );
     const lines = frame.split(/\r?\n/);
     const revisions = separatedPanelFrame(frame, 'RESOURCE REVISIONS', true);
