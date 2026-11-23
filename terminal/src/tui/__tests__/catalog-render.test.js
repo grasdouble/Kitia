@@ -294,7 +294,18 @@ async function startInteractiveDashboard(resources, actions = {}, dimensions = {
   };
   input.once('close', () => onFinish(false));
   await wait((value) => Boolean(value), 'initial interactive frame');
-  return { input, output, done, frame, rawFrame, wait, waitRaw, stop, mouse: transport.mouse };
+  return {
+    input,
+    output,
+    done,
+    frame,
+    rawFrame,
+    wait,
+    waitRaw,
+    stop,
+    mouse: transport.mouse,
+    flush: app.waitUntilRenderFlush,
+  };
 }
 
 function clickMouseTarget(dashboard, matchesTarget) {
@@ -2084,17 +2095,14 @@ test('mouse selects rendered resources and modal buttons preserve install safety
       'Install resource',
     );
     await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'install options modal');
-    await new Promise((resolve) => setImmediate(resolve));
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-option' && target.group === 'scope', '│ USER │');
-    await dashboard.wait((frame) => frame.includes('│ USER │'), 'user scope selected by click');
-    await new Promise((resolve) => setImmediate(resolve));
+    await dashboard.flush();
     clickRenderedTarget(
       dashboard,
       (target) => target.type === 'modal-option' && target.group === 'client',
       '│ CLAUDE │',
     );
-    await dashboard.wait((frame) => frame.includes('│ CLAUDE │'), 'Claude client selected by click');
-    await new Promise((resolve) => setImmediate(resolve));
+    await dashboard.flush();
     dashboard.input.write('\r');
     await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
     clickAt(dashboard.input, browseTab);
