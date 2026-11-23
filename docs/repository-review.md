@@ -20,7 +20,7 @@ Priority ladder: **P1** release/CI or data-integrity risks; **P2** behavioral/re
 
 ### The existing Oxfmt Changeset format failure blocks the PR changeset check
 
-**Evidence:** The actual `pnpm run changeset:format` output reported `.changeset/bright-oxfmt-format.md`: “add grouped details after the description” and “add a User-Facing or Technical group.” The file has a package bump and a plain description but no grouped details ([`.changeset/bright-oxfmt-format.md:1–5`](../.changeset/bright-oxfmt-format.md#L1)). CI runs `changeset:format` in the PR `changeset-status` job ([`.github/workflows/ci.yml:49–80`](../.github/workflows/ci.yml#L49)).
+**Evidence:** At the time of the review, `pnpm run changeset:format` reported “add grouped details after the description” and “add a User-Facing or Technical group.” The [original Oxfmt changeset](https://github.com/grasdouble/Kitia/blob/93b68706a46384263445006338c623d3da11635f/.changeset/bright-oxfmt-format.md#L1-L5) requested a package bump but had no grouped details. CI runs `changeset:format` in the PR `changeset-status` job ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml#L49)).
 
 **Impact:** The checked-in Changeset fails the formatter check, so the PR changeset job fails until the entry is resolved.
 
