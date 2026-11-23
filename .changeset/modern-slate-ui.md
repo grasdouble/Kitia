@@ -12,7 +12,7 @@ Redesign the terminal dashboard, add self-update, and make catalog installs more
     - Find keyboard shortcuts under Actions, Filters, Display, and Navigation, with `?` for the guide under Display. Section tabs show unfiltered counts.
     - Use the mouse wheel over resource lists, catalog cards, selection details, or the active preview pane. Clicking a visible row preserves the current scroll position, and reaching a list boundary or clicking the active tab no longer interrupts pointer input.
     - Search and filter with the keyboard or mouse. Filter menus open below their fields, and keyboard focus follows the visible control order.
-    - Page through long Inventory and Browse details with PageUp/PageDown. Long catalog labels wrap inside the details pane, and Browse shows the pinned source even on compact layouts.
+    - Page through long Inventory and Browse details with PageUp/PageDown, including immediately after resizing the terminal. Long catalog labels wrap inside the details pane, and Browse shows the pinned source even on compact layouts.
     - See only the actions that apply to the selected resource, including Update only when available. Browse actions remain within the details pane at 120×24.
     - Manage connected catalogs from a card list with Add and Presets above the list and Edit, Refresh, and Remove on the selected card.
     - See the installed Kitia version in the dashboard header.
