@@ -1,5 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const { test } = require('node:test');
 const { buildSourceSkillArgs, formatGhDiagnostics, describeGhFailure } = require('../gh-skill.ts');
 
@@ -29,7 +30,7 @@ test('builds scoped source skill commands and explains command failures', () => 
       '--pin',
       'a'.repeat(40),
       '--dir',
-      '/home/user/.agents/skills',
+      path.join('/home/user', '.agents', 'skills'),
       '--force',
     ],
   );
