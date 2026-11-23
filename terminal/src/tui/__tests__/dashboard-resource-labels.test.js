@@ -87,7 +87,7 @@ test('inventory labels custom catalogs from the most specific configured source 
   );
 });
 
-test('catalog browser renders custom source folders in SOURCE and detail labels', async () => {
+test('catalog browser renders custom source folders in SOURCE and detail labels', async (t) => {
   const { PassThrough } = require('node:stream');
   const { runDashboard } = await import('../dashboard.mts');
   const candidates = [
@@ -152,6 +152,14 @@ test('catalog browser renders custom source folders in SOURCE and detail labels'
       { name: 'Basic', repository: 'basic/skills', mode: 'basic', entries: [] },
     ],
   });
+  t.after(async () => {
+    input.destroy();
+    try {
+      await done;
+    } finally {
+      output.destroy();
+    }
+  });
   input.write('b');
   await waitForOutput(
     output,
@@ -159,10 +167,6 @@ test('catalog browser renders custom source folders in SOURCE and detail labels'
     (text) => text.includes('\u001b[?2026l') && text.includes('CATALOG RESOURCES'),
     'catalog browser screen',
   );
-  input.write('q');
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
   assert.match(renderedOutput, /MattPucock\[engineering\]/);
   assert.match(renderedOutput, /MattPucock\[productivity\]/);
   assert.match(renderedOutput, /Basic/);
@@ -170,7 +174,7 @@ test('catalog browser renders custom source folders in SOURCE and detail labels'
   assert.doesNotMatch(renderedOutput, /MattPucock\[misc\]/);
 });
 
-test('catalog browser renders mapped source folders and keeps repository-less names', async () => {
+test('catalog browser renders mapped source folders and keeps repository-less names', async (t) => {
   const { PassThrough } = require('node:stream');
   const { runDashboard } = await import('../dashboard.mts');
   const candidates = [
@@ -214,6 +218,14 @@ test('catalog browser renders mapped source folders and keeps repository-less na
         entries: [{ kind: 'skill', path: 'skills/productivity' }],
       },
     ],
+  });
+  t.after(async () => {
+    input.destroy();
+    try {
+      await done;
+    } finally {
+      output.destroy();
+    }
   });
   const plain = () => rendered.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
   await waitForOutput(
@@ -261,12 +273,6 @@ test('catalog browser renders mapped source folders and keeps repository-less na
       .split(/\r?\n/)
       .some((line) => line.includes('MattPucock[productivity]') && line.includes('grill-me')),
   );
-  input.write('\x1b');
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  input.write('q');
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
 });
 
 test('inventory TUI labels a tracked user skill with its custom source folder', async (t) => {
@@ -410,10 +416,6 @@ test('inventory TUI labels a tracked user skill with its custom source folder', 
     compactDetailText.includes('CATALOGMattPucock[productivity]'),
     'the custom catalog folder remains visible in Inventory details',
   );
-  input.write('q');
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
 });
 
 test('inventory TUI renders multiple configured custom folders and preserves other catalog labels', async (t) => {
@@ -518,10 +520,6 @@ test('inventory TUI renders multiple configured custom folders and preserves oth
     new Set(resources.map(({ id }) => id)),
     'every tracked and unmanaged resource remains reachable in the inventory list',
   );
-  input.write('q');
-  assert.equal(await done, true);
-  input.destroy();
-  output.destroy();
 });
 
 test('inventory columns reserve usable ID space and expose custom Catalog suffixes at 120 columns', async () => {
