@@ -1,6 +1,6 @@
 'use strict';
 
-import { Text, useInput } from 'ink';
+import { Text, useInput, useStdin } from 'ink';
 import React, { type ReactNode, useState } from 'react';
 
 import { DASHBOARD_THEME } from '../colors.js';
@@ -64,6 +64,7 @@ export function useDashboardDetailPaging({
   menuFilter?: DashboardFilter | null;
   resetKey: readonly unknown[];
 }) {
+  const { isRawModeSupported } = useStdin();
   const [page, setPage] = useState(() => ({ resetKey, offset: 0 }));
   const maxOffset = viewport > 0 ? Math.max(0, lines.length - viewport) : 0;
   const reset =
@@ -75,22 +76,25 @@ export function useDashboardDetailPaging({
     setPage({ resetKey, offset: visibleOffset });
   }
   const canScroll = enabled && !menuFilter && maxOffset > 0;
-  const canPage = canScroll && !filterMode && (focus === 'list' || focus === 'actions');
+  const canPage = isRawModeSupported && canScroll && !filterMode && (focus === 'list' || focus === 'actions');
   const move = (delta: number) =>
     setPage((current) => {
       const offset = Math.max(0, Math.min(maxOffset, current.offset + delta));
       return offset === current.offset ? current : { resetKey: current.resetKey, offset };
     });
-  // Keep the listener installed across layout and focus changes.
-  useInput((input, key) => {
-    if (!canPage) return;
-    const step = Math.max(1, viewport - 1);
-    if (key.pageUp || input === '\u001b[5~') {
-      move(-step);
-    } else if (key.pageDown || input === '\u001b[6~') {
-      move(step);
-    }
-  });
+  // Keep the listener installed across layout and focus changes when stdin supports raw mode.
+  useInput(
+    (input, key) => {
+      if (!canPage) return;
+      const step = Math.max(1, viewport - 1);
+      if (key.pageUp || input === '\u001b[5~') {
+        move(-step);
+      } else if (key.pageDown || input === '\u001b[6~') {
+        move(step);
+      }
+    },
+    { isActive: isRawModeSupported },
+  );
   return {
     visibleLines: lines.slice(visibleOffset, visibleOffset + Math.max(0, viewport)),
     isClipped: maxOffset > 0,
