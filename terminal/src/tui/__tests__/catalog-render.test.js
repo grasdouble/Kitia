@@ -2128,10 +2128,12 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     source_ref: 'abcdef0123456789abcdef0123456789abcdef01',
   }));
   const calls = [];
+  const installation = Promise.withResolvers();
   const dashboard = await startInteractiveDashboard([], {
     catalogResources: candidates,
     execute: async (operation, resource, options) => {
       calls.push({ operation, id: resource.id, options });
+      await installation.promise;
       return {
         code: 0,
         resources: [{ ...resource, scope: options.scope, managed: true, status: 'current' }],
@@ -2248,10 +2250,19 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     assert.ok(!confirmation.includes('• .copilot/skills/candidate-two/SKILL.md'));
     clickAt(dashboard.input, browseTab);
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 1, '│ INSTALL │');
-    await dashboard.wait(
-      (frame) => frame.includes('Inventory 1') && !frame.includes('CONFIRM INSTALL'),
-      'confirmed install updates the live installed tab count',
+    const loading = await dashboard.wait(
+      (frame) => frame.includes('LOADING') && frame.includes('Installing skill:candidate-two'),
+      'installation progress',
     );
+    assert.ok(loading.includes('CATALOG RESOURCES'));
+    assert.ok(!loading.includes('INSTALLED RESOURCES'));
+    assert.match(loading, /›\s+candidate-two/);
+    installation.resolve();
+    const installed = await dashboard.wait(
+      (frame) => frame.includes('CATALOG RESOURCES') && frame.includes('Inventory 1') && !frame.includes('LOADING'),
+      'the completed install refreshes Browse without leaving it',
+    );
+    assert.match(installed, /›\s+candidate-two\s+skill\s+sample\s+user/);
     assert.deepEqual(
       calls.map(({ operation, id, options }) => ({
         operation,
@@ -2262,6 +2273,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       [{ operation: 'install', id: 'candidate-two', scope: 'user', destinations: ['standard', 'claude', 'mistral'] }],
     );
   } finally {
+    installation.resolve();
     await dashboard.stop();
   }
 });
@@ -2337,10 +2349,12 @@ test('install options keep scope selections independent and only add newly selec
     dashboard.input.write('y');
     await dashboard.wait(
       (frame) =>
-        frame.includes('INSTALLED RESOURCES') && !frame.includes('CONFIRM INSTALL') && !frame.includes('LOADING'),
-      'inventory after adding the destination',
+        frame.includes('CATALOG RESOURCES') && !frame.includes('CONFIRM INSTALL') && !frame.includes('LOADING'),
+      'Browse after adding the destination',
     );
     assert.deepEqual(calls, [{ action: 'install', id: source.id, scope: 'project', destinations: ['copilot'] }]);
+    assert.match(detailBodyText(dashboard.frame()), /MESSAGEInstalledskill:review\./);
+    await press('i', 'INSTALLED RESOURCES');
     const uninstall = await press('\x1b[3~', 'CONFIRM UNINSTALL');
     assert.ok(uninstall.includes(`• ${standardPath}`));
     assert.ok(uninstall.includes(`• ${copilotPath}`));

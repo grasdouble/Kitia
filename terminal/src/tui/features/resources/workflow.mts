@@ -196,6 +196,7 @@ export function useResourceWorkflow(
         }
       } else if (inspectionAction) {
         inspect(requested.resource, result);
+        setActionMessage('');
       } else {
         setActionMessage(outcome || `${completedLabel} ${requested.resource.kind}:${requested.resource.id}.`);
       }
@@ -249,10 +250,8 @@ export function useResourceWorkflow(
     setConfirmation(null);
     setConfirmationStage(1);
     setConfirmationChoice(0);
-    if (requested.action === 'install' || (requested.action === 'update' && requested.scope)) {
-      setScreenMode('inventory');
-      setInstallResource(null);
-    }
+    const fromInstallOptions = requested.action === 'install' || (requested.action === 'update' && requested.scope);
+    if (fromInstallOptions) cancelOptions();
     void runConfirmedAction(requested);
   };
 

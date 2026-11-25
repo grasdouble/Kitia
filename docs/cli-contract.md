@@ -167,6 +167,9 @@ Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
 Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
+Resource actions keep the dashboard section from which they were started.
+For example, after installing or updating from **Browse resources**, the
+dashboard refreshes the installed state in Browse without opening **Inventory**.
 Operations that can block run in a worker thread so rendering and animation
 continue during the work.
 When Inventory or Browse selection details are clipped, PageUp/PageDown moves the

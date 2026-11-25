@@ -9,6 +9,7 @@ Choose one or more installation destinations in the CLI and dashboard
     - Select multiple destinations in a dropdown styled like the Inventory filters, add copies without replacing existing ones, and review full paths before installing, updating, or uninstalling.
     - The dashboard lists User first and selects it by default for skills and agents. Scope and Destinations use the same dropdown style. The CLI continues to default to project scope.
     - Use Review install to check selected paths before confirming, or Cancel to return to the catalog without installing.
+    - Stay on the dashboard section that started a resource action, including after a Browse installation or update finishes.
     - See the underlying inventory error directly in Install Options when a scope is unavailable.
     - See the selected artifact's installation destinations under Installed for in Inventory.
     - Existing tracked skills stay in place and require no inventory migration. Agents and instructions keep their native formats; instructions remain project-only.

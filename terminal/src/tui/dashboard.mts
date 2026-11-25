@@ -857,6 +857,7 @@ export function Dashboard({
       licenseFilter: catalogLicenseFilter,
       selectedIndex: activeCatalogIndex,
       versionLabel,
+      actionMessage,
       showDetails,
       columns,
       rows,

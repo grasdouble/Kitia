@@ -31,6 +31,7 @@ export function CatalogScreen({
   licenseFilter,
   selectedIndex,
   versionLabel,
+  actionMessage = '',
   showDetails,
   columns,
   rows,
@@ -48,6 +49,7 @@ export function CatalogScreen({
   licenseFilter: string;
   selectedIndex: number;
   versionLabel: string;
+  actionMessage?: string;
   showDetails: boolean;
   columns: number;
   rows: number;
@@ -205,6 +207,12 @@ export function CatalogScreen({
             ? [
                 h(Text, { key: 'catalog-entry-source-gap' }, ' '),
                 ...detailField('catalog-entry-source', 'PINNED SOURCE', source, detailsContentWidth, Infinity),
+              ]
+            : []),
+          ...(!modalActive && actionMessage
+            ? [
+                h(Text, { key: 'catalog-entry-action-gap' }, ' '),
+                ...detailField('catalog-entry-action', 'MESSAGE', actionMessage, detailsContentWidth, Infinity),
               ]
             : []),
         ],

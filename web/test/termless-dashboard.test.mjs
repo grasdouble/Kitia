@@ -1438,9 +1438,8 @@ test(
       );
       session.input.write('\x1b');
       resizeDashboard(session, terminalSize);
-      await assertTableSurface(session, '', {
-        ids: [],
-        hints: ['F filter', '? guide', 'D details', ...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
+      await assertTableSurface(session, 'b', {
+        selected: 'plan-review',
         dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE'],
       });
       session.input.write('q');
@@ -2232,6 +2231,7 @@ test(
       });
       resizeDashboard(session, { columns: 120, rows: 55 });
       await assertTableSurface(session, '', { selected: 'unmanaged', hints });
+      session.input.write('\x1b[6~');
       await waitForGrid(
         session,
         (grid) =>

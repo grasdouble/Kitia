@@ -183,7 +183,11 @@ test('dashboard replaces an installed skill with the selected full revision thro
   assert.match(confirmationFrame, /Tracked paths:/);
   for (const path of installed.paths) assert.ok(confirmationFrame.includes(path));
   input.write('y');
-  await waitForFrame((frame) => frame.includes('Updating skill:revision-skill'), 'update loading popup');
+  const loading = await waitForFrame(
+    (frame) => frame.includes('Updating skill:revision-skill'),
+    'update loading popup',
+  );
+  assert.ok(loading.includes('CATALOG RESOURCES'));
   await updateStarted;
   assert.deepEqual(actions, [
     {
@@ -197,7 +201,11 @@ test('dashboard replaces an installed skill with the selected full revision thro
   input.write('q');
   assert.equal(dashboardFinished, false, 'input remains blocked while the loader popup is active');
   resolveUpdate();
-  await waitForFrame((frame) => !frame.includes('Updating skill:revision-skill'), 'the update loading popup to close');
+  const updated = await waitForFrame(
+    (frame) => frame.includes('CATALOG RESOURCES') && !frame.includes('LOADING') && !frame.includes('CONFIRM UPDATE'),
+    'Browse after the selected revision update',
+  );
+  assert.match(updated, /›\s+revision-skill/);
   input.write('q');
   assert.equal(await done, true);
   input.destroy();
