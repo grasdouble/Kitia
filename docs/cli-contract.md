@@ -315,9 +315,12 @@ arrows to move through the menu and `Space` to toggle an
 available destination; already installed copies are marked and cannot be
 selected. `Esc` or an outside click closes the menu without clearing choices.
 `Tab` closes it and moves to the next control. Project and user selections
-are independent. Click **Review install** to open confirmation with the full
-paths, or **Cancel** to return to the catalog without installing. Both buttons
-also work with `Tab` and `Enter` or `Space`; `Esc` cancels when no menu is open.
+are independent. Click **Validate** to open confirmation with the full paths,
+**Replace** to review a revision replacement, or **Cancel** to return to the
+catalog without installing. These buttons also work with `Tab` and `Enter`
+or `Space`; `Esc` cancels when no menu is open. Validate and Replace do not
+execute anything until confirmed. After installing, Browse resources keeps
+the active filters and selected resource.
 Update and uninstall confirmations show the tracked destination paths.
 Instructions remain project-scoped. In the catalog browser, `F` enters
 search mode; while searching, all typed characters—including `T`, `S`, and `L`—
@@ -603,6 +606,8 @@ For source-skill installation, a nonzero GitHub CLI result is reported as
 process status as the Kitia command's exit code. A failure to launch `gh` is
 reported as `GH_SPAWN_FAILED` and also exits with status `1`. The source-skill
 `preview` command may retain the delegated process status.
+If GitHub CLI refuses an install because the destination already exists,
+Kitia reports the conflict without automatically overwriting the folder.
 
 A doctor finding such as an unavailable executable is a diagnostic result
 requiring attention, not necessarily a failure to execute doctor itself.

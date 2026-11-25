@@ -2127,16 +2127,19 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     source_path: `skills/${id}`,
     source_ref: 'abcdef0123456789abcdef0123456789abcdef01',
   }));
+  const installed = { ...candidates[1], scope: 'project', managed: true, status: 'current' };
+  const sha = '0123456789abcdef0123456789abcdef01234567';
   const calls = [];
   const installation = Promise.withResolvers();
-  const dashboard = await startInteractiveDashboard([], {
+  const dashboard = await startInteractiveDashboard([installed], {
     catalogResources: candidates,
+    listSourceVersions: () => [{ sha, prefix: sha.slice(0, 7), date: '2026-11-24', subject: 'Earlier revision' }],
     execute: async (operation, resource, options) => {
       calls.push({ operation, id: resource.id, options });
       await installation.promise;
       return {
         code: 0,
-        resources: [{ ...resource, scope: options.scope, managed: true, status: 'current' }],
+        resources: [installed, { ...resource, scope: options.scope, managed: true, status: 'current' }],
       };
     },
   });
@@ -2147,7 +2150,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       'Browse resources 2',
     );
     await dashboard.wait((frame) => frame.includes('CATALOG RESOURCES'), 'Browse after tab click');
-    const inventoryTab = renderedTextCell(dashboard.frame(), 'Inventory 0');
+    const inventoryTab = renderedTextCell(dashboard.frame(), 'Inventory 1');
     const tabRow = dashboard.frame().split(/\r?\n/)[inventoryTab.row];
     const previousSelection = selectedDetailsFrame(dashboard.frame());
     clickRenderedTarget(
@@ -2246,7 +2249,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     clickRenderedButtonRow(
       dashboard,
       (target) => target.type === 'modal-install-action' && target.action === 'review',
-      '│ REVIEW INSTALL │',
+      '│ VALIDATE │',
       1,
     );
     const confirmation = await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
@@ -2255,6 +2258,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     assert.ok(confirmation.includes('• .claude/skills/candidate-two/SKILL.md'));
     assert.ok(confirmation.includes('• .vibe/skills/candidate-two/SKILL.md'));
     assert.ok(!confirmation.includes('• .copilot/skills/candidate-two/SKILL.md'));
+    assert.deepEqual(calls, [], 'Validate does not execute the installation before confirmation');
     clickAt(dashboard.input, browseTab);
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 1, '│ INSTALL │');
     const loading = await dashboard.wait(
@@ -2266,11 +2270,11 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     assert.equal(loading.split(/\r?\n/)[inventoryTab.row], tabRow);
     assert.match(loading, /›\s+candidate-two/);
     installation.resolve();
-    const installed = await dashboard.wait(
-      (frame) => frame.includes('CATALOG RESOURCES') && frame.includes('Inventory 1') && !frame.includes('LOADING'),
+    const completed = await dashboard.wait(
+      (frame) => frame.includes('CATALOG RESOURCES') && frame.includes('Inventory 2') && !frame.includes('LOADING'),
       'the completed install refreshes Browse without leaving it',
     );
-    assert.match(installed, /›\s+candidate-two\s+skill\s+sample\s+user/);
+    assert.match(completed, /›\s+candidate-two\s+skill\s+sample\s+both/);
     assert.deepEqual(
       calls.map(({ operation, id, options }) => ({
         operation,
@@ -2280,6 +2284,23 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       })),
       [{ operation: 'install', id: 'candidate-two', scope: 'user', destinations: ['standard', 'claude', 'mistral'] }],
     );
+
+    dashboard.input.write('v');
+    await dashboard.wait((frame) => frame.includes('Earlier revision'), 'revision picker');
+    dashboard.input.write('\r');
+    await dashboard.wait((frame) => frame.includes('│ REPLACE │'), 'replace button in revision options');
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'modal-install-action' && target.action === 'review',
+      '│ REPLACE │',
+    );
+    const replacement = await dashboard.wait(
+      (frame) => frame.includes('CONFIRM UPDATE') && !frame.includes('INSTALL OPTIONS'),
+      'revision replacement confirmation after mouse review',
+    );
+    assert.ok(replacement.includes('user scope?'));
+    assert.ok(replacement.includes(sha));
+    assert.equal(calls.length, 1, 'Replace does not execute the update before confirmation');
   } finally {
     installation.resolve();
     await dashboard.stop();
@@ -2326,6 +2347,7 @@ test('install options keep scope selections independent and only add newly selec
     const options = await changeScope('\x1b[B', 'Project');
     assert.ok(options.includes('│ 0 selected▾') && !options.includes('Standard [Installed]'));
     assert.ok(options.includes('Select at least one new destination.'));
+    assert.ok(!options.includes('│ VALIDATE │'), 'an installed destination cannot be added again');
     await press('\t', '› Destinations');
     const opened = await press('\r', '› □ GitHub Copilot');
     assert.ok(opened.includes('Standard [Installed]') && opened.includes('.agents/skills/'));
@@ -2347,8 +2369,8 @@ test('install options keep scope selections independent and only add newly selec
     await press(' ', '› ✓ GitHub Copilot');
     dashboard.input.write('\t');
     await dashboard.wait(
-      (frame) => frame.includes('│ REVIEW INSTALL │') && !frame.includes('› Destinations'),
-      'Tab dismisses the menu and moves to Review install',
+      (frame) => frame.includes('│ VALIDATE │') && !frame.includes('› Destinations'),
+      'Tab dismisses the menu and moves to Validate',
     );
     const confirmation = await press('\r', 'CONFIRM INSTALL');
     assert.ok(confirmation.includes(`• ${copilotPath}`));
@@ -2396,7 +2418,7 @@ test('install options use kind defaults and block a scope with an inventory scan
   const closed = await userFrame(['b', '\r']);
   assert.ok(closed.includes('│ CANCEL │'));
   assert.ok(closed.includes('Cannot read user inventory.'));
-  assert.ok(!closed.includes('│ REVIEW INSTALL │'));
+  assert.ok(!closed.includes('│ VALIDATE │'));
 });
 
 test('destination menu opens above the field and scrolls at short terminal heights', async () => {
@@ -2413,7 +2435,7 @@ test('destination menu opens above the field and scrolls at short terminal heigh
     Object.assign(dashboard.output, { columns: 38, rows: 10 });
     dashboard.output.emit('resize');
     await dashboard.wait(
-      (frame) => frame.includes('Pinned source audit required.') && frame.includes('│ REVIEW INSTALL │ │ CANCEL │'),
+      (frame) => frame.includes('Pinned source audit required.') && frame.includes('│ VALIDATE │ │ CANCEL │'),
       'both install buttons remain visible in compact options',
     );
     const open = await press('\r', '› ✓ Standard');

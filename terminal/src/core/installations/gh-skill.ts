@@ -270,6 +270,10 @@ function formatGhDiagnostics(result: GhSkillResult): string {
   return text.length > limit ? `${text.slice(0, limit)}… [diagnostic truncated]` : text;
 }
 
+function isGhOverwriteRequired(diagnostic: string): boolean {
+  return /^Skills already installed: [^\r\n]+ \(Use --force to overwrite\)$/im.test(diagnostic);
+}
+
 function describeGhFailure(diagnostic: string): string {
   const text = diagnostic.toLowerCase();
   if (/rate.?limit|api rate limit/.test(text))
@@ -290,4 +294,11 @@ function describeGhFailure(diagnostic: string): string {
   return 'gh did not provide a recognized cause. Check GitHub CLI authentication, repository access, network connectivity, and the pinned resource, then retry.';
 }
 
-export { buildSourceSkillArgs, runGhSkill, runGhSkillAsync, formatGhDiagnostics, describeGhFailure };
+export {
+  buildSourceSkillArgs,
+  runGhSkill,
+  runGhSkillAsync,
+  formatGhDiagnostics,
+  describeGhFailure,
+  isGhOverwriteRequired,
+};

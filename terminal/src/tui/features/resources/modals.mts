@@ -77,18 +77,18 @@ export function optionsModal({
     mouseTarget: { type: 'modal-install-action' as const, action },
   });
   const cancel = button('cancel', 'Cancel');
-  const reviewLabel = replacing ? 'Review replacement' : 'Review install';
-  const review = button('review', reviewLabel.length + 4 <= contentWidth ? reviewLabel : 'Review');
+  const review = button('review', replacing ? 'Replace' : 'Validate');
   const buttons = canReview ? [review, cancel] : [cancel];
   const buttonGroup = choiceGroup(
     '',
     buttons,
     buttons.findIndex(({ mouseTarget }) => mouseTarget.action === focus),
   );
-  const buttonRows =
+  const buttonRows = (
     buttonGroup.text.length <= contentWidth
       ? [buttonGroup]
-      : buttons.map((option) => choiceGroup('', [option], option.mouseTarget.action === focus ? 0 : -1));
+      : buttons.map((option) => choiceGroup('', [option], option.mouseTarget.action === focus ? 0 : -1))
+  ).map((row) => ({ ...row, alignRight: true }));
   const frame = modalFrame(
     'INSTALL OPTIONS',
     [

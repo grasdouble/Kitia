@@ -517,7 +517,7 @@ test('install failures and successful destination records are independent of pro
         const messages = [];
         const run = (args, cwd) => {
           if (skillInstallDirectory(args) === path.join(cwd, '.claude', 'skills')) {
-            return { status: 7, stderr: 'fixture failure' };
+            return { status: 1, stderr: 'skills already installed: demo (use --force to overwrite)' };
           }
           writeSkillFixture(args);
           return { status: 0 };
@@ -538,10 +538,13 @@ test('install failures and successful destination records are independent of pro
             nonInteractive ? undefined : run,
           );
         } catch (error) {
-          failure = { code: error.code, message: error.message };
+          failure = { code: error.code, message: error.message, userMessage: error.userMessage };
         }
         assert.equal(failure.code, 'GH_INSTALL_FAILED');
         assert.match(failure.message, /Already installed for standard.*remain in place/);
+        assert.match(failure.userMessage, /already has a local destination/);
+        assert.match(failure.userMessage, /move it aside/);
+        assert.doesNotMatch(failure.userMessage, /--force|authentication/);
         assert.equal(messages.length, 1);
         outcomes.push({ failure, messages, state: readInstallState(target).sources });
       }
