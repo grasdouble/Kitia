@@ -64,6 +64,7 @@ export function CatalogManagementScreen({
   const tabControls: ControlsProps = {
     ...controls,
     part: 'tabs',
+    modalActive,
     actions: [],
     actionsInToolbar: false,
   };
@@ -302,7 +303,7 @@ export function CatalogManagementScreen({
       flexShrink: 0,
     },
     h(DashboardHeader, { versionLabel, columns }),
-    h(Controls, { ...tabControls, modalActive }),
+    h(Controls, tabControls),
     h(InventorySummaryCards, {
       resources: installedResources,
       width: columns - 2,

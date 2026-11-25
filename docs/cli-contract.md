@@ -167,6 +167,8 @@ Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
 Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
+Section tabs stay visible behind dialogs and progress popups when the terminal
+has room for both. They cannot be activated while a dialog blocks navigation.
 Resource actions keep the dashboard section from which they were started.
 For example, after installing or updating from **Browse resources**, the
 dashboard refreshes the installed state in Browse without opening **Inventory**.

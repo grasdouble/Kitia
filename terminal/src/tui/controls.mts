@@ -16,6 +16,7 @@ export function Controls(props: ControlsProps) {
   const regions: DashboardMouseRegion[] = [];
   const mouseTop = (row: number) => DASHBOARD_HEADER_ROWS + (props.rowOffset || 0) + row + 1;
   const onRegion = (item: LayoutItem, x: number, top: number, bottom: number) => {
+    if (props.modalActive) return;
     regions.push({
       left: x,
       right: Math.min(props.columns - 1, x + item.width - 1),

@@ -143,10 +143,11 @@ test('dashboard replaces an installed skill with the selected full revision thro
   input.write('b');
   await waitForFrame((frame) => frame.includes('CATALOG RESOURCES'), 'catalog resources');
   input.write('v');
-  await waitForFrame(
+  const historyLoading = await waitForFrame(
     (frame) => frame.includes('Loading commit history for revision-skill'),
     'revision history loading popup',
   );
+  assert.match(historyLoading, /Inventory 1\s+Browse resources 1\s+Manage Catalogs 0/);
   resolveHistory([
     {
       sha: 'a'.repeat(40),
@@ -162,6 +163,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
     },
   ]);
   const revisionFrame = await waitForFrame((frame) => frame.includes('RESOURCE REVISIONS'), 'revision picker');
+  assert.match(revisionFrame, /Inventory 1\s+Browse resources 1\s+Manage Catalogs 0/);
   const revisionBody = assertSeparatedPanelHeader(revisionFrame, 'RESOURCE REVISIONS', '', [
     'Test / skill:revision-skill',
     'Select a commit to update; the catalog pin remains unchanged.',
@@ -260,7 +262,11 @@ test('dashboard shows the loading popup for consecutive actions', async () => {
     input.write('b');
     await waitFor((frame) => frame.includes('CATALOG RESOURCES'), 'open catalog');
     input.write('p');
-    await waitFor((frame) => frame.includes('LOADING'), 'show the first loading popup');
+    const firstLoading = await waitFor((frame) => frame.includes('LOADING'), 'show the first loading popup');
+    assert.match(
+      require('node:util').stripVTControlCharacters(firstLoading),
+      /Inventory 0\s+Browse resources 1\s+Manage Catalogs 0/,
+    );
     await waitFor((frame) => frame.includes('Preview ready.'), 'finish the first preview');
     assert.equal(callCount, 1);
 

@@ -2211,17 +2211,20 @@ test(
       await assertShortcutsFrame(session, ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE']);
       assert.equal(actions.length, 0, 'the action remains undispatched after one confirmation');
 
+      resizeDashboard(session, { columns, rows: 18 });
       session.input.write('y');
-      await waitForGrid(
+      const progress = await waitForGrid(
         session,
         (value) => value.includes('LOADING') && value.includes('Removing skill:unmanaged'),
         'the second confirmation shows removal progress',
       );
+      assert.match(progress, /Inventory 3\s+Browse resources 5\s+Manage Catalogs 1/);
       // The dashboard yields after rendering progress and before invoking the handler.
       await actionStarted;
       assert.equal(actions.length, 1);
       assert.equal(actions[0][0], 'remove-unmanaged');
       assert.equal(actions[0][1].id, 'unmanaged');
+      resizeDashboard(session, { columns, rows });
       finishAction();
       await assertTableSurface(session, '', {
         selected: 'unmanaged',

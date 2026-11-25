@@ -3,6 +3,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ScanError } from '../core/inventory/checks.js';
 import type { CatalogResource } from '../core/resources/model.js';
+import { dashboardControlsLayout } from './components/controls/control-layout-plan.mjs';
 import type {
   DashboardControlButton,
   DashboardControlFilter,
@@ -36,6 +37,7 @@ import {
 import { createDashboardInputTransport } from './input-transport.mjs';
 import { ModalOverlay, loadingModal } from './modals.mjs';
 import { CatalogManagementScreen, CatalogScreen, InspectionScreen, InventoryScreen, ScreenFrame } from './screens.mjs';
+import { DASHBOARD_HEADER_ROWS } from './sections/header.mjs';
 import { checkInstalledVersion, type VersionNotice } from './version-check.mjs';
 
 const h = React.createElement;
@@ -906,7 +908,17 @@ export function Dashboard({
   } else if (tourStep !== null && !actionFailure) {
     modal = onboardingModal(tourStep);
   }
-  const overlay = modal && h(ModalOverlay, { modal, columns, rows, mouse });
+  const overlay =
+    modal &&
+    h(ModalOverlay, {
+      modal,
+      columns,
+      rows,
+      mouse,
+      tabStripBottom: inspection
+        ? 0
+        : DASHBOARD_HEADER_ROWS + dashboardControlsLayout({ ...controlsBase, part: 'tabs' }).height,
+    });
   return h(ScreenFrame, { columns, rows }, baseScreen, overlay);
 }
 

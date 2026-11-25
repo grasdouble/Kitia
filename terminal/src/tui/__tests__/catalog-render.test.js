@@ -2147,6 +2147,8 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       'Browse resources 2',
     );
     await dashboard.wait((frame) => frame.includes('CATALOG RESOURCES'), 'Browse after tab click');
+    const inventoryTab = renderedTextCell(dashboard.frame(), 'Inventory 0');
+    const tabRow = dashboard.frame().split(/\r?\n/)[inventoryTab.row];
     const previousSelection = selectedDetailsFrame(dashboard.frame());
     clickRenderedTarget(
       dashboard,
@@ -2167,6 +2169,11 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       (frame) => frame.includes('INSTALL OPTIONS') && frame.includes('│ User▾'),
       'default User scope',
     );
+    assert.equal(defaults.split(/\r?\n/)[inventoryTab.row], tabRow);
+    assert.ok(!dashboard.mouse.getRegions().some(({ target }) => target.type === 'section'));
+    clickAt(dashboard.input, inventoryTab);
+    await dashboard.flush();
+    assert.ok(dashboard.frame().includes('INSTALL OPTIONS'));
     const scopeField = renderedTextCell(defaults, '│ User▾');
     const destinationField = renderedTextCell(defaults, '│ Standard▾');
     const border = (field) => defaults.split(/\r?\n/)[field.row - 1].slice(field.start).match(/^╭─+╮/)?.[0];
@@ -2256,6 +2263,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     );
     assert.ok(loading.includes('CATALOG RESOURCES'));
     assert.ok(!loading.includes('INSTALLED RESOURCES'));
+    assert.equal(loading.split(/\r?\n/)[inventoryTab.row], tabRow);
     assert.match(loading, /›\s+candidate-two/);
     installation.resolve();
     const installed = await dashboard.wait(

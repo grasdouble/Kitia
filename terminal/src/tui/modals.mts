@@ -497,17 +497,20 @@ export function ModalOverlay({
   columns,
   rows,
   mouse,
+  tabStripBottom,
 }: {
   modal: ModalFrameResult;
   columns: number;
   rows: number;
   mouse?: DashboardMouseRegions;
+  tabStripBottom: number;
 }) {
   const shortcutsRows = modal.shortcuts.length ? wrappedShortcutLines(modal.shortcuts, modal.width).length + 4 : 0;
   const contentRows = modal.lines.reduce((height, line) => height + modalLineHeight(line), 0);
   const modalHeight =
     contentRows + modal.headerLines.length + (modal.panelTitle ? 4 : 0) + (shortcutsRows ? shortcutsRows + 1 : 0);
-  const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
+  const centeredTop = Math.max(0, Math.floor((rows - modalHeight) / 2));
+  const top = tabStripBottom + modalHeight <= rows ? Math.max(tabStripBottom, centeredTop) : centeredTop;
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
   const popover = selectPopover(modal, left, top, rows);
   const choiceRefs = React.useRef<Array<ChoiceGroupRefs | null>>([]);
