@@ -32,6 +32,8 @@ For one-off runs, use `npx --yes @grasdouble/kitia@latest` or `pnpm dlx @grasdou
 
 Run `kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository. Without a global install, run `npx --yes @grasdouble/kitia dashboard` instead.
 
+Run `kitia web` from your project to view the project and user inventories in a browser. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop. The browser view is read-only; use the dashboard or CLI to manage installations and catalogs.
+
 - **Basic** discovers skills recursively under `skills/**/SKILL.md`.
 - **Custom** maps selected repository-relative paths for skills, agents, and instructions. Multiple paths can be registered in one catalog.
 
@@ -41,7 +43,5 @@ Use `kitia catalog export catalogs.json` and `kitia catalog import catalogs.json
 Kitia tracks managed files and protects untracked or locally modified content. Use `update`, `uninstall`, `check`, and read-only `doctor` to maintain installations. Add `--dry-run --json` to inspect a planned change without modifying files. The CLI stores catalog definitions and metadata-only indexes under `~/.config/kitia/` (override with `KITIA_CONFIG_DIR`); resource bodies remain upstream and catalog entries are pinned to source commits.
 
 See the [CLI contract](docs/cli-contract.md) for commands and machine-readable output, the [resource collections guide](docs/resource-collections.md) for sharing pinned resource selections, the [resource audit guide](docs/resource-audit.md) for opt-in pinned-text checks, and the [inventory migration guide](docs/inventory-migrations.md) for inventory format upgrades.
-
-## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development, testing, and release instructions.

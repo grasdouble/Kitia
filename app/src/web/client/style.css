@@ -1,0 +1,55 @@
+:root {
+  color-scheme: light dark;
+  font: 1rem/1.5 system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 65rem;
+  margin: auto;
+  padding: 2rem clamp(1rem, 4vw, 3rem);
+}
+
+header p {
+  margin: 0;
+}
+
+h1 {
+  margin: 0 0 1rem;
+}
+
+nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.35rem 1rem;
+  cursor: pointer;
+}
+
+button[aria-pressed='true'] {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.5rem;
+  border-block-end: 1px solid GrayText;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+code {
+  overflow-wrap: anywhere;
+}

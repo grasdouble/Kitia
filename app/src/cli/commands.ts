@@ -26,7 +26,8 @@ import {
   renderInstalledResources,
   selectCatalogResource,
 } from '../tui/terminal.js';
-import { parseArguments, printHelp, type ParsedCliOptions } from './arguments.js';
+import { runWebCommand } from '../web/server/command.js';
+import { parseArguments, printHelp, webHelp, type ParsedCliOptions } from './arguments.js';
 import { manageCatalogCommand } from './catalog-command.js';
 import { formatSourceVersionTable } from './history.js';
 import { formatAuditLines } from './inspection-format.js';
@@ -89,6 +90,11 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
     printHelp();
     return 0;
   }
+  if (options.command === 'web-help') {
+    output.log(webHelp);
+    return 0;
+  }
+  if (options.command === 'web') return runWebCommand(!options.noOpen);
   if (options.command === 'self-update') {
     return runSelfUpdate(Boolean(options.yes), Boolean(options.nonInteractive));
   }

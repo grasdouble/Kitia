@@ -28,6 +28,8 @@ try {
     'CHANGELOG.md',
     'CONTRIBUTING.md',
     'dist/kitia.js',
+    'dist/web/server/command.js',
+    'dist/web/client/index.html',
     'dist/migrations/run.js',
     'dist/core/resources/model.js',
     'dist/core/catalogs/config.js',
@@ -49,6 +51,12 @@ try {
     'schemas/cli-report-v1.schema.json',
   ]) {
     assert.ok(packed.has(file), `Missing package file: ${file}`);
+  }
+  for (const extension of ['.js', '.css']) {
+    assert.ok(
+      [...packed].some((file) => file.startsWith('dist/web/client/assets/') && file.endsWith(extension)),
+      `Missing packaged web client ${extension} assets`,
+    );
   }
   for (const excludedDirectory of ['app/', 'src/', 'test/', 'catalogs/', 'bin/', 'migrations/']) {
     assert.equal(
@@ -111,6 +119,11 @@ try {
   assert.deepEqual(listed, []);
   const migrationHelp = runKitia('migrate', '--help');
   assert.match(migrationHelp, /Usage: .* migrate \[--dry-run \| --apply\]/);
+  assert.match(runKitia('web', '--help'), /Usage: kitia web \[--no-open\]/);
+  execFileSync(process.execPath, ['--test', path.join(packageRoot, 'test/web-session.test.js')], {
+    env: { ...consumerEnvironment, KITIA_TEST_WEB_EXECUTABLE: path.join(installedRoot, 'dist/kitia.js') },
+    stdio: 'inherit',
+  });
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });
 }

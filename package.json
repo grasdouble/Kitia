@@ -2,7 +2,7 @@
   "name": "kitia-workspace",
   "private": true,
   "scripts": {
-    "format": "oxfmt \"{scripts,docs/test,app/{src,test,scripts},web/{src,test,scripts}}/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"web/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
+    "format": "oxfmt \"{scripts,docs/test,app/{src,test,scripts},web/{src,test,scripts}}/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\" \"{app,web}/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}\"",
     "format:check": "pnpm run format --check",
     "build": "pnpm -r run build",
     "dev": "pnpm --filter @grasdouble/kitia-web run dev",

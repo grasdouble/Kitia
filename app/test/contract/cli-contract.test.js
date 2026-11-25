@@ -325,6 +325,7 @@ test('top-level help and doctor network probes use the executable argument contr
   const help = invoke(['--help'], { parseJson: false });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Usage:/);
+  assert.match(help.stdout, /Kitia web \[--no-open\]/);
   assert.match(help.stdout, /--destination <[^>]+\bmistral\b>.*repeat/);
   assert.doesNotMatch(help.stdout, /--tool\b/);
 

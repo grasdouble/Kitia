@@ -58,6 +58,7 @@ export interface CliOptions {
   spawnProcess?: typeof spawn;
   showOnboarding?: boolean;
   yes?: boolean;
+  noOpen?: boolean;
   output?: CliOutput;
 }
 export interface CliOutput {
@@ -65,6 +66,8 @@ export interface CliOutput {
   error(message?: string): void;
 }
 export type ParsedCliOptions = CliOptions & { command: string };
+
+export const webHelp = 'Usage: kitia web [--no-open]';
 
 function isResourceKind(value: unknown): value is ResourceKind {
   return value === 'skill' || value === 'agent' || value === 'instruction';
@@ -84,6 +87,13 @@ function parseArguments(args: string[]): ParsedCliOptions {
   if (args.length === 0) args = ['dashboard'];
   const extras: CliOptions = {};
   const command = args[0] ?? 'dashboard';
+  if (command === 'web') {
+    const option = args[1];
+    if (args.length === 1) return { command };
+    if (args.length === 2 && option === '--no-open') return { command, noOpen: true };
+    if (args.length === 2 && (option === '--help' || option === '-h')) return { command: 'web-help' };
+    throw new CatalogError(webHelp, 'INVALID_ARGUMENT');
+  }
   const discovery = ['list', 'search'].includes(command);
   const remaining: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -407,6 +417,7 @@ function printHelp() {
   console.log(`Usage:
   Kitia onboarding                 Show the getting-started guide again
   Kitia [dashboard] [--non-interactive] (dashboard is the default command)
+  Kitia web [--no-open]             Open the local project and user inventories in a browser
   Kitia self-update [--yes]         Update the current global npm or pnpm installation
   Kitia list [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]
   Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]

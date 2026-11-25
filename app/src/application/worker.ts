@@ -11,7 +11,7 @@ import {
 import type { AddCatalogRequest } from '../core/catalogs/model.js';
 import type { CatalogResource } from '../core/resources/model.js';
 import { runResourceAction, type ResourceAction, type ResourceActionOptions } from './resource-actions.js';
-import { readCatalogSnapshot, type InstallationTargets } from './snapshot.js';
+import { readCatalogSnapshot, readInventory, type InstallationTargets } from './snapshot.js';
 
 export type OperationTask =
   | {
@@ -21,6 +21,7 @@ export type OperationTask =
       targets: InstallationTargets;
       options?: ResourceActionOptions;
     }
+  | { task: 'inventory-read'; targets: InstallationTargets }
   | { task: 'catalog-add'; request: AddCatalogRequest }
   | { task: 'catalog-update'; originalName: string; request: AddCatalogRequest }
   | { task: 'catalog-remove'; name: string }
@@ -30,6 +31,8 @@ export type OperationTask =
 
 async function execute(data: OperationTask) {
   switch (data.task) {
+    case 'inventory-read':
+      return readInventory(data.targets, readCatalogSnapshot());
     case 'resource-action':
       return runResourceAction(data.action, data.resource, data.targets, data.options, (progress) =>
         parentPort?.postMessage({ progress }),
