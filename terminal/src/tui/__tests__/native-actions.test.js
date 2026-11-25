@@ -161,6 +161,11 @@ test('native audited failure retains license warnings and audit facts in its typ
     assert.match(result.failure.userMessage, /installation blocked/);
     assert.equal(result.messages.filter((message) => /has no declared license/.test(message)).length, 1);
     assert.match(result.messages.join('\n'), /instruction-override/);
+    assert.deepEqual(result.failure.auditLines, [
+      'Audit coverage: 1/1 files analyzed; no files skipped.',
+      '  WARNING agents/demo.md:1 [instruction-override] Attempts to override or disregard existing instructions.',
+      '  WARNING agents/demo.md:1 [prompt-secrecy] Requests disclosure of hidden instructions or secrets.',
+    ]);
     assert.deepEqual(result.resources, []);
     assert.deepEqual(result.errors, []);
     assert.equal(fs.existsSync(path.join(project, '.github/agents/demo.agent.md')), false);
@@ -180,7 +185,7 @@ test('native audited failure retains license warnings and audit facts in its typ
     );
     assert.equal(replacement.code, 1);
     assert.equal(replacement.failure.code, 'AUDIT_BLOCKED');
-    assert.match(replacement.messages.join('\n'), /instruction-override/);
+    assert.deepEqual(replacement.failure.auditLines, result.failure.auditLines);
     assert.equal(fs.readFileSync(installedFile, 'utf8'), installedBody);
     assert.equal(readInstallState(project).sources.Fixture.agents.demo.source_ref, oldRef);
   } finally {

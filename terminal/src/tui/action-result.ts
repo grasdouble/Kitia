@@ -7,6 +7,7 @@ export interface DashboardActionFailure {
   recoverable?: boolean;
   userMessage: string;
   agent?: string;
+  auditLines?: string[];
 }
 export interface DashboardActionResult {
   code: number;

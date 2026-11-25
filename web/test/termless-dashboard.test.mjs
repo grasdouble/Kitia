@@ -1250,10 +1250,22 @@ test(
           if (action === 'install') {
             return {
               code: 1,
-              messages: [],
+              messages: ['A separate operation message.'],
               resources: [],
               errors: [],
-              failure: { userMessage: 'AUDIT_BLOCKED: findings detected; installation blocked.' },
+              failure: {
+                code: 'AUDIT_BLOCKED',
+                userMessage: 'Audit findings and incomplete coverage blocked installation.',
+                auditLines: [
+                  'Audit coverage: 1/2 files analyzed; coverage incomplete.',
+                  '  Skipped skills/review/SKILL.md: is not valid UTF-8 text.',
+                  ...Array.from(
+                    { length: 18 },
+                    (_, index) =>
+                      `  WARNING skills/plan-review/SKILL.md:${index + 10} [instruction-override] Attempts to override or disregard existing instructions.`,
+                  ),
+                ],
+              },
             };
           }
           previewResource = resource;
@@ -1405,13 +1417,27 @@ test(
         'Tab moves from Destinations to Review install',
       );
       await press('\r', 'CONFIRM INSTALL');
-      const blocked = await press('y', 'INSTALL FAILED');
-      assert.ok(blocked.includes('AUDIT_BLOCKED'));
+      resizeDashboard(session, { columns: 72, rows: 18 });
+      const blocked = await press('y', 'Page 1/');
+      assert.match(blocked, /INSTALL FAILED/);
+      assert.match(blocked, /AUDIT REPORT/);
+      assert.match(blocked, /Audit coverage: 1\/2 files analyzed; coverage incomplete/);
+      assert.match(blocked, /Skipped skills\/review\/SKILL\.md/);
+      assert.match(blocked, /skills\/plan-review\/SKILL\.md:10/);
+      assert.doesNotMatch(blocked, /A separate operation message/);
+      assert.match(blocked, /PgUp\/PgDn · Esc/);
+      const pageCount = Number(blocked.match(/Page 1\/(\d+)/)?.[1]);
+      assert.ok(pageCount > 1);
+      let lastPage;
+      for (let page = 2; page <= pageCount; page++) lastPage = await press('\x1b[6~', `Page ${page}/${pageCount}`);
+      assert.match(lastPage, /skills\/plan-review\/SKILL\.md:27/);
+      await press('\x1b[5~', `Page ${pageCount - 1}/${pageCount}`);
       assert.deepEqual(
         calls.map(({ action }) => action),
         ['preview', 'install'],
       );
       session.input.write('\x1b');
+      resizeDashboard(session, terminalSize);
       await assertTableSurface(session, '', {
         ids: [],
         hints: ['F filter', '? guide', 'D details', ...sectionNavigationHints, '↑↓ navigate', 'Q quit'],

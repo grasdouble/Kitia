@@ -26,6 +26,7 @@ export function useResourceWorkflow(
   activity: DashboardActivity,
   navigate: (screen: string) => void,
   inspect: (resource: CatalogResource, result: DashboardActionResult) => void,
+  { columns, rows }: { columns: number; rows: number },
 ) {
   const { actionPending, setActionPending, setActionMessage, setLastActionFailed } = activity;
   const setScreenMode = navigate;
@@ -41,7 +42,12 @@ export function useResourceWorkflow(
   const [confirmation, setConfirmation] = useState<PendingDashboardAction | null>(null);
   const [confirmationChoice, setConfirmationChoice] = useState(0);
   const [confirmationStage, setConfirmationStage] = useState(1);
-  const [actionFailure, setActionFailure] = useState<{ action: string; message: string } | null>(null);
+  const [actionFailure, setActionFailure] = useState<{
+    action: string;
+    message: string;
+    auditLines?: readonly string[];
+  } | null>(null);
+  const [failurePage, setFailurePage] = useState(0);
   const [sourceVersionPicker, setSourceVersionPicker] = useState<{
     resource: CatalogResource;
     versions: SourceVersionOption[];
@@ -134,6 +140,7 @@ export function useResourceWorkflow(
     setActionPending(true);
     setLastActionFailed(false);
     setActionFailure(null);
+    setFailurePage(0);
     const inspectionAction = requested.action === 'preview';
     const progressLabel =
       requested.action === 'install'
@@ -180,7 +187,11 @@ export function useResourceWorkflow(
             (requested.action === 'update'
               ? `Update failed (exit ${result.code}); no safe cause details were provided by the action handler.`
               : `Action failed (exit ${result.code}).`);
-          setActionFailure({ action: requested.action, message: errorText });
+          setActionFailure({
+            action: requested.action,
+            message: errorText,
+            auditLines: failure?.auditLines,
+          });
           setActionMessage(`Action failed${result.code ? ` (exit ${result.code})` : ''}: ${errorText}`);
         }
       } else if (inspectionAction) {
@@ -373,9 +384,17 @@ export function useResourceWorkflow(
       else if (installFocus === 'cancel') cancelOptions();
     }
   };
-  const modal = (columns: number, rows: number, optionsVisible: boolean) => {
+  const failureView = actionFailure ? actionFailureModal({ ...actionFailure, page: failurePage, columns, rows }) : null;
+  const handleFailureInput = (input: string, key: Key) => {
+    if (key.return || key.escape || input === ' ') setActionFailure(null);
+    else if (failureView && (key.pageUp || key.pageDown)) {
+      const next = failureView.page + (key.pageUp ? -1 : 1);
+      setFailurePage(Math.max(0, Math.min(next, failureView.pageCount - 1)));
+    }
+  };
+  const modal = (optionsVisible: boolean) => {
     if (sourceVersionPicker) return sourceVersionsModal({ ...sourceVersionPicker, columns, rows });
-    if (actionFailure) return actionFailureModal({ ...actionFailure, columns });
+    if (failureView) return failureView.frame;
     if (confirmation)
       return confirmationModal({
         confirmation,
@@ -407,7 +426,7 @@ export function useResourceWorkflow(
     sourceVersionPicker,
     confirmation,
     actionFailure,
-    dismissFailure: () => setActionFailure(null),
+    handleFailureInput,
     openSourceVersions,
     openInstallOptions,
     runConfirmedAction,

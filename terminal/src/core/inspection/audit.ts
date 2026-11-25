@@ -24,17 +24,43 @@ export type AuditResult = {
 const MAX_FILES = 500;
 const MAX_FILE_BYTES = 1024 * 1024;
 
-const RULES: Array<{ code: string; pattern: RegExp; message: string }> = [
+const DISCLOSURE_REQUEST =
+  /\b(?:reveal|print|expose|disclose|dump|repeat)\b[^\n]{0,100}?\b(?:system prompt|developer message|hidden instructions?|secrets?)\b/gi;
+const DIRECT_DISCLOSURE =
+  /^(?:reveal|print|expose|disclose|dump|repeat)[ \t]+(?:(?:the|any|all|your)[ \t]+)*(?:system prompt|developer message|hidden instructions?|secrets?)$/i;
+// Recognize a direct prohibition or the final verb in a comma-separated "Never …, …, or …" list.
+// Do not carry negation through a paragraph break or into a new sentence, command, or exception.
+const PROHIBITION_PREFIX =
+  /(?:^|[.!?][ \t]+|\n)[ \t]*(?:never|do not)(?:[ \t]+|[ \t]+[\w' \t\n-]{1,100},[ \t\n]+[\w' \t\n-]{1,100},[ \t\n]+or[ \t]+)$/i;
+
+function requestsDisclosure(line: string, previousLine: string): boolean {
+  for (const match of line.matchAll(DISCLOSURE_REQUEST)) {
+    const request = match[0];
+    if (
+      !DIRECT_DISCLOSURE.test(request) ||
+      !/^[ \t]*[.!](?=[ \t]|$)/.test(line.slice(match.index + request.length)) ||
+      !PROHIBITION_PREFIX.test(`${previousLine}\n${line.slice(0, match.index)}`)
+    )
+      return true;
+  }
+  return false;
+}
+
+type AuditRule = { code: string; message: string } & (
+  | { pattern: RegExp; matches?: never }
+  | { pattern?: never; matches: (line: string, previousLine: string) => boolean }
+);
+const RULES: AuditRule[] = [
   {
     code: 'instruction-override',
+    // "Existing ignore rules" refers to rules used by a tool, not a command to ignore instructions.
     pattern:
-      /\b(?:ignore|disregard|forget|override|bypass)\b[^\n]{0,100}\b(?:previous|prior|above|system|developer|safety|instructions?|rules?)\b/i,
+      /\b(?:ignore(?!(?<=\bexisting[ \t]+ignore)[ \t]+rules?\b)|disregard|forget|override|bypass)\b[^\n]{0,100}\b(?:previous|prior|above|system|developer|safety|instructions?|rules?)\b/i,
     message: 'Attempts to override or disregard existing instructions.',
   },
   {
     code: 'prompt-secrecy',
-    pattern:
-      /\b(?:reveal|print|expose|disclose|dump|repeat)\b[^\n]{0,100}\b(?:system prompt|developer message|hidden instructions?|secrets?)\b/i,
+    matches: requestsDisclosure,
     message: 'Requests disclosure of hidden instructions or secrets.',
   },
   {
@@ -90,9 +116,9 @@ export function auditTextResources(files: AuditFile[]): AuditResult {
       continue;
     }
     analyzed++;
-    text.split(/\r?\n/).forEach((line, lineIndex) => {
+    text.split(/\r?\n/).forEach((line, lineIndex, lines) => {
       for (const rule of RULES) {
-        if (rule.pattern.test(line)) {
+        if (rule.pattern ? rule.pattern.test(line) : rule.matches(line, lines[lineIndex - 1] ?? '')) {
           findings.push({
             code: rule.code,
             severity: 'warning',

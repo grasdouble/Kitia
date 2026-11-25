@@ -324,19 +324,77 @@ export function confirmationModal({
     semantic.accents.warning,
   );
 }
-export function actionFailureModal({ action, message, columns }: { action: string; message: string; columns: number }) {
+export function actionFailureModal({
+  action,
+  message,
+  auditLines,
+  page,
+  columns,
+  rows,
+}: {
+  action: string;
+  message: string;
+  auditLines?: readonly string[];
+  page: number;
+  columns: number;
+  rows: number;
+}) {
+  const maxWidth = 88;
+  const title = `${action.toUpperCase()} FAILED`;
   const outputLines = message.split(/\r?\n/).filter(Boolean);
-  return modalFrame(
-    `${action.toUpperCase()} FAILED`,
-    [
-      { text: 'Kitia could not complete this action.', color: semantic.accents.error, bold: true },
-      ...(outputLines.length ? outputLines : ['No error details were provided.']),
-      'ENTER / ESC CLOSE',
-    ],
-    columns,
-    semantic.accents.error,
-    88,
-  );
+  const summary = [
+    { text: 'Kitia could not complete this action.', color: semantic.accents.error, bold: true },
+    ...(outputLines.length ? outputLines : ['No error details were provided.']).map((text) => ({ text })),
+  ];
+  const closeHint = 'ENTER / ESC CLOSE';
+  if (!auditLines?.length) {
+    return {
+      frame: modalFrame(title, [...summary, closeHint], columns, semantic.accents.error, maxWidth),
+      page: 0,
+      pageCount: 1,
+    };
+  }
+
+  const width = Math.max(20, Math.min(maxWidth, columns - 4));
+  const lineWidth = width - 4;
+  const body = [
+    ...summary,
+    { text: 'AUDIT REPORT', color: semantic.accents.label, bold: true },
+    ...auditLines.map((text) => ({ text })),
+  ].flatMap((entry) => wrapText(entry.text, lineWidth).map((text) => ({ ...entry, text, preserveSpacing: true })));
+  const shortcutsHeight = wrappedShortcutLines(categorizeShortcutHint(closeHint), width).length + 5;
+  if (body.length + 2 + shortcutsHeight <= rows) {
+    return {
+      frame: modalFrame(title, [...body, closeHint], columns, semantic.accents.error, maxWidth),
+      page: 0,
+      pageCount: 1,
+    };
+  }
+
+  // Keep the frame and pagination controls visible even when the report is taller than the terminal.
+  const pageSize = Math.max(1, rows - 4);
+  const pageCount = Math.ceil(body.length / pageSize);
+  const currentPage = Math.min(page, pageCount - 1);
+  const start = currentPage * pageSize;
+  return {
+    frame: modalFrame(
+      title,
+      [
+        ...body.slice(start, start + pageSize),
+        ...(pageCount > 1
+          ? [
+              { text: `Page ${currentPage + 1}/${pageCount}`, dimColor: true },
+              { text: 'PgUp/PgDn · Esc', dimColor: true },
+            ]
+          : [{ text: closeHint, dimColor: true }]),
+      ],
+      columns,
+      semantic.accents.error,
+      maxWidth,
+    ),
+    page: currentPage,
+    pageCount,
+  };
 }
 
 export function sourceVersionsModal({

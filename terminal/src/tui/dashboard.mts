@@ -114,7 +114,10 @@ export function Dashboard({
   } = catalogs;
   const inspector = useInspection();
   const { inspection } = inspector;
-  const operations = useResourceWorkflow(actions, resources, errors, activity, setScreenMode, inspector.open);
+  const operations = useResourceWorkflow(actions, resources, errors, activity, setScreenMode, inspector.open, {
+    columns,
+    rows,
+  });
   const {
     installedResources,
     scanErrors,
@@ -521,7 +524,7 @@ export function Dashboard({
       return;
     }
     if (actionFailure) {
-      if (key.return || key.escape || input === ' ') operations.dismissFailure();
+      operations.handleFailureInput(input, key);
       return;
     }
     if (migrationScopes.length) {
@@ -797,7 +800,7 @@ export function Dashboard({
   } else if (catalogs.active) {
     modal = catalogs.modal(columns);
   } else {
-    modal = operations.modal(columns, rows, screenMode === 'install-options');
+    modal = operations.modal(screenMode === 'install-options');
   }
   const screenModalActive = Boolean(
     modal || versionNotice || tourStep !== null || actionPending || inspection || screenMode === 'install-options',
