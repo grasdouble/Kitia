@@ -5,11 +5,13 @@ export function SessionDialog({
   subtitle,
   closeLabel,
   onClose,
+  busy = false,
   children,
 }: {
   title: string;
   subtitle: string;
   closeLabel: string;
+  busy?: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -19,13 +21,20 @@ export function SessionDialog({
     dialog.current?.showModal();
   }, []);
   return (
-    <dialog ref={dialog} onClose={onClose} aria-labelledby={heading}>
+    <dialog
+      ref={dialog}
+      onClose={onClose}
+      onCancel={(event) => {
+        if (busy) event.preventDefault();
+      }}
+      aria-labelledby={heading}
+    >
       <header className="inspection-header">
         <div>
           <p className="eyebrow">{subtitle}</p>
           <h2 id={heading}>{title}</h2>
         </div>
-        <button type="button" autoFocus onClick={() => dialog.current?.close()}>
+        <button type="button" autoFocus disabled={busy} onClick={() => dialog.current?.close()}>
           {closeLabel}
         </button>
       </header>

@@ -8,6 +8,7 @@ import type { CatalogResourceSelector } from '../../application/catalog-preview.
 import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
 import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
 import { runOperation } from '../../application/worker-client.js';
+import { installationDestinationIds, isInstallationDestination } from '../../core/installations/destinations.js';
 
 const host = '127.0.0.1';
 const headers = {
@@ -33,6 +34,7 @@ async function resolveDirectory(directory: string) {
 const localPreviewRoute = '/api/inventory/preview?';
 const catalogPreviewRoute = '/api/catalog/preview?';
 const catalogRevisionsRoute = '/api/catalog/revisions?';
+const catalogInstallRoute = '/api/catalog/install?';
 
 function resourceIdentity(params: URLSearchParams) {
   const catalog = params.get('catalog');
@@ -53,9 +55,7 @@ function installedSelector(query: string): InstalledResourceSelector | undefined
   return { ...identity, scope, managed: managed === 'true' };
 }
 
-function catalogSelector(query: string): CatalogResourceSelector | undefined {
-  const params = new URLSearchParams(query);
-  if (params.size !== 4) return undefined;
+function catalogSelector(params: URLSearchParams): CatalogResourceSelector | undefined {
   const identity = resourceIdentity(params);
   const ref = params.get('ref');
   if (!identity?.catalog || !ref || !/^[a-f0-9]{40}$/i.test(ref)) return undefined;
@@ -92,12 +92,18 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       sendJson(response, 403, { error: 'Invalid origin.' });
       return;
     }
-    if (request.method !== 'GET') {
-      response.setHeader('Allow', 'GET');
+    const route = request.url || '/';
+    const isCatalogInstall = route === '/api/catalog/install' || route.startsWith(catalogInstallRoute);
+    const method = isCatalogInstall ? 'POST' : 'GET';
+    if (request.method !== method) {
+      response.setHeader('Allow', method);
       sendJson(response, 405, { error: 'Method not allowed.' });
       return;
     }
-    const route = request.url || '/';
+    if (isCatalogInstall && request.headers.origin !== origin) {
+      sendJson(response, 403, { error: 'Installation requests must come from this session.' });
+      return;
+    }
     const asset = assets.get(route);
     if (asset) {
       response.writeHead(200, { 'Content-Type': asset.type });
@@ -113,7 +119,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         route === '/api/catalog' ||
         isLocalPreview ||
         isCatalogPreview ||
-        isCatalogRevisions
+        isCatalogRevisions ||
+        isCatalogInstall
       )
     ) {
       sendJson(response, 404, { error: 'Not found.' });
@@ -130,6 +137,36 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       return;
     }
     try {
+      if (isCatalogInstall) {
+        const params = new URLSearchParams(route.slice(catalogInstallRoute.length));
+        const scope = params.get('scope');
+        const destinations = params.getAll('destination').filter(isInstallationDestination);
+        const selector = catalogSelector(params);
+        if (
+          !selector ||
+          (scope !== 'project' && scope !== 'user') ||
+          params.size !== 5 + destinations.length ||
+          !destinations.length ||
+          destinations.length > installationDestinationIds.length ||
+          new Set(destinations).size !== destinations.length
+        ) {
+          sendJson(response, 400, { error: 'Invalid catalog installation options.' });
+          return;
+        }
+        const target = targets[scope];
+        if ((await realpath(target)) !== target) {
+          sendJson(response, 409, {
+            error: 'The installation directory has changed. Restart kitia web from the intended project.',
+          });
+          return;
+        }
+        sendJson(
+          response,
+          200,
+          await runOperation({ task: 'catalog-install', selector, targets, options: { scope, destinations } }),
+        );
+        return;
+      }
       if (route === '/api/inventory') {
         inventoryRead ??= runOperation({ task: 'inventory-read', targets }).finally(() => {
           inventoryRead = undefined;
@@ -152,9 +189,10 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         else sendJson(response, 404, { error: 'This resource is not available for local preview.' });
         return;
       }
-      const selector = catalogSelector(
+      const params = new URLSearchParams(
         route.slice((isCatalogPreview ? catalogPreviewRoute : catalogRevisionsRoute).length),
       );
+      const selector = params.size === 4 ? catalogSelector(params) : undefined;
       if (!selector) {
         sendJson(response, 400, { error: 'Invalid pinned resource selector.' });
         return;

@@ -2,12 +2,18 @@ import fs from 'node:fs';
 
 import type { AuditResult } from '../core/inspection/audit.js';
 import type { ResourceInspection } from '../core/inspection/model.js';
+import { installationPath, resolveInstallationDestinations } from '../core/installations/destinations.js';
 import { executeInstallationOperation, type InstallationRequest } from '../core/installations/lifecycle.js';
 import { acquireOperationLock } from '../core/installations/lock.js';
 import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
-import { readInstallState } from '../core/inventory/inventory.js';
+import { readInstallState, sourceCatalogName } from '../core/inventory/inventory.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
-import { inspectPinnedSource, type SourceInspection } from './catalog-preview.js';
+import {
+  inspectPinnedSource,
+  resolvePinnedCatalogResource,
+  type CatalogResourceSelector,
+  type SourceInspection,
+} from './catalog-preview.js';
 import { inspectInstalledFiles } from './inventory-preview.js';
 import { readCatalogSnapshot, readInventory, type InstallationTargets, type InventorySnapshot } from './snapshot.js';
 
@@ -36,11 +42,14 @@ export type ResourceActionResult = InventorySnapshot & {
 
 export async function runResourceAction(
   action: ResourceAction,
-  resource: CatalogResource,
+  selection: CatalogResource | CatalogResourceSelector,
   targets: InstallationTargets,
   options: ResourceActionOptions = {},
   onProgress?: (message: string) => void,
 ): Promise<ResourceActionResult> {
+  const catalog = readCatalogSnapshot();
+  const pinnedInstall = 'ref' in selection;
+  const resource = pinnedInstall ? resolvePinnedCatalogResource(selection, catalog.resources) : selection;
   const scope = action === 'install' ? options.scope || 'project' : (resource.scope as ResourceActionOptions['scope']);
   const target = scope === 'user' ? targets.user : targets.project;
   const messages: ResourceActionResult['messages'] = [];
@@ -49,7 +58,6 @@ export async function runResourceAction(
   let release: (() => void) | undefined;
   let code = 0;
   let failure: ActionFailure | undefined;
-  const catalog = readCatalogSnapshot();
   try {
     if (action !== 'preview') release = acquireOperationLock(target);
     const targetRoot = fs.realpathSync(target);
@@ -68,7 +76,32 @@ export async function runResourceAction(
       inspection = preview.inspection;
     } else {
       // Keep the inventory format check before invoking any lifecycle operation.
-      readInstallState(targetRoot);
+      const state = readInstallState(targetRoot);
+      if (pinnedInstall) {
+        const layouts = resolveInstallationDestinations(resource.kind, scope ?? 'project', options.destinations);
+        const record = state.sources[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id];
+        if (record) {
+          if (
+            record.source_repository !== resource.source_repository ||
+            record.source_path !== resource.source_path ||
+            record.source_ref?.toLowerCase() !== resource.source_ref?.toLowerCase()
+          ) {
+            throw new CatalogError(
+              'A different source is already installed in this scope. Update it before adding destinations.',
+              'SHARED_SOURCE_PIN',
+            );
+          }
+          const tracked = layouts
+            .map((layout) => installationPath(layout, resource.id))
+            .filter((file) => Object.hasOwn(record.files, file));
+          if (tracked.length) {
+            throw new CatalogError(
+              `Already installed: ${tracked.join(', ')}. Choose only new destinations.`,
+              'ALREADY_INSTALLED',
+            );
+          }
+        }
+      }
       const result = await executeInstallationOperation(
         {
           ...options,

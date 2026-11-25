@@ -20,6 +20,7 @@ type OperationResults = {
   'catalog-read': CatalogSnapshot;
   'catalog-preview': SourceInspection;
   'catalog-revisions': ResourceRevision[];
+  'catalog-install': ResourceActionResult;
   'catalog-add': CatalogMutation;
   'catalog-update': CatalogMutation;
   'catalog-remove': CatalogSnapshot;

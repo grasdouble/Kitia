@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { CatalogSnapshot, InventorySnapshot, ResourceRevision } from '../../application/snapshot.js';
+import type {
+  CatalogSnapshot,
+  InstallationTargets,
+  InventorySnapshot,
+  ResourceRevision,
+} from '../../application/snapshot.js';
 import { inventoryCatalogLabels } from '../../core/inventory/view.js';
 import { catalogCandidateLabel, filterCatalogResources } from '../../core/resources/catalog-view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { InspectionDialog } from './inspection.js';
+import { InstallDialog } from './install.js';
 import { ResourceFilters, resourceFilterOptions, useResourceFilters } from './resource-filters.js';
 import { readSessionJson } from './session-api.js';
 import { SessionDialog } from './session-dialog.js';
@@ -84,7 +90,15 @@ function RevisionsDialog({
   );
 }
 
-export function BrowseCatalog({ inventory, token }: { inventory: InventorySnapshot; token: string }) {
+type CatalogSession = {
+  inventory: InventorySnapshot;
+  targets: InstallationTargets;
+  token: string;
+  onInstalled: (inventory: InventorySnapshot) => void;
+};
+
+export function BrowseCatalog(session: CatalogSession) {
+  const { token } = session;
   const [snapshot, setSnapshot] = useState<CatalogSnapshot>();
   const [error, setError] = useState<string>();
   useEffect(() => {
@@ -99,7 +113,7 @@ export function BrowseCatalog({ inventory, token }: { inventory: InventorySnapsh
     return () => controller.abort();
   }, [token]);
   if (!snapshot) return error ? <p role="alert">{error}</p> : <p role="status">Loading catalog resources…</p>;
-  return <CatalogResources snapshot={snapshot} inventory={inventory} token={token} />;
+  return <CatalogResources snapshot={snapshot} {...session} />;
 }
 
 const resourceKey = ({ catalog, kind, id }: CatalogResource) => `${catalog}:${kind}:${id}`;
@@ -107,14 +121,12 @@ const resourceKey = ({ catalog, kind, id }: CatalogResource) => `${catalog}:${ki
 function CatalogResources({
   snapshot,
   inventory,
+  targets,
   token,
-}: {
-  snapshot: CatalogSnapshot;
-  inventory: InventorySnapshot;
-  token: string;
-}) {
+  onInstalled,
+}: CatalogSession & { snapshot: CatalogSnapshot }) {
   const [selection, setSelection] = useState<CatalogResource>();
-  const [dialog, setDialog] = useState<'preview' | 'revisions'>();
+  const [dialog, setDialog] = useState<'preview' | 'revisions' | 'install'>();
   const { filters, set } = useResourceFilters();
   const { resources, catalogs, warnings } = snapshot;
   const labels = useMemo(() => {
@@ -223,6 +235,9 @@ function CatalogResources({
             <p>{selected.description || 'No description available.'}</p>
             {query ? (
               <div className="resource-actions">
+                <button type="button" onClick={() => setDialog('install')}>
+                  Install…
+                </button>
                 <button type="button" onClick={() => setDialog('preview')}>
                   Preview / audit
                 </button>
@@ -288,6 +303,17 @@ function CatalogResources({
           resource={selected}
           endpoint={`/api/catalog/revisions?${query}`}
           token={token}
+          onClose={() => setDialog(undefined)}
+        />
+      ) : null}
+      {query && selected && dialog === 'install' ? (
+        <InstallDialog
+          resource={selected}
+          selector={query}
+          inventory={inventory}
+          targets={targets}
+          token={token}
+          onInstalled={onInstalled}
           onClose={() => setDialog(undefined)}
         />
       ) : null}

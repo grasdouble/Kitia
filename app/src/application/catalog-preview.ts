@@ -15,8 +15,11 @@ export type SourceInspection = {
   audit?: AuditResult;
 };
 
-export function resolvePinnedCatalogResource(selector: CatalogResourceSelector): CatalogResource {
-  const resource = readCatalogSnapshot().resources.find(
+export function resolvePinnedCatalogResource(
+  selector: CatalogResourceSelector,
+  resources = readCatalogSnapshot().resources,
+): CatalogResource {
+  const resource = resources.find(
     ({ catalog, kind, id }) => catalog === selector.catalog && kind === selector.kind && id === selector.id,
   );
   if (!resource) throw new CatalogError('This resource is no longer available in the catalog.', 'RESOURCE_NOT_FOUND');

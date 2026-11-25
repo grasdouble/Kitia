@@ -185,11 +185,11 @@ test(
 );
 
 test(
-  'browse previews the pinned files and reads history for each indexed resource kind',
+  'browse reads pinned files and history without writes, then installs only on an authenticated confirmation',
   { timeout: 10_000 },
   async () => {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-web-catalog-'));
-    const { project, config, env, ref, head, items } = seedWebCatalog(temporary);
+    const { project, user, config, env, ref, head, items } = seedWebCatalog(temporary);
     const preload = path.join(__dirname, 'gh-process-preload.cjs');
     const child = spawn(process.execPath, ['--require', preload, executable, 'web', '--no-open'], {
       cwd: project,
@@ -252,6 +252,112 @@ test(
       stale.set('id', 'unknown');
       assert.equal((await request(`${api}/revisions?${stale}`, headers)).status, 404);
       assert.deepEqual(await fs.readdir(project), []);
+      assert.equal(await fs.readFile(index, 'utf8'), initialIndex);
+
+      const install = (item, scope, destinations, pin = ref) => {
+        const params = new URLSearchParams({ catalog: 'Fixture', kind: item.kind, id: item.id, ref: pin, scope });
+        for (const destination of destinations) params.append('destination', destination);
+        return `${api}/install?${params}`;
+      };
+      const [agent, instruction, skill] = items;
+      const post = { authorization, origin: url.origin, 'sec-fetch-site': 'same-origin' };
+      const installAgent = install(agent, 'project', ['copilot']);
+      assert.equal((await request(installAgent, post)).status, 405);
+      assert.equal((await request(installAgent, { authorization }, 'POST')).status, 403);
+      assert.equal((await request(installAgent, { ...post, origin: 'https://example.invalid' }, 'POST')).status, 403);
+      assert.equal((await request(installAgent, { ...post, authorization: 'Bearer wrong' }, 'POST')).status, 401);
+      assert.equal((await request(`${installAgent}&force=true`, post, 'POST')).status, 400);
+      assert.equal((await request(install(agent, 'project', ['copilot'], head), post, 'POST')).status, 409);
+      const rejectedScope = await request(install(instruction, 'user', ['copilot']), post, 'POST');
+      assert.equal(JSON.parse(rejectedScope.body).failure.code, 'INVALID_ARGUMENT');
+      assert.deepEqual(await fs.readdir(project), []);
+      assert.deepEqual(await fs.readdir(user), []);
+
+      await fs.writeFile(index, JSON.stringify({ ...JSON.parse(initialIndex), source_ref: head }));
+      const rejectedAudit = await request(install(agent, 'project', ['copilot'], head), post, 'POST');
+      const { failure } = JSON.parse(rejectedAudit.body);
+      assert.equal(failure.code, 'AUDIT_BLOCKED');
+      assert.equal(failure.audit.findings[0].code, 'instruction-override');
+      assert.deepEqual(await fs.readdir(project), []);
+      await fs.writeFile(index, initialIndex);
+
+      const matrices = [
+        [
+          agent,
+          'project',
+          project,
+          { copilot: '.github/agents/catalog-agent.agent.md', claude: '.claude/agents/catalog-agent.md' },
+        ],
+        [
+          agent,
+          'user',
+          user,
+          { copilot: '.copilot/agents/catalog-agent.agent.md', claude: '.claude/agents/catalog-agent.md' },
+        ],
+        [
+          instruction,
+          'project',
+          project,
+          { copilot: '.github/instructions/catalog-rules.instructions.md', claude: '.claude/rules/catalog-rules.md' },
+        ],
+        [
+          skill,
+          'project',
+          project,
+          { standard: '.agents/skills', copilot: '.github/skills', claude: '.claude/skills', mistral: '.vibe/skills' },
+        ],
+        [
+          skill,
+          'user',
+          user,
+          { standard: '.agents/skills', copilot: '.copilot/skills', claude: '.claude/skills', mistral: '.vibe/skills' },
+        ],
+      ];
+      for (const [item, scope, target, destinations] of matrices) {
+        const paths = Object.values(destinations).map((file) =>
+          item.kind === 'skill' ? `${file}/${item.id}/SKILL.md` : file,
+        );
+        if (item === skill && scope === 'project') {
+          const conflict = path.join(target, paths[1]);
+          await fs.mkdir(path.dirname(conflict), { recursive: true });
+          await fs.writeFile(conflict, 'Unmanaged content\n');
+          const partial = await request(install(item, scope, ['standard', 'copilot']), post, 'POST');
+          const action = JSON.parse(partial.body);
+          assert.equal(action.failure.code, 'GH_INSTALL_FAILED', partial.body);
+          assert.ok(
+            action.resources
+              .find((resource) => resource.id === item.id && resource.managed !== false && resource.scope === scope)
+              .paths.includes(paths[0]),
+          );
+          assert.equal(await fs.readFile(conflict, 'utf8'), 'Unmanaged content\n');
+          await fs.rm(path.dirname(conflict), { recursive: true });
+          await fs.writeFile(index, JSON.stringify({ ...JSON.parse(initialIndex), source_ref: head }));
+          const differentPin = await request(install(item, scope, ['copilot'], head), post, 'POST');
+          assert.equal(JSON.parse(differentPin.body).failure.code, 'SHARED_SOURCE_PIN');
+          await fs.writeFile(index, initialIndex);
+        }
+        const requested = Object.keys(destinations).filter(
+          (id) => !(item === skill && scope === 'project' && id === 'standard'),
+        );
+        const response = await request(install(item, scope, requested), post, 'POST');
+        assert.equal(response.status, 200, response.body);
+        const result = JSON.parse(response.body);
+        assert.equal(result.code, 0, response.body);
+        const managed = result.resources.find(
+          (resource) => resource.id === item.id && resource.managed !== false && resource.scope === scope,
+        );
+        assert.ok(managed, `Missing ${scope} ${item.kind} in the refreshed inventory: ${response.body}`);
+        const lock = JSON.parse(await fs.readFile(path.join(target, '.agents/kitia-lock.json'), 'utf8'));
+        assert.equal(lock.sources.Fixture[`${item.kind}s`][item.id].source_ref, ref);
+        for (const file of paths) {
+          assert.ok(managed.paths.includes(file), response.body);
+          assert.ok((await fs.readFile(path.join(target, file), 'utf8')).includes(item.content.trim()));
+        }
+      }
+      const duplicate = await request(installAgent, post, 'POST');
+      assert.equal(JSON.parse(duplicate.body).failure.code, 'ALREADY_INSTALLED');
+      const inventory = await request(`${url.origin}/api/inventory`, headers);
+      assert.equal(JSON.parse(inventory.body).inventory.resources.filter(({ managed }) => managed !== false).length, 5);
       assert.equal(await fs.readFile(index, 'utf8'), initialIndex);
     } finally {
       stdout.close();

@@ -28,6 +28,12 @@ export type OperationTask =
   | { task: 'catalog-read' }
   | { task: 'catalog-preview'; selector: CatalogResourceSelector; project: string }
   | { task: 'catalog-revisions'; selector: CatalogResourceSelector }
+  | {
+      task: 'catalog-install';
+      selector: CatalogResourceSelector;
+      targets: InstallationTargets;
+      options: Pick<ResourceActionOptions, 'scope' | 'destinations'>;
+    }
   | { task: 'catalog-add'; request: AddCatalogRequest }
   | { task: 'catalog-update'; originalName: string; request: AddCatalogRequest }
   | { task: 'catalog-remove'; name: string }
@@ -54,6 +60,8 @@ async function execute(data: OperationTask) {
     }
     case 'catalog-revisions':
       return listResourceRevisions(resolvePinnedCatalogResource(data.selector));
+    case 'catalog-install':
+      return runResourceAction('install', data.selector, data.targets, data.options);
     case 'resource-action':
       return runResourceAction(data.action, data.resource, data.targets, data.options, (progress) =>
         parentPort?.postMessage({ progress }),

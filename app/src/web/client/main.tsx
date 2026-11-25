@@ -58,7 +58,12 @@ function App() {
       ) : !data ? (
         <p role="status">Loading inventory…</p>
       ) : section === 'browse' ? (
-        <BrowseCatalog inventory={data.snapshot.inventory} token={data.token} />
+        <BrowseCatalog
+          inventory={data.snapshot.inventory}
+          targets={data.snapshot.targets}
+          token={data.token}
+          onInstalled={(inventory) => setData({ ...data, snapshot: { ...data.snapshot, inventory } })}
+        />
       ) : (
         <>
           <InventorySummary inventory={data.snapshot.inventory} />

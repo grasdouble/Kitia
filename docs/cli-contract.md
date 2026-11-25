@@ -57,9 +57,13 @@ audit of installed skills, agents, and instructions. **Browse resources**
 searches the configured catalog indexes and opens the pinned source files,
 their entry-file audit, and the GitHub commit history. Catalog previews require
 access to the configured source; skill previews and revision history use the
-GitHub CLI. Use the CLI or TUI to manage installations and catalogs. The local
-HTTP API is an internal interface, not part of the public CLI compatibility
-contract.
+GitHub CLI. Browser installation uses the catalog pin and the same destination
+rules and entry-file audit as the dashboard. Review the scope and paths before
+confirming; skills and agents default to user scope, and instructions only
+support project scope. The inventory refreshes after the operation, including
+after a partial install. Use the CLI or TUI to select another revision, update
+or remove installations, or manage catalogs. The local HTTP API is internal
+and not part of the public CLI compatibility contract.
 
 `kitia self-update` leaves local dependencies, one-off caches, linked
 checkouts, and installations of unknown or ambiguous origin untouched.
