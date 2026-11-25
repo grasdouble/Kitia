@@ -9,11 +9,10 @@ package version.
 
 The public surface consists of the `kitia` command, documented options and
 defaults, and the machine-readable output described below. In a repository
-checkout, the executable is `terminal/dist/kitia.js`; in the published package
-archive it is `dist/kitia.js`. Direct callers of `terminal/bin/kitia.js` must
-switch to the checkout path or invoke the installed `kitia` command. In a
-checkout, run `pnpm --filter @grasdouble/kitia run build` before using
-the executable. The other JavaScript modules in `terminal/dist/` are implementation
+checkout, the executable is `app/dist/kitia.js`; in the published package
+archive it is `dist/kitia.js`. From a checkout, run
+`pnpm --filter @grasdouble/kitia run build` before using
+the executable. The other JavaScript modules in `app/dist/` are implementation
 details, not a supported JavaScript SDK.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
@@ -516,8 +515,8 @@ a write failure.
 
 Machine-readable schemas ship with the package:
 
-- [Discovery arrays](../terminal/schemas/cli-discovery-v1.schema.json)
-- [Reports, version 1](../terminal/schemas/cli-report-v1.schema.json)
+- [Discovery arrays](../app/schemas/cli-discovery-v1.schema.json)
+- [Reports, version 1](../app/schemas/cli-report-v1.schema.json)
 - [Installation inventory formats and migrations](inventory-migrations.md)
 
 Discovery schema versions are identified by the schema filename; the public

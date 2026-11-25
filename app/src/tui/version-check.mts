@@ -29,7 +29,7 @@ export async function checkInstalledVersion(
     return {
       installed,
       available: version,
-      changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/terminal/CHANGELOG.md#${heading}`,
+      changelogUrl: `https://github.com/grasdouble/Kitia/blob/main/app/CHANGELOG.md#${heading}`,
     };
   }
   return null;

@@ -460,7 +460,7 @@ async function exerciseVersionNotice(decision) {
     assert.match(frame.split('\n').slice(0, 5).join('\n'), /Version 1\.0\.0[ \t]*$/m);
     assert.match(frame, /Installed: 1\.0\.0/);
     assert.match(frame, /Available: 1\.0\.2/);
-    assert.match(frame, /github\.com\/grasdouble\/Kitia\/blob\/main\/terminal\/CHANGELOG\.md#102/);
+    assert.match(frame, /github\.com\/grasdouble\/Kitia\/blob\/main\/app\/CHANGELOG\.md#102/);
     assert.match(frame, /global installation with pnpm/);
     assert.equal(requests, 0);
     if (decision === 'later') {

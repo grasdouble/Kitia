@@ -50,7 +50,7 @@ try {
   ]) {
     assert.ok(packed.has(file), `Missing package file: ${file}`);
   }
-  for (const excludedDirectory of ['terminal/', 'src/', 'test/', 'catalogs/', 'bin/', 'migrations/']) {
+  for (const excludedDirectory of ['app/', 'src/', 'test/', 'catalogs/', 'bin/', 'migrations/']) {
     assert.equal(
       [...packed].some((file) => file.startsWith(excludedDirectory)),
       false,

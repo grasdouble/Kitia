@@ -176,7 +176,7 @@ importers:
         specifier: 0.79.0
         version: 0.79.0
 
-  terminal:
+  app:
     dependencies:
       ink:
         specifier: 8.0.0
@@ -220,7 +220,7 @@ importers:
     dependencies:
       '@grasdouble/kitia':
         specifier: workspace:*
-        version: link:../terminal
+        version: link:../app
       '@tanstack/react-router':
         specifier: ^1.170.46
         version: 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)

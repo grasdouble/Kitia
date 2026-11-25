@@ -22,7 +22,7 @@ const hash = (content) => createHash('sha256').update(content).digest('hex');
 const packageContent = (file) => {
   const content = fs.readFileSync(resolve(workspaceRoot, file));
   if (!file.startsWith('docs/')) return content;
-  return Buffer.from(content.toString().replaceAll('../terminal/schemas/', '../schemas/'));
+  return Buffer.from(content.toString().replaceAll('../app/schemas/', '../schemas/'));
 };
 
 function clean() {
