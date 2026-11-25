@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.0.1
+
+### Patch Changes
+
+- 83d511e: Explain skill installation failures caused by an existing destination
+  - **User-Facing**
+    - When GitHub CLI refuses to overwrite a skill folder, identify the local conflict and explain how to preserve the existing files before retrying.
+- 83d511e: Clarify the dashboard's Install Options buttons
+  - **User-Facing**
+    - Review an installation with Validate or a revision replacement with Replace. Both buttons sit next to Cancel on the right.
+
 ## 4.0.0
 
 ### Major Changes
