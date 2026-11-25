@@ -18,7 +18,7 @@ export type DashboardMouseTarget =
   | { type: 'filter-dismiss'; filter: DashboardFilter }
   | { type: 'modal-choice'; index: number }
   | { type: 'modal-option'; group: 'scope' | 'destination'; index: number }
-  | { type: 'modal-review' }
+  | { type: 'modal-install-action'; action: 'review' | 'cancel' }
   | { type: 'modal-select'; action: 'toggle'; group: 'scope' | 'destination' }
   | { type: 'modal-select'; action: 'dismiss' | 'surface' }
   | { type: 'row'; screen: DashboardSection; index: number }

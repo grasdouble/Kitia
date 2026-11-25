@@ -574,7 +574,18 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
     assert.equal(session.terminal.cell(inventory.row, inventory.left).char, '│');
 
     session.input.write('\x1b[6~');
-    const laterDetails = await waitForGrid(
+    const installedDetails = await waitForGrid(
+      session,
+      (grid) => {
+        const details = workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES'));
+        return details.includes('INSTALLED FOR') && details.includes('Standard');
+      },
+      'paging the selected details shows the installed destination',
+    );
+    const installedMetadata = workspaceDetails(workspaceFrame(installedDetails, 'INSTALLED RESOURCES'));
+    assert.ok(installedMetadata.includes('INSTALLED REVISION') && installedMetadata.includes('4ae2317'));
+    session.input.write('\x1b[6~');
+    const sourceDetails = await waitForGrid(
       session,
       (grid) => {
         const details = workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES'));
@@ -583,11 +594,16 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
           !details.includes('Route repository questions')
         );
       },
-      'paging the selected details shows the installed revision and upstream source',
+      'paging further shows the upstream source',
     );
-    const metadata = workspaceDetails(workspaceFrame(laterDetails, 'INSTALLED RESOURCES')).filter(Boolean).join(' ');
-    assert.match(metadata, /INSTALLED REVISION 4ae2317/);
+    const metadata = workspaceDetails(workspaceFrame(sourceDetails, 'INSTALLED RESOURCES')).filter(Boolean).join(' ');
     assert.match(metadata.replace(/\s+/g, ''), /SOURCEPATHskills\/engineering\/ask-matt/);
+    session.input.write('\x1b[5~');
+    await waitForGrid(
+      session,
+      (grid) => workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES')).includes('INSTALLED REVISION'),
+      'Page Up returns to the installed metadata',
+    );
     session.input.write('\x1b[5~');
     await waitForGrid(
       session,
@@ -1382,7 +1398,12 @@ test(
       }
       await press('\r', 'INSTALL OPTIONS');
       await press('\t', '› Destinations');
-      await press('\t', '› [ Review install ]');
+      session.input.write('\t');
+      await waitForGrid(
+        session,
+        (grid) => grid.includes('│ REVIEW INSTALL │') && !grid.includes('› Destinations'),
+        'Tab moves from Destinations to Review install',
+      );
       await press('\r', 'CONFIRM INSTALL');
       const blocked = await press('y', 'INSTALL FAILED');
       assert.ok(blocked.includes('AUDIT_BLOCKED'));

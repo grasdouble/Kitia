@@ -164,9 +164,10 @@ export function TuiDemo() {
           <kbd>I</kbd> for Inventory, <kbd>B</kbd> to browse resources, or <kbd>M</kbd> to manage catalogs.{' '}
           <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> moves between controls. In Install Options, open Scope or Destinations
           with a click, <kbd>Enter</kbd>, or <kbd>Space</kbd>. Use arrows and <kbd>Enter</kbd> to pick a scope, or{' '}
-          <kbd>Space</kbd> to toggle destinations. <kbd>Tab</kbd> moves to Review install; <kbd>Esc</kbd> closes the
-          menu. Press <kbd>?</kbd> for the guide. When search is focused, type normally. The buttons below send the same
-          keys.
+          <kbd>Space</kbd> to toggle destinations. Use <kbd>Tab</kbd> to reach Review install or Cancel, then{' '}
+          <kbd>Enter</kbd> or <kbd>Space</kbd> to activate the button. <kbd>Esc</kbd> closes the menu or leaves Install
+          Options. Press <kbd>?</kbd> for the guide. When search is focused, type normally. The buttons below send the
+          same keys.
         </p>
         <div className={styles.screen}>
           <div

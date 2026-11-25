@@ -12,7 +12,7 @@ import { ShortcutsPanel } from './components/shortcuts/shortcuts-panel.mjs';
 import { fitColumn, fitText, wrapText } from './helpers.mjs';
 import { DashboardMouseRegions, type DashboardMouseRegion, type DashboardMouseTarget } from './input-transport.mjs';
 
-type ModalOption = { label: string; color?: string };
+type ModalOption = { label: string; color?: string; mouseTarget?: DashboardMouseTarget };
 type ModalContentLine = {
   text: string;
   type?: 'choice-group' | 'selectable-option';
@@ -548,7 +548,7 @@ export function ModalOverlay({
         const bodyOffset = typeof line.text === 'string' ? line.text.indexOf(line.bodyText) : -1;
         for (const [index, option] of line.options.entries()) {
           const label = option.label;
-          const target: DashboardMouseTarget = { type: 'modal-choice', index };
+          const target: DashboardMouseTarget = option.mouseTarget ?? { type: 'modal-choice', index };
           const node = refs?.options[index]?.current;
           if (node) {
             const optionLayout = measureElement(node);

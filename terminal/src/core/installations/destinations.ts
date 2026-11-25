@@ -42,7 +42,7 @@ export type InstallationDestination = keyof typeof destinations;
 export const installationDestinationIds: readonly InstallationDestination[] = Object.keys(
   destinations,
 ) as InstallationDestination[];
-export const installationScopes = ['project', 'user'] as const satisfies readonly InstallationScope[];
+export const installationScopes = ['user', 'project'] as const satisfies readonly InstallationScope[];
 
 export interface InstallationLayout {
   id: InstallationDestination;

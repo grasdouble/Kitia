@@ -31,7 +31,7 @@ export function optionsModal({
   scope: InstallationScope;
   scopeChoices: InstallationScope[];
   destinations: { label: string; directory: string; tracked: boolean; selected: boolean }[];
-  focus: 'scope' | 'destinations' | 'review';
+  focus: 'scope' | 'destinations' | 'review' | 'cancel';
   menu: { group: 'scope' | 'destination'; index: number } | null;
   moveMenu: (direction: -1 | 1) => void;
   replacing: boolean;
@@ -71,6 +71,24 @@ export function optionsModal({
   const extra = selected.length > 2 ? ` +${selected.length - 2}` : '';
   const summary =
     names && names.length + extra.length <= contentWidth - 5 ? `${names}${extra}` : `${selected.length} selected`;
+  const button = (action: 'review' | 'cancel', label: string) => ({
+    label,
+    color: semantic.selected,
+    mouseTarget: { type: 'modal-install-action' as const, action },
+  });
+  const cancel = button('cancel', 'Cancel');
+  const reviewLabel = replacing ? 'Review replacement' : 'Review install';
+  const review = button('review', reviewLabel.length + 4 <= contentWidth ? reviewLabel : 'Review');
+  const buttons = canReview ? [review, cancel] : [cancel];
+  const buttonGroup = choiceGroup(
+    '',
+    buttons,
+    buttons.findIndex(({ mouseTarget }) => mouseTarget.action === focus),
+  );
+  const buttonRows =
+    buttonGroup.text.length <= contentWidth
+      ? [buttonGroup]
+      : buttons.map((option) => choiceGroup('', [option], option.mouseTarget.action === focus ? 0 : -1));
   const frame = modalFrame(
     'INSTALL OPTIONS',
     [
@@ -87,6 +105,7 @@ export function optionsModal({
               text: `${scope.toUpperCase()} unavailable: ${scopeError.code}`,
               color: semantic.accents.error,
             },
+            { text: scopeError.message, color: semantic.accents.error },
           ]
         : []),
       ...selectField('Scope', scopeLabel(scope), 'scope', !fixedScope),
@@ -123,16 +142,7 @@ export function optionsModal({
           : 'Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.',
         color: semantic.accents.warning,
       },
-      ...(canReview
-        ? [
-            {
-              text: `${focus === 'review' ? '› ' : ''}[ ${replacing ? 'Review replacement' : 'Review install'} ]`,
-              bold: true,
-              color: focus === 'review' ? semantic.selected : semantic.accents.primary,
-              mouseTarget: { type: 'modal-review' as const },
-            },
-          ]
-        : []),
+      ...buttonRows,
       ...(!compact
         ? [
             {

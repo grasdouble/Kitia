@@ -299,8 +299,10 @@ artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
 
 In the dashboard, new skill and agent installs default to **User**. Open
-**Scope** to choose **Project** instead. Instructions have a read-only Project
-scope. The CLI still defaults to project scope.
+**Scope** to see **User** first and choose **Project** if needed. If the
+selected scope cannot be scanned, Install Options shows the inventory error
+and blocks review for that scope. Instructions have a read-only Project scope.
+The CLI still defaults to project scope.
 
 In Install Options, **Destinations** looks like an Inventory filter but
 accepts multiple values. Open it with a click, `Enter`, or `Space`. Use the
@@ -308,8 +310,10 @@ arrows to move through the menu and `Space` to toggle an
 available destination; already installed copies are marked and cannot be
 selected. `Esc` or an outside click closes the menu without clearing choices.
 `Tab` closes it and moves to the next control. Project and user selections
-are independent. **Review install** opens the confirmation with the full
-paths. Update and uninstall confirmations show the tracked destination paths.
+are independent. Click **Review install** to open confirmation with the full
+paths, or **Cancel** to return to the catalog without installing. Both buttons
+also work with `Tab` and `Enter` or `Space`; `Esc` cancels when no menu is open.
+Update and uninstall confirmations show the tracked destination paths.
 Instructions remain project-scoped. In the catalog browser, `F` enters
 search mode; while searching, all typed characters—including `T`, `S`, and `L`—
 are query text, and `Enter` applies the query. Outside search mode, `F` starts
@@ -342,6 +346,12 @@ not change CLI command syntax, options, output contracts, or audit semantics.
 Selected-resource details expose license status and, when source provenance is
 available, the pinned repository/path/commit. Missing license metadata is shown
 as undeclared; incomplete pin metadata may show as unknown.
+
+In Inventory, `INSTALLED FOR` lists the destinations matching the selected
+artifact's recorded or detected paths, including unmanaged copies in recognized
+locations. The field is omitted if none of its paths match an installation
+destination. The paths themselves remain visible in `INSTALLED PATH`.
+
 Inventory selection details show a `CATALOG` label for tracked artifacts with
 source-repository metadata. Custom user catalogs include the folder selected by
 the saved path mapping, such as `MattPucock[engineering]`. Browse keeps catalog

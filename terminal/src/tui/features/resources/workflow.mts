@@ -36,7 +36,7 @@ export function useResourceWorkflow(
   const [destinationSelections, setDestinationSelections] = useState<
     Partial<Record<InstallationScope, readonly InstallationDestination[]>>
   >({});
-  const [installFocus, setInstallFocus] = useState<'scope' | 'destinations' | 'review'>('scope');
+  const [installFocus, setInstallFocus] = useState<'scope' | 'destinations' | 'review' | 'cancel'>('scope');
   const [installMenu, setInstallMenu] = useState<{ group: 'scope' | 'destination'; index: number } | null>(null);
   const [confirmation, setConfirmation] = useState<PendingDashboardAction | null>(null);
   const [confirmationChoice, setConfirmationChoice] = useState(0);
@@ -297,6 +297,10 @@ export function useResourceWorkflow(
       });
     }
   };
+  const cancelOptions = () => {
+    setScreenMode('catalog');
+    setInstallResource(null);
+  };
   const chooseOption = (group: 'scope' | 'destination', index: number) => {
     if (installMenu?.group !== group) return;
     if (group === 'scope') {
@@ -349,8 +353,9 @@ export function useResourceWorkflow(
       if (scopeChoices.length > 1) controls.push('scope');
       if (!replacing) controls.push('destinations');
       if (canReview) controls.push('review');
+      controls.push('cancel');
       const index = controls.indexOf(installFocus);
-      if (controls.length) setInstallFocus(controls[cycleIndex(controls.length, index, key.shift ? -1 : 1)]);
+      setInstallFocus(controls[cycleIndex(controls.length, index, key.shift ? -1 : 1)]);
       return;
     }
     if (installMenu) {
@@ -360,13 +365,12 @@ export function useResourceWorkflow(
         chooseOption(installMenu.group, installMenu.index);
       return;
     }
-    if (key.escape) {
-      setScreenMode('catalog');
-      setInstallResource(null);
-    } else if (key.return || input === ' ') {
+    if (key.escape) cancelOptions();
+    else if (key.return || input === ' ') {
       if (installFocus === 'scope') toggleInstallMenu('scope');
       else if (installFocus === 'destinations') toggleInstallMenu('destination');
       else if (installFocus === 'review') reviewOptions();
+      else if (installFocus === 'cancel') cancelOptions();
     }
   };
   const modal = (columns: number, rows: number, optionsVisible: boolean) => {
@@ -413,6 +417,7 @@ export function useResourceWorkflow(
     toggleInstallMenu,
     closeInstallMenu,
     reviewOptions,
+    cancelOptions,
     handleVersionInput,
     handleConfirmationInput,
     handleOptionsInput,

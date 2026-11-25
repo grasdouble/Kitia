@@ -1414,7 +1414,12 @@ test('Inventory details order installed metadata and pair only contextual action
     source_ref: revision,
     source_repository: 'org/toolkit',
     source_path: 'skills/code-review',
-    paths: ['./.agents/skills/code-review/SKILL.md'],
+    paths: [
+      './.agents/skills/code-review/SKILL.md',
+      '.github/skills/code-review/SKILL.md',
+      '.claude/skills/code-review/SKILL.md',
+      '.vibe/skills/code-review/SKILL.md',
+    ],
   };
   const candidate = { catalog: 'toolkit', kind: 'skill', id: 'candidate' };
   const dashboard = await startInteractiveDashboard(
@@ -1469,17 +1474,18 @@ test('Inventory details order installed metadata and pair only contextual action
       'CATALOGtoolkit',
       'LICENSEMIT',
       'INSTALLEDREVISIONa3d7f09',
+      'INSTALLEDFORStandard·GitHubCopilot·ClaudeCode·MistralVibe',
       'INSTALLEDPATH./.agents/skills/code-review/SKILL.md',
     ];
     const positions = metadata.map((value) => details.indexOf(value));
     assert.ok(
       positions.every((position) => position >= 0),
-      'all four installed metadata fields are visible',
+      'all installed metadata fields are visible',
     );
     assert.deepEqual(
       positions,
       [...positions].sort((left, right) => left - right),
-      'catalog, license, installed revision, and installed path appear in reference order',
+      'destination labels appear between the installed revision and the paths',
     );
     assert.equal(
       details.includes(revision),
@@ -1503,6 +1509,67 @@ test('Inventory details order installed metadata and pair only contextual action
     await dashboard.stop();
   }
 });
+
+test('Inventory lists the matching destinations for managed and unmanaged artifacts', async () => {
+  for (const { id = 'example', kind, scope, paths, labels, managed = true } of [
+    {
+      kind: 'skill',
+      scope: 'user',
+      paths: [
+        '.agents/skills/example/SKILL.md',
+        '.copilot/skills/example/SKILL.md',
+        '.claude/skills/example/SKILL.md',
+        '.vibe/skills/example/SKILL.md',
+      ],
+      labels: 'Standard·GitHubCopilot·ClaudeCode·MistralVibe',
+    },
+    {
+      kind: 'agent',
+      scope: 'project',
+      paths: ['.github/agents/example.agent.md', '.claude/agents/example.md'],
+      labels: 'GitHubCopilot·ClaudeCode',
+    },
+    {
+      kind: 'agent',
+      scope: 'user',
+      paths: ['.copilot/agents/example.agent.md', '.claude/agents/example.md'],
+      labels: 'GitHubCopilot·ClaudeCode',
+    },
+    {
+      kind: 'instruction',
+      scope: 'project',
+      paths: ['.github/instructions/example.instructions.md', '.claude/rules/example.md'],
+      labels: 'GitHubCopilot·ClaudeCode',
+    },
+    {
+      id: 'category/example',
+      kind: 'agent',
+      scope: 'project',
+      paths: ['.github/agents/category/example.md', '.github/agents/category/example.agent.md'],
+      labels: 'GitHubCopilot',
+      managed: false,
+    },
+    {
+      kind: 'instruction',
+      scope: 'project',
+      paths: ['.agents/instructions/example.md'],
+      labels: '',
+      managed: false,
+    },
+  ]) {
+    const frame = await captureDashboardFrame([{ id, kind, scope, paths, managed }], {}, [], {
+      columns: 120,
+      rows: 48,
+    });
+    const details = detailBodyText(frame);
+    if (labels) assert.ok(details.includes(`INSTALLEDFOR${labels}INSTALLEDPATH`), paths.join(', '));
+    else {
+      assert.ok(details.includes(`INSTALLEDPATH${paths[0]}`));
+      assert.ok(!details.includes('INSTALLEDFOR'));
+    }
+  }
+});
+
 test('Browse details mirror Inventory hierarchy and retain catalog-specific metadata and actions', async () => {
   const candidate = {
     catalog: 'toolkit',
@@ -2103,6 +2170,20 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     const border = (field) => defaults.split(/\r?\n/)[field.row - 1].slice(field.start).match(/^╭─+╮/)?.[0];
     assert.ok(border(scopeField));
     assert.equal(border(scopeField), border(destinationField));
+    clickRenderedButtonRow(
+      dashboard,
+      (target) => target.type === 'modal-install-action' && target.action === 'cancel',
+      '│ CANCEL │',
+      -1,
+    );
+    const catalog = await dashboard.wait(
+      (frame) => frame.includes('CATALOG RESOURCES') && !frame.includes('INSTALL OPTIONS'),
+      'Cancel returns to the selected catalog resource',
+    );
+    assert.ok(selectedDetailsFrame(catalog).includes('candidate-two'));
+    assert.deepEqual(calls, []);
+    dashboard.input.write('\r');
+    await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'reopened install options');
     for (const [current, next] of [
       ['User', 'Project'],
       ['Project', 'User'],
@@ -2153,7 +2234,12 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       'outside click closes the menu and retains selections',
     );
     assert.ok(closed.includes('INSTALL OPTIONS') && !closed.includes('CONFIRM INSTALL'));
-    clickRenderedTarget(dashboard, (target) => target.type === 'modal-review', '[ Review install ]');
+    clickRenderedButtonRow(
+      dashboard,
+      (target) => target.type === 'modal-install-action' && target.action === 'review',
+      '│ REVIEW INSTALL │',
+      1,
+    );
     const confirmation = await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
     assert.ok(confirmation.includes('Selected paths (user):'));
     assert.ok(confirmation.includes('• .agents/skills/candidate-two/SKILL.md'));
@@ -2200,15 +2286,24 @@ test('install options keep scope selections independent and only add newly selec
   try {
     await press('b', 'CATALOG RESOURCES');
     await press('\r', '│ User▾');
+    dashboard.input.write('\x1b[Z');
+    await dashboard.wait(
+      (frame) => frame.includes('│ CANCEL │') && !frame.includes('› Scope'),
+      'focus moves to Cancel',
+    );
+    dashboard.input.write(' ');
+    await dashboard.wait((frame) => !frame.includes('INSTALL OPTIONS'), 'Space activates Cancel');
+    assert.deepEqual(calls, []);
+    await press('\r', '│ User▾');
     await press('\r', '› ✓ User');
-    await press('\x1b[A', '› Project');
+    await press('\x1b[B', '› Project');
     await press('\x1b', '│ User▾');
     const changeScope = async (key, choice) => {
       await press('\r', choice === 'Project' ? '› ✓ User' : '› ✓ Project');
       await press(key, `› ${choice}`);
       return press('\r', `│ ${choice}▾`);
     };
-    const options = await changeScope('\x1b[A', 'Project');
+    const options = await changeScope('\x1b[B', 'Project');
     assert.ok(options.includes('│ 0 selected▾') && !options.includes('Standard [Installed]'));
     assert.ok(options.includes('Select at least one new destination.'));
     await press('\t', '› Destinations');
@@ -2223,15 +2318,18 @@ test('install options keep scope selections independent and only add newly selec
     await press('\x1b', '│ GitHub Copilot▾');
     dashboard.input.write('\x1b[Z');
     await dashboard.wait((frame) => !frame.includes('› Destinations'), 'focus returns to scope');
-    const userOptions = await changeScope('\x1b[B', 'User');
+    const userOptions = await changeScope('\x1b[A', 'User');
     assert.ok(userOptions.includes('│ Standard▾'));
     assert.ok(!userOptions.includes('□ GitHub Copilot'));
-    const projectOptions = await changeScope('\x1b[A', 'Project');
+    const projectOptions = await changeScope('\x1b[B', 'Project');
     assert.ok(projectOptions.includes('│ GitHub Copilot▾'));
     await press('\t', '› Destinations');
     await press(' ', '› ✓ GitHub Copilot');
-    await press('\t', '› [ Review install ]');
-    assert.ok(!dashboard.frame().includes('✓ GitHub Copilot'));
+    dashboard.input.write('\t');
+    await dashboard.wait(
+      (frame) => frame.includes('│ REVIEW INSTALL │') && !frame.includes('› Destinations'),
+      'Tab dismisses the menu and moves to Review install',
+    );
     const confirmation = await press('\r', 'CONFIRM INSTALL');
     assert.ok(confirmation.includes(`• ${copilotPath}`));
     assert.ok(!confirmation.includes(`• ${standardPath}`));
@@ -2264,18 +2362,19 @@ test('install options use kind defaults and block a scope with an inventory scan
   assert.ok(!project.includes('□ Standard'));
   assert.ok(!project.includes('Mistral Vibe'));
   assert.ok(!project.includes('User▾'));
-  const user = await captureDashboardFrame(
-    [],
-    { catalogResources: [{ ...candidate, kind: 'agent' }] },
-    ['b', '\r', '\t', '\r'],
-    dimensions,
-    [{ scope: 'user', code: 'CATALOG_ERROR', message: 'Cannot read user inventory.' }],
-  );
+  const userFrame = (keys) =>
+    captureDashboardFrame([], { catalogResources: [{ ...candidate, kind: 'agent' }] }, keys, dimensions, [
+      { scope: 'user', code: 'CATALOG_ERROR', message: 'Cannot read user inventory.' },
+    ]);
+  const user = await userFrame(['b', '\r', '\t', '\r']);
   assert.ok(user.includes('USER unavailable: CATALOG_ERROR'));
   assert.ok(user.includes('│ User▾'));
   assert.ok(user.includes('~/.copilot/agents/'));
   assert.ok(!user.includes('Mistral Vibe'));
-  assert.ok(!user.includes('[ Review install ]'));
+  const closed = await userFrame(['b', '\r']);
+  assert.ok(closed.includes('│ CANCEL │'));
+  assert.ok(closed.includes('Cannot read user inventory.'));
+  assert.ok(!closed.includes('│ REVIEW INSTALL │'));
 });
 
 test('destination menu opens above the field and scrolls at short terminal heights', async () => {
@@ -2291,7 +2390,10 @@ test('destination menu opens above the field and scrolls at short terminal heigh
     await press('\t', '› Destinations');
     Object.assign(dashboard.output, { columns: 38, rows: 10 });
     dashboard.output.emit('resize');
-    await dashboard.wait((frame) => frame.includes('Pinned source audit required.'), 'compact install options');
+    await dashboard.wait(
+      (frame) => frame.includes('Pinned source audit required.') && frame.includes('│ REVIEW INSTALL │ │ CANCEL │'),
+      'both install buttons remain visible in compact options',
+    );
     const open = await press('\r', '› ✓ Standard');
     assert.ok(renderedTextCell(open, '› ✓ Standard').y < renderedTextCell(open, '▴').y);
     assert.ok(!open.includes('Mistral Vibe'));
