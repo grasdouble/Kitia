@@ -61,10 +61,10 @@ test('dashboard refreshes its source catalog set before rebuilding installed ski
         resource,
         target,
         scope: 'project',
-        tool: 'copilot',
+        destinations: ['standard'],
       },
-      (_args, installTarget) => {
-        const skillFile = path.join(installTarget, '.agents/skills/demo-skill/SKILL.md');
+      (args) => {
+        const skillFile = path.join(args[args.indexOf('--dir') + 1], resource.id, 'SKILL.md');
         fs.mkdirSync(path.dirname(skillFile), { recursive: true });
         fs.writeFileSync(
           skillFile,
@@ -142,7 +142,7 @@ test('CLI install --ref replaces only the selected scope and retains skill updat
         '',
       ].join('\n'),
     );
-    recordSourceInstallation(catalogResource, target, 'github-copilot');
+    recordSourceInstallation(catalogResource, target, '.agents/skills/demo-skill/SKILL.md');
   };
   for (const target of [projectTarget, userTarget, modifiedTarget, untrackedTarget]) seedTarget(target);
   fs.mkdirSync(oppositeOnlyTarget);
@@ -180,7 +180,8 @@ test('CLI install --ref replaces only the selected scope and retains skill updat
       '#!/usr/bin/env node',
       'const fs = require("node:fs");',
       'const path = require("node:path");',
-      'const file = ".agents/skills/demo-skill/SKILL.md";',
+      'const dir = process.argv[process.argv.indexOf("--dir") + 1];',
+      'const file = path.join(dir, "demo-skill", "SKILL.md");',
       'const ref = process.argv[process.argv.indexOf("--pin") + 1];',
       'fs.writeFileSync(process.env.KITIA_TEST_GH_PIN, ref);',
       'fs.mkdirSync(path.dirname(file), { recursive: true });',

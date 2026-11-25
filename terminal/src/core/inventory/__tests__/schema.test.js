@@ -44,7 +44,7 @@ test('v1 schema accepts inventory written for the Anthropics preset and a catalo
     recordSourceInstallation(
       { catalog, kind: 'skill', id, source_repository: repository, source_path: sourcePath, source_ref: sourceRef },
       target,
-      'github-copilot',
+      `.agents/skills/${id}/SKILL.md`,
     );
   }
   const written = JSON.parse(fs.readFileSync(path.join(target, LOCK_PATH), 'utf8'));

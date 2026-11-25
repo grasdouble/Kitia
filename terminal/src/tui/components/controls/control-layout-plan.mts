@@ -178,7 +178,6 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
   const width = Math.max(1, props.columns - 2);
   const fieldRows = props.rows && props.rows < 40 ? 2 : 4;
   const lines: ControlLine[] = [];
-  if (props.modalActive) return { width, height: 0, lines, menu: undefined };
   const part = props.part || 'all';
   let row = 0;
   if (part !== 'filters') {
@@ -217,7 +216,7 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
     }
     row += tabLines.length * 3;
   }
-  if (part === 'tabs') return { width, height: row, lines, menu: undefined };
+  if (part === 'tabs' || props.modalActive) return { width, height: row, lines, menu: undefined };
 
   const filters = ['kind', 'catalog', 'license'].flatMap((id) =>
     (props.filters || []).filter((filter) => filter.id === id),

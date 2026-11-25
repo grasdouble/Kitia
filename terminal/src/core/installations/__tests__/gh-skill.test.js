@@ -13,24 +13,26 @@ test('builds scoped source skill commands and explains command failures', () => 
     source_path: 'skills/demo',
   };
   assert.deepEqual(
-    buildSourceSkillArgs('install', { ...resource, source_ref: 'a'.repeat(40) }, 'github-copilot', {
-      scope: 'user',
-      force: true,
-      target: '/home/user',
-    }),
+    buildSourceSkillArgs(
+      'install',
+      { ...resource, source_ref: 'a'.repeat(40) },
+      path.join('/home/user', '.copilot', 'skills'),
+      {
+        scope: 'user',
+        force: true,
+      },
+    ),
     [
       'skill',
       'install',
       'acme/repo',
       'skills/demo',
-      '--agent',
-      'github-copilot',
+      '--dir',
+      path.join('/home/user', '.copilot', 'skills'),
       '--scope',
       'user',
       '--pin',
       'a'.repeat(40),
-      '--dir',
-      path.join('/home/user', '.agents', 'skills'),
       '--force',
     ],
   );

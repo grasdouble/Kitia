@@ -90,6 +90,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
     source_repository: 'org/repo',
     source_path: 'skills/revision-skill',
     source_ref: 'a'.repeat(40),
+    paths: ['.agents/skills/revision-skill/SKILL.md', '.github/skills/revision-skill/SKILL.md'],
   };
   let resolveHistory;
   const historyRequest = new Promise((resolve) => {
@@ -117,7 +118,13 @@ test('dashboard replaces an installed skill with the selected full revision thro
     ],
     listSourceVersions: () => historyRequest,
     execute: async (action, resource, options) => {
-      actions.push({ action, resource: resource.id, scope: resource.scope, ref: options.ref });
+      actions.push({
+        action,
+        resource: resource.id,
+        scope: resource.scope,
+        ref: options.ref,
+        destinations: options.destinations,
+      });
       markUpdateStarted();
       await updateRequest;
       return {
@@ -136,10 +143,11 @@ test('dashboard replaces an installed skill with the selected full revision thro
   input.write('b');
   await waitForFrame((frame) => frame.includes('CATALOG RESOURCES'), 'catalog resources');
   input.write('v');
-  await waitForFrame(
+  const historyLoading = await waitForFrame(
     (frame) => frame.includes('Loading commit history for revision-skill'),
     'revision history loading popup',
   );
+  assert.match(historyLoading, /Inventory 1\s+Browse resources 1\s+Manage Catalogs 0/);
   resolveHistory([
     {
       sha: 'a'.repeat(40),
@@ -155,6 +163,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
     },
   ]);
   const revisionFrame = await waitForFrame((frame) => frame.includes('RESOURCE REVISIONS'), 'revision picker');
+  assert.match(revisionFrame, /Inventory 1\s+Browse resources 1\s+Manage Catalogs 0/);
   const revisionBody = assertSeparatedPanelHeader(revisionFrame, 'RESOURCE REVISIONS', '', [
     'Test / skill:revision-skill',
     'Select a commit to update; the catalog pin remains unchanged.',
@@ -173,8 +182,14 @@ test('dashboard replaces an installed skill with the selected full revision thro
   assert.match(confirmationFrame, /Replace the installed skill:revision-skill/);
   assert.match(confirmationFrame, /revision in project scope\?/);
   assert.match(confirmationFrame, /Selected revision: b{40}/);
+  assert.match(confirmationFrame, /Tracked paths:/);
+  for (const path of installed.paths) assert.ok(confirmationFrame.includes(path));
   input.write('y');
-  await waitForFrame((frame) => frame.includes('Updating skill:revision-skill'), 'update loading popup');
+  const loading = await waitForFrame(
+    (frame) => frame.includes('Updating skill:revision-skill'),
+    'update loading popup',
+  );
+  assert.ok(loading.includes('CATALOG RESOURCES'));
   await updateStarted;
   assert.deepEqual(actions, [
     {
@@ -182,12 +197,17 @@ test('dashboard replaces an installed skill with the selected full revision thro
       resource: 'revision-skill',
       scope: 'project',
       ref: selectedSha,
+      destinations: undefined,
     },
   ]);
   input.write('q');
   assert.equal(dashboardFinished, false, 'input remains blocked while the loader popup is active');
   resolveUpdate();
-  await waitForFrame((frame) => !frame.includes('Updating skill:revision-skill'), 'the update loading popup to close');
+  const updated = await waitForFrame(
+    (frame) => frame.includes('CATALOG RESOURCES') && !frame.includes('LOADING') && !frame.includes('CONFIRM UPDATE'),
+    'Browse after the selected revision update',
+  );
+  assert.match(updated, /›\s+revision-skill/);
   input.write('q');
   assert.equal(await done, true);
   input.destroy();
@@ -242,7 +262,11 @@ test('dashboard shows the loading popup for consecutive actions', async () => {
     input.write('b');
     await waitFor((frame) => frame.includes('CATALOG RESOURCES'), 'open catalog');
     input.write('p');
-    await waitFor((frame) => frame.includes('LOADING'), 'show the first loading popup');
+    const firstLoading = await waitFor((frame) => frame.includes('LOADING'), 'show the first loading popup');
+    assert.match(
+      require('node:util').stripVTControlCharacters(firstLoading),
+      /Inventory 0\s+Browse resources 1\s+Manage Catalogs 0/,
+    );
     await waitFor((frame) => frame.includes('Preview ready.'), 'finish the first preview');
     assert.equal(callCount, 1);
 
@@ -295,6 +319,7 @@ test('dashboard revision picker applies a selected full SHA to a confirmed instr
     source_repository: 'org/repo',
     source_path: '.github/instructions/review.instructions.md',
     source_ref: 'a'.repeat(40),
+    paths: ['.github/instructions/review.instructions.md', '.claude/rules/review.md'],
   };
   const actions = [];
   const done = runDashboard([installedInstruction], input, output, [], {
@@ -356,12 +381,13 @@ test('dashboard revision picker applies a selected full SHA to a confirmed instr
       (frame) => frame.includes('RESOURCE REVISIONS') && frame.includes('› ccccccc'),
       'selected revision',
     );
-    await press(
+    const confirmation = await press(
       '\r',
       (frame) =>
         frame.includes('CONFIRM UPDATE') && frame.includes(selectedSha) && !frame.includes('RESOURCE REVISIONS'),
       'update confirmation with selected SHA',
     );
+    for (const path of installedInstruction.paths) assert.ok(confirmation.includes(path));
     let updated = await press(
       'y',
       (frame) =>

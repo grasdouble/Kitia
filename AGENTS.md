@@ -5,6 +5,10 @@
 - For every feature, verify its applicability to both the CLI and TUI; implement it in every applicable interface and document any intentional interface-specific exception.
 - For any change that can affect catalog artifact behavior, verify its applicability across all applicable combinations of skills, agents, and instructions; update all applicable code paths and regression tests, and document any intentional type-specific exception.
 
+## Formatting
+
+- After editing files, run `pnpm exec oxfmt <file>...` before handing off or committing. Pass only the files you modified that are covered by the repository's `format` script; do not run the workspace-wide formatter.
+
 ## Dashboard colors
 
 - Source dashboard colors from `terminal/src/tui/colors.ts`; screens and components MUST use theme tokens instead of defining color literals locally.

@@ -43,8 +43,6 @@ const INSTALLABLE_KINDS = new Set(['skill', 'agent', 'instruction']);
 
 const USER_INSTALLABLE_KINDS = new Set(['skill', 'agent']);
 
-const TOOLS = new Set(['claude', 'copilot', 'both']);
-
 const RESOURCE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 class CatalogError extends Error {
@@ -88,4 +86,4 @@ function rejectUnsupportedVersion(version: unknown, supported: number, label: st
   }
 }
 
-export { CatalogError, INSTALLABLE_KINDS, USER_INSTALLABLE_KINDS, TOOLS, RESOURCE_ID, rejectUnsupportedVersion };
+export { CatalogError, INSTALLABLE_KINDS, USER_INSTALLABLE_KINDS, RESOURCE_ID, rejectUnsupportedVersion };

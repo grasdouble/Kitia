@@ -6,6 +6,10 @@ by [`catalog-lock-v1.schema.json`](../terminal/schemas/catalog-lock-v1.schema.js
 It stores configured external source records only: skills, agents, and
 instructions.
 
+Destination selection does not require an inventory migration. Existing
+tracked `.agents/skills/` files are shown as Standard and remain managed at
+their recorded paths.
+
 This development checkout no longer supports internal catalog resources,
 bundles, or MCPs. Older local lock files that contain `resources`, `bundles`, or
 `mcps` fields are incompatible with this source-only format. Back up and remove

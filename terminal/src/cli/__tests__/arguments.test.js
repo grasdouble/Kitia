@@ -76,6 +76,26 @@ test('onboarding and no-argument invocations select their default targets', () =
   assert.deepEqual(parseArguments([]), { command: 'dashboard', target: '.' });
 });
 
+test('install parses repeatable destinations without setting a default before resource selection', () => {
+  const base = ['install', 'skill', 'demo'];
+  const defaults = parseArguments(base);
+  assert.equal(defaults.target, '.');
+  assert.equal(defaults.destinations, undefined);
+  const options = parseArguments([
+    ...base,
+    '--destination',
+    'claude',
+    '--target',
+    'project',
+    '--destination',
+    'standard',
+  ]);
+  assert.equal(options.target, 'project');
+  assert.deepEqual(options.destinations, ['claude', 'standard']);
+  assert.throws(() => parseArguments([...base, '--destination']), /--destination requires a value/);
+  assert.throws(() => parseArguments([...base, '--destination', 'both']), /must be one of: standard, copilot, claude/);
+});
+
 test('versions and install/update arguments select every source kind and validate refs', () => {
   const sha = 'c'.repeat(40);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-versions-args-'));

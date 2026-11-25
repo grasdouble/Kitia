@@ -62,7 +62,7 @@ test('update confirmation distinguishes GH-backed skills and other resources', a
       resource: { ...base, kind: 'skill' },
       forceRetry: true,
       ghForceRetry: true,
-      ghForceAgent: 'github-copilot',
+      ghForceAgent: 'standard',
       conflict: {
         category: 'github-force-required',
         paths: [],
@@ -76,11 +76,35 @@ test('update confirmation distinguishes GH-backed skills and other resources', a
   const ghRetryText = ghRetry.lines.map(({ bodyText, text }) => bodyText || text).join(' ');
   assert.ok(ghRetryText.includes('GH REQUESTS OVERWRITE'));
   assert.ok(ghRetryText.includes('requires --force'));
-  assert.ok(ghRetryText.includes('for github-copilot'));
+  assert.ok(ghRetryText.includes('for standard'));
   assert.ok(ghRetryText.includes("Kitia's local-modification and untracked-content checks still apply"));
   const retryChoices = ghRetry.lines.find(({ options }) => options).options.map(({ label }) => label);
   assert.deepEqual(retryChoices, ['NO / CANCEL', 'YES, RETRY WITH --FORCE']);
   const agentText = confirmationText({ ...base, kind: 'agent' });
   assert.ok(agentText.includes('does not use gh --force'));
   assert.ok(!agentText.includes('gh skill install --force'));
+});
+
+test('update and uninstall confirmations show every tracked path for all resource kinds', async () => {
+  const { confirmationModal } = await import('../features/resources/modals.mts');
+  for (const [kind, paths] of Object.entries({
+    skill: ['.agents/skills/review/SKILL.md', '.github/skills/review/SKILL.md', '.claude/skills/review/SKILL.md'],
+    agent: ['.copilot/agents/review.agent.md', '.claude/agents/review.md'],
+    instruction: ['.github/instructions/review.instructions.md', '.claude/rules/review.md'],
+  })) {
+    for (const action of ['update', 'uninstall']) {
+      const resource = { kind, id: 'review', scope: kind === 'agent' ? 'user' : 'project', paths };
+      const lines = confirmationModal({
+        confirmation: { action, resource },
+        selectedButton: 0,
+        stage: 1,
+        columns: 80,
+      }).lines.map(({ bodyText }) => bodyText);
+      assert.ok(lines.includes('Tracked paths:'));
+      assert.deepEqual(
+        lines.filter((line) => line?.startsWith('• ')),
+        paths.map((path) => `• ${path}`),
+      );
+    }
+  }
 });

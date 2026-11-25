@@ -16,11 +16,11 @@ type ActionFailure = {
 export function createForceRetryPrompt(requested: PendingDashboardAction, failure: ActionFailure): RetryPrompt | null {
   const ghForceRetry =
     failure.code === 'GH_FORCE_REQUIRED' && typeof failure.agent === 'string' && failure.agent.length > 0;
-  const alreadyForceRetriedAgent = ghForceRetry && requested.ghForceAgents?.includes(failure.agent as string);
+  const alreadyForceRetriedDestination = ghForceRetry && requested.ghForceAgents?.includes(failure.agent as string);
   if (
     requested.action !== 'update' ||
     failure.recoverable !== true ||
-    (ghForceRetry ? alreadyForceRetriedAgent : requested.forceRetry || failure.code !== 'LOCAL_CONFLICT')
+    (ghForceRetry ? alreadyForceRetriedDestination : requested.forceRetry || failure.code !== 'LOCAL_CONFLICT')
   )
     return null;
 

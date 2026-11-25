@@ -1414,7 +1414,12 @@ test('Inventory details order installed metadata and pair only contextual action
     source_ref: revision,
     source_repository: 'org/toolkit',
     source_path: 'skills/code-review',
-    paths: ['./.agents/skills/code-review/SKILL.md'],
+    paths: [
+      './.agents/skills/code-review/SKILL.md',
+      '.github/skills/code-review/SKILL.md',
+      '.claude/skills/code-review/SKILL.md',
+      '.vibe/skills/code-review/SKILL.md',
+    ],
   };
   const candidate = { catalog: 'toolkit', kind: 'skill', id: 'candidate' };
   const dashboard = await startInteractiveDashboard(
@@ -1469,17 +1474,18 @@ test('Inventory details order installed metadata and pair only contextual action
       'CATALOGtoolkit',
       'LICENSEMIT',
       'INSTALLEDREVISIONa3d7f09',
+      'INSTALLEDFORStandard·GitHubCopilot·ClaudeCode·MistralVibe',
       'INSTALLEDPATH./.agents/skills/code-review/SKILL.md',
     ];
     const positions = metadata.map((value) => details.indexOf(value));
     assert.ok(
       positions.every((position) => position >= 0),
-      'all four installed metadata fields are visible',
+      'all installed metadata fields are visible',
     );
     assert.deepEqual(
       positions,
       [...positions].sort((left, right) => left - right),
-      'catalog, license, installed revision, and installed path appear in reference order',
+      'destination labels appear between the installed revision and the paths',
     );
     assert.equal(
       details.includes(revision),
@@ -1503,6 +1509,67 @@ test('Inventory details order installed metadata and pair only contextual action
     await dashboard.stop();
   }
 });
+
+test('Inventory lists the matching destinations for managed and unmanaged artifacts', async () => {
+  for (const { id = 'example', kind, scope, paths, labels, managed = true } of [
+    {
+      kind: 'skill',
+      scope: 'user',
+      paths: [
+        '.agents/skills/example/SKILL.md',
+        '.copilot/skills/example/SKILL.md',
+        '.claude/skills/example/SKILL.md',
+        '.vibe/skills/example/SKILL.md',
+      ],
+      labels: 'Standard·GitHubCopilot·ClaudeCode·MistralVibe',
+    },
+    {
+      kind: 'agent',
+      scope: 'project',
+      paths: ['.github/agents/example.agent.md', '.claude/agents/example.md'],
+      labels: 'GitHubCopilot·ClaudeCode',
+    },
+    {
+      kind: 'agent',
+      scope: 'user',
+      paths: ['.copilot/agents/example.agent.md', '.claude/agents/example.md'],
+      labels: 'GitHubCopilot·ClaudeCode',
+    },
+    {
+      kind: 'instruction',
+      scope: 'project',
+      paths: ['.github/instructions/example.instructions.md', '.claude/rules/example.md'],
+      labels: 'GitHubCopilot·ClaudeCode',
+    },
+    {
+      id: 'category/example',
+      kind: 'agent',
+      scope: 'project',
+      paths: ['.github/agents/category/example.md', '.github/agents/category/example.agent.md'],
+      labels: 'GitHubCopilot',
+      managed: false,
+    },
+    {
+      kind: 'instruction',
+      scope: 'project',
+      paths: ['.agents/instructions/example.md'],
+      labels: '',
+      managed: false,
+    },
+  ]) {
+    const frame = await captureDashboardFrame([{ id, kind, scope, paths, managed }], {}, [], {
+      columns: 120,
+      rows: 48,
+    });
+    const details = detailBodyText(frame);
+    if (labels) assert.ok(details.includes(`INSTALLEDFOR${labels}INSTALLEDPATH`), paths.join(', '));
+    else {
+      assert.ok(details.includes(`INSTALLEDPATH${paths[0]}`));
+      assert.ok(!details.includes('INSTALLEDFOR'));
+    }
+  }
+});
+
 test('Browse details mirror Inventory hierarchy and retain catalog-specific metadata and actions', async () => {
   const candidate = {
     catalog: 'toolkit',
@@ -2050,7 +2117,7 @@ test('mouse wheel keeps separate page positions for the active preview panes', a
   }
 });
 
-test('mouse selects rendered resources and modal buttons preserve install safety', async () => {
+test('mouse selects rendered resources, destination checkboxes, and install confirmation', async () => {
   const candidates = ['candidate-one', 'candidate-two'].map((id) => ({
     catalog: 'sample',
     kind: 'skill',
@@ -2061,10 +2128,12 @@ test('mouse selects rendered resources and modal buttons preserve install safety
     source_ref: 'abcdef0123456789abcdef0123456789abcdef01',
   }));
   const calls = [];
+  const installation = Promise.withResolvers();
   const dashboard = await startInteractiveDashboard([], {
     catalogResources: candidates,
     execute: async (operation, resource, options) => {
       calls.push({ operation, id: resource.id, options });
+      await installation.promise;
       return {
         code: 0,
         resources: [{ ...resource, scope: options.scope, managed: true, status: 'current' }],
@@ -2078,6 +2147,8 @@ test('mouse selects rendered resources and modal buttons preserve install safety
       'Browse resources 2',
     );
     await dashboard.wait((frame) => frame.includes('CATALOG RESOURCES'), 'Browse after tab click');
+    const inventoryTab = renderedTextCell(dashboard.frame(), 'Inventory 0');
+    const tabRow = dashboard.frame().split(/\r?\n/)[inventoryTab.row];
     const previousSelection = selectedDetailsFrame(dashboard.frame());
     clickRenderedTarget(
       dashboard,
@@ -2094,32 +2165,269 @@ test('mouse selects rendered resources and modal buttons preserve install safety
       (target) => target.type === 'action' && target.action === 'install',
       'Install resource',
     );
-    await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'install options modal');
-    clickRenderedTarget(dashboard, (target) => target.type === 'modal-option' && target.group === 'scope', '│ USER │');
+    const defaults = await dashboard.wait(
+      (frame) => frame.includes('INSTALL OPTIONS') && frame.includes('│ User▾'),
+      'default User scope',
+    );
+    assert.equal(defaults.split(/\r?\n/)[inventoryTab.row], tabRow);
+    assert.ok(!dashboard.mouse.getRegions().some(({ target }) => target.type === 'section'));
+    clickAt(dashboard.input, inventoryTab);
     await dashboard.flush();
+    assert.ok(dashboard.frame().includes('INSTALL OPTIONS'));
+    const scopeField = renderedTextCell(defaults, '│ User▾');
+    const destinationField = renderedTextCell(defaults, '│ Standard▾');
+    const border = (field) => defaults.split(/\r?\n/)[field.row - 1].slice(field.start).match(/^╭─+╮/)?.[0];
+    assert.ok(border(scopeField));
+    assert.equal(border(scopeField), border(destinationField));
+    clickRenderedButtonRow(
+      dashboard,
+      (target) => target.type === 'modal-install-action' && target.action === 'cancel',
+      '│ CANCEL │',
+      -1,
+    );
+    const catalog = await dashboard.wait(
+      (frame) => frame.includes('CATALOG RESOURCES') && !frame.includes('INSTALL OPTIONS'),
+      'Cancel returns to the selected catalog resource',
+    );
+    assert.ok(selectedDetailsFrame(catalog).includes('candidate-two'));
+    assert.deepEqual(calls, []);
+    dashboard.input.write('\r');
+    await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'reopened install options');
+    for (const [current, next] of [
+      ['User', 'Project'],
+      ['Project', 'User'],
+    ]) {
+      clickRenderedTarget(
+        dashboard,
+        (target) => target.type === 'modal-select' && target.action === 'toggle' && target.group === 'scope',
+        `${current}▾`,
+      );
+      await dashboard.wait((frame) => frame.includes(`✓ ${current}`), 'scope menu shows the current choice');
+      clickRenderedTarget(
+        dashboard,
+        (target) => target.type === 'modal-option' && target.group === 'scope',
+        `│   ${next} `,
+      );
+      await dashboard.wait(
+        (frame) => frame.includes(`│ ${next}▾`) && !frame.includes(`✓ ${current}`),
+        'selecting a scope closes the menu',
+      );
+    }
+    const field = await dashboard.wait((frame) => frame.includes('│ Standard▾'), 'closed destination field');
+    assert.ok(!field.includes('~/.copilot/skills/'));
+    const { row, start } = renderedTextCell(field, '│ Standard▾');
+    const lines = field.split(/\r?\n/);
+    const topBorder = lines[row - 1].slice(start).match(/^╭─+╮/)?.[0];
+    assert.ok(topBorder, 'the destination select has the Inventory-style rounded top border');
+    assert.equal(lines[row + 1].slice(start, start + topBorder.length), `╰${topBorder.slice(1, -1)}╯`);
+    clickAt(dashboard.input, { x: start + Math.floor(topBorder.length / 2) + 1, y: row });
+    const opened = await dashboard.wait((frame) => frame.includes('~/.copilot/skills/'), 'user destination menu');
+    const anchor = renderedTextCell(opened, '│ Standard▴');
+    assert.equal(opened.split(/\r?\n/)[anchor.row + 2].slice(anchor.start, anchor.start + topBorder.length), topBorder);
+    assert.ok(!opened.includes('candidate-two/SKILL.md'));
     clickRenderedTarget(
       dashboard,
-      (target) => target.type === 'modal-option' && target.group === 'client',
-      '│ CLAUDE │',
+      (target) => target.type === 'modal-option' && target.group === 'destination',
+      '□ Claude Code',
     );
-    await dashboard.flush();
-    dashboard.input.write('\r');
-    await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
+    await dashboard.wait((frame) => frame.includes('✓ Claude Code'), 'Claude selected without closing the menu');
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'modal-option' && target.group === 'destination',
+      '□ Mistral Vibe',
+    );
+    await dashboard.wait((frame) => frame.includes('✓ Mistral Vibe'), 'Mistral Vibe selected');
+    clickAt(dashboard.input, browseTab);
+    const closed = await dashboard.wait(
+      (frame) => frame.includes('Standard, Claude Code +1▾') && !frame.includes('~/.vibe/skills/'),
+      'outside click closes the menu and retains selections',
+    );
+    assert.ok(closed.includes('INSTALL OPTIONS') && !closed.includes('CONFIRM INSTALL'));
+    clickRenderedButtonRow(
+      dashboard,
+      (target) => target.type === 'modal-install-action' && target.action === 'review',
+      '│ REVIEW INSTALL │',
+      1,
+    );
+    const confirmation = await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
+    assert.ok(confirmation.includes('Selected paths (user):'));
+    assert.ok(confirmation.includes('• .agents/skills/candidate-two/SKILL.md'));
+    assert.ok(confirmation.includes('• .claude/skills/candidate-two/SKILL.md'));
+    assert.ok(confirmation.includes('• .vibe/skills/candidate-two/SKILL.md'));
+    assert.ok(!confirmation.includes('• .copilot/skills/candidate-two/SKILL.md'));
     clickAt(dashboard.input, browseTab);
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 1, '│ INSTALL │');
-    await dashboard.wait(
-      (frame) => frame.includes('Inventory 1') && !frame.includes('CONFIRM INSTALL'),
-      'confirmed install updates the live installed tab count',
+    const loading = await dashboard.wait(
+      (frame) => frame.includes('LOADING') && frame.includes('Installing skill:candidate-two'),
+      'installation progress',
     );
+    assert.ok(loading.includes('CATALOG RESOURCES'));
+    assert.ok(!loading.includes('INSTALLED RESOURCES'));
+    assert.equal(loading.split(/\r?\n/)[inventoryTab.row], tabRow);
+    assert.match(loading, /›\s+candidate-two/);
+    installation.resolve();
+    const installed = await dashboard.wait(
+      (frame) => frame.includes('CATALOG RESOURCES') && frame.includes('Inventory 1') && !frame.includes('LOADING'),
+      'the completed install refreshes Browse without leaving it',
+    );
+    assert.match(installed, /›\s+candidate-two\s+skill\s+sample\s+user/);
     assert.deepEqual(
       calls.map(({ operation, id, options }) => ({
         operation,
         id,
         scope: options.scope,
-        tool: options.tool,
+        destinations: options.destinations,
       })),
-      [{ operation: 'install', id: 'candidate-two', scope: 'user', tool: 'claude' }],
+      [{ operation: 'install', id: 'candidate-two', scope: 'user', destinations: ['standard', 'claude', 'mistral'] }],
     );
+  } finally {
+    installation.resolve();
+    await dashboard.stop();
+  }
+});
+
+test('install options keep scope selections independent and only add newly selected destinations', async () => {
+  const source = { catalog: 'sample', kind: 'skill', id: 'review' };
+  const standardPath = '.agents/skills/review/SKILL.md';
+  const copilotPath = '.github/skills/review/SKILL.md';
+  const installed = { ...source, scope: 'project', managed: true, paths: [standardPath] };
+  const calls = [];
+  const dashboard = await startInteractiveDashboard([installed], {
+    catalogResources: [source],
+    execute: async (action, resource, { scope, destinations }) => {
+      calls.push({ action, id: resource.id, scope, destinations });
+      return { code: 0, resources: [{ ...installed, paths: [standardPath, copilotPath] }] };
+    },
+  });
+  const press = (key, text) => {
+    dashboard.input.write(key);
+    return dashboard.wait((frame) => frame.includes(text), text);
+  };
+  try {
+    await press('b', 'CATALOG RESOURCES');
+    await press('\r', '│ User▾');
+    dashboard.input.write('\x1b[Z');
+    await dashboard.wait(
+      (frame) => frame.includes('│ CANCEL │') && !frame.includes('› Scope'),
+      'focus moves to Cancel',
+    );
+    dashboard.input.write(' ');
+    await dashboard.wait((frame) => !frame.includes('INSTALL OPTIONS'), 'Space activates Cancel');
+    assert.deepEqual(calls, []);
+    await press('\r', '│ User▾');
+    await press('\r', '› ✓ User');
+    await press('\x1b[B', '› Project');
+    await press('\x1b', '│ User▾');
+    const changeScope = async (key, choice) => {
+      await press('\r', choice === 'Project' ? '› ✓ User' : '› ✓ Project');
+      await press(key, `› ${choice}`);
+      return press('\r', `│ ${choice}▾`);
+    };
+    const options = await changeScope('\x1b[B', 'Project');
+    assert.ok(options.includes('│ 0 selected▾') && !options.includes('Standard [Installed]'));
+    assert.ok(options.includes('Select at least one new destination.'));
+    await press('\t', '› Destinations');
+    const opened = await press('\r', '› □ GitHub Copilot');
+    assert.ok(opened.includes('Standard [Installed]') && opened.includes('.agents/skills/'));
+    await press('\x1b[A', '› Standard [Installed]');
+    dashboard.input.write(' ');
+    await dashboard.flush();
+    assert.ok(dashboard.frame().includes('│ 0 selected▴'));
+    await press('\x1b[B', '› □ GitHub Copilot');
+    await press(' ', '› ✓ GitHub Copilot');
+    await press('\x1b', '│ GitHub Copilot▾');
+    dashboard.input.write('\x1b[Z');
+    await dashboard.wait((frame) => !frame.includes('› Destinations'), 'focus returns to scope');
+    const userOptions = await changeScope('\x1b[A', 'User');
+    assert.ok(userOptions.includes('│ Standard▾'));
+    assert.ok(!userOptions.includes('□ GitHub Copilot'));
+    const projectOptions = await changeScope('\x1b[B', 'Project');
+    assert.ok(projectOptions.includes('│ GitHub Copilot▾'));
+    await press('\t', '› Destinations');
+    await press(' ', '› ✓ GitHub Copilot');
+    dashboard.input.write('\t');
+    await dashboard.wait(
+      (frame) => frame.includes('│ REVIEW INSTALL │') && !frame.includes('› Destinations'),
+      'Tab dismisses the menu and moves to Review install',
+    );
+    const confirmation = await press('\r', 'CONFIRM INSTALL');
+    assert.ok(confirmation.includes(`• ${copilotPath}`));
+    assert.ok(!confirmation.includes(`• ${standardPath}`));
+    assert.deepEqual(calls, []);
+    dashboard.input.write('y');
+    await dashboard.wait(
+      (frame) =>
+        frame.includes('CATALOG RESOURCES') && !frame.includes('CONFIRM INSTALL') && !frame.includes('LOADING'),
+      'Browse after adding the destination',
+    );
+    assert.deepEqual(calls, [{ action: 'install', id: source.id, scope: 'project', destinations: ['copilot'] }]);
+    assert.match(detailBodyText(dashboard.frame()), /MESSAGEInstalledskill:review\./);
+    await press('i', 'INSTALLED RESOURCES');
+    const uninstall = await press('\x1b[3~', 'CONFIRM UNINSTALL');
+    assert.ok(uninstall.includes(`• ${standardPath}`));
+    assert.ok(uninstall.includes(`• ${copilotPath}`));
+  } finally {
+    await dashboard.stop();
+  }
+});
+
+test('install options use kind defaults and block a scope with an inventory scan error', async () => {
+  const candidate = { catalog: 'sample', kind: 'instruction', id: 'review' };
+  const actions = { catalogResources: [candidate] };
+  const dimensions = { columns: 80, rows: 40 };
+  const project = await captureDashboardFrame([], actions, ['b', '\r', '\r'], dimensions);
+  assert.ok(project.includes('│ Project ') && project.includes('Instructions are project-scoped.'));
+  assert.ok(!project.includes('Project▾') && !project.includes('Project▴'));
+  assert.ok(project.includes('✓ GitHub Copilot'));
+  assert.ok(project.includes('.github/instructions/'));
+  assert.ok(project.includes('.claude/rules/'));
+  assert.ok(!project.includes('□ Standard'));
+  assert.ok(!project.includes('Mistral Vibe'));
+  assert.ok(!project.includes('User▾'));
+  const userFrame = (keys) =>
+    captureDashboardFrame([], { catalogResources: [{ ...candidate, kind: 'agent' }] }, keys, dimensions, [
+      { scope: 'user', code: 'CATALOG_ERROR', message: 'Cannot read user inventory.' },
+    ]);
+  const user = await userFrame(['b', '\r', '\t', '\r']);
+  assert.ok(user.includes('USER unavailable: CATALOG_ERROR'));
+  assert.ok(user.includes('│ User▾'));
+  assert.ok(user.includes('~/.copilot/agents/'));
+  assert.ok(!user.includes('Mistral Vibe'));
+  const closed = await userFrame(['b', '\r']);
+  assert.ok(closed.includes('│ CANCEL │'));
+  assert.ok(closed.includes('Cannot read user inventory.'));
+  assert.ok(!closed.includes('│ REVIEW INSTALL │'));
+});
+
+test('destination menu opens above the field and scrolls at short terminal heights', async () => {
+  const source = { catalog: 'sample', kind: 'skill', id: 'review' };
+  const dashboard = await startInteractiveDashboard([], { catalogResources: [source] });
+  const press = (key, marker) => {
+    dashboard.input.write(key);
+    return dashboard.wait((frame) => frame.includes(marker), marker);
+  };
+  try {
+    await press('b', 'CATALOG RESOURCES');
+    await press('\r', '│ Standard▾');
+    await press('\t', '› Destinations');
+    Object.assign(dashboard.output, { columns: 38, rows: 10 });
+    dashboard.output.emit('resize');
+    await dashboard.wait(
+      (frame) => frame.includes('Pinned source audit required.') && frame.includes('│ REVIEW INSTALL │ │ CANCEL │'),
+      'both install buttons remain visible in compact options',
+    );
+    const open = await press('\r', '› ✓ Standard');
+    assert.ok(renderedTextCell(open, '› ✓ Standard').y < renderedTextCell(open, '▴').y);
+    assert.ok(!open.includes('Mistral Vibe'));
+    await press('\x1b[B', '› □ GitHub Copilot');
+    const copilot = await press(' ', '› ✓ GitHub Copilot');
+    const { x, y } = renderedTextCell(copilot, '› ✓ GitHub Copilot');
+    dashboard.input.write(`\u001b[<65;${x};${y}M`);
+    await dashboard.wait((frame) => frame.includes('› □ Claude Code'), 'wheel moves through the destination menu');
+    await press('\x1b[B', '› □ Mistral Vibe');
+    await press(' ', '› ✓ Mistral Vibe');
+    const closed = await press('\x1b', '│ 3 selected▾');
+    assert.ok(!closed.includes('✓ Mistral Vibe'));
   } finally {
     await dashboard.stop();
   }
@@ -3264,7 +3572,7 @@ test('managed inventory U confirms an update and renders the successful result',
     assert.equal(executions[0][0], 'update');
     assert.deepEqual(executions[0][1], resource);
     assert.equal(executions[0][2].scope, undefined);
-    assert.equal(executions[0][2].tool, undefined);
+    assert.equal(executions[0][2].destinations, undefined);
     assert.equal(typeof executions[0][2].onProgress, 'function');
     assert.ok(completed.includes('Current'), 'the returned refreshed resource replaces its old status');
     input.write('q');
@@ -3351,7 +3659,7 @@ test('managed inventory U selects Update and Enter executes the confirmed action
     assert.equal(executions[0][0], 'update');
     assert.deepEqual(executions[0][1], resource);
     assert.equal(executions[0][2].scope, undefined);
-    assert.equal(executions[0][2].tool, undefined);
+    assert.equal(executions[0][2].destinations, undefined);
     assert.equal(typeof executions[0][2].onProgress, 'function');
     assert.ok(completed.includes('Update complete'));
     assert.ok(completed.includes('Current'), 'the refreshed resource replaces its old status');
@@ -3378,12 +3686,29 @@ test('local conflicts and GH force-required updates require explicit retry conse
     managed: true,
   };
 
+  function modalText(frame, title) {
+    const lines = frame.split(/\r?\n/);
+    const heading = `┌─ ${title} `;
+    const top = lines.findIndex((line) => line.includes(heading));
+    if (top < 0) return '';
+    const left = lines[top].indexOf(heading);
+    const right = lines[top].indexOf('┐', left + heading.length);
+    const bottom = lines.findIndex((line, index) => index > top && line[left] === '└' && line[right] === '┘');
+    if (bottom < 0) return '';
+    return lines
+      .slice(top + 1, bottom)
+      .map((line) => line.slice(left + 1, right))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   for (const category of [
     'tracked-modification',
     'untracked-skill-content',
     'github-force-required',
-    'github-next-agent',
-    'github-repeated-agent',
+    'github-next-destination',
+    'github-repeated-destination',
   ]) {
     const ghForceRequired = category.startsWith('github-');
     const responses = ghForceRequired ? ['no', 'escape', 'yes'] : ['no', 'yes'];
@@ -3413,7 +3738,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
             error.category = 'github-force-required';
             error.paths = [];
             error.recoverable = true;
-            error.agent = 'github-copilot';
+            error.agent = 'standard';
             error.userMessage = 'GitHub CLI says this skill is already installed and requires --force.';
             error.technicalDetail = 'raw secret diagnostic: token=secret-value';
             throw error;
@@ -3430,23 +3755,23 @@ test('local conflicts and GH force-required updates require explicit retry conse
             error.recoverable = true;
             throw error;
           }
-          if (calls.length === 2 && category === 'github-next-agent') {
-            const error = new Error('raw GH overwrite diagnostic for another agent');
+          if (calls.length === 2 && category === 'github-next-destination') {
+            const error = new Error('raw GH overwrite diagnostic for another destination');
             error.code = 'GH_FORCE_REQUIRED';
             error.category = 'github-force-required';
             error.paths = [];
             error.recoverable = true;
-            error.agent = 'claude-code';
-            error.userMessage = 'GitHub CLI says this skill is already installed and requires --force for claude-code.';
+            error.agent = 'claude';
+            error.userMessage = 'GitHub CLI says this skill is already installed and requires --force for claude.';
             throw error;
           }
-          if (calls.length === 2 && category === 'github-repeated-agent') {
+          if (calls.length === 2 && category === 'github-repeated-destination') {
             const error = new Error('raw GH overwrite diagnostic repeated');
             error.code = 'GH_FORCE_REQUIRED';
             error.category = 'github-force-required';
             error.paths = [];
             error.recoverable = true;
-            error.agent = 'github-copilot';
+            error.agent = 'standard';
             error.userMessage = 'GitHub CLI says this skill is already installed and requires --force.';
             throw error;
           }
@@ -3472,15 +3797,15 @@ test('local conflicts and GH force-required updates require explicit retry conse
         input.write('\r');
         const promptTitle = ghForceRequired ? 'GH REQUESTS OVERWRITE' : 'LOCAL CONFLICT';
         const conflict = await waitForFrame((frame) => frame.includes(promptTitle), 'force confirmation');
-        const promptText = conflict.replace(/[│─]/g, ' ').replace(/\s+/g, ' ');
-        assert.ok(conflict.includes('conflicted-skill'));
-        assert.ok(conflict.includes('catalog Test'));
-        assert.ok(conflict.includes('scope project'));
+        const promptText = modalText(conflict, promptTitle);
+        assert.ok(promptText.includes('conflicted-skill'));
+        assert.ok(promptText.includes('catalog Test'));
+        assert.ok(promptText.includes('scope project'));
         if (ghForceRequired) {
           assert.ok(promptText.includes('already installed'), `missing installation reason: ${promptText}`);
           assert.ok(promptText.includes('requires'), `missing GH force requirement: ${promptText}`);
           assert.ok(promptText.includes('--force'), `missing explicit force flag: ${promptText}`);
-          assert.ok(promptText.includes('github-copilot'), `missing retry target in modal: ${promptText}`);
+          assert.ok(promptText.includes('for standard'), `missing retry target in modal: ${promptText}`);
           assert.ok(promptText.includes('local-modification and untracked-content checks still apply'));
           assert.ok(!promptText.includes('secret-value'));
         } else {
@@ -3495,54 +3820,57 @@ test('local conflicts and GH force-required updates require explicit retry conse
         assert.ok(conflict.includes('YES, RETRY WITH --FORCE'));
         assert.equal(calls.length, 1, 'the first update attempt has no retry flag');
         assert.equal(calls[0][2].scope, undefined);
-        assert.equal(calls[0][2].tool, undefined);
+        assert.equal(calls[0][2].destinations, undefined);
         assert.equal(typeof calls[0][2].onProgress, 'function');
 
         if (accept) {
           input.write('\x1b[C');
           await new Promise((resolve) => setImmediate(resolve));
           input.write('\r');
-          if (category === 'github-next-agent') {
-            const nextPrompt = await waitForFrame((frame) => {
-              const text = frame.replace(/[│]/g, ' ').replace(/\s+/g, ' ');
-              return text.includes('GH REQUESTS OVERWRITE') && text.includes('for claude-code');
-            }, 'second agent force confirmation');
-            const nextPromptText = nextPrompt.replace(/[│]/g, ' ').replace(/\s+/g, ' ');
-            assert.ok(nextPromptText.includes('already installed'), `missing second-agent reason: ${nextPromptText}`);
-            assert.ok(nextPromptText.includes('requires'), `missing second-agent force requirement: ${nextPromptText}`);
-            assert.ok(nextPromptText.includes('--force'), `missing second-agent force flag: ${nextPromptText}`);
+          if (category === 'github-next-destination') {
+            const nextPrompt = await waitForFrame(
+              (frame) => modalText(frame, promptTitle).includes('for claude'),
+              'second destination force confirmation',
+            );
+            const nextPromptText = modalText(nextPrompt, promptTitle);
+            assert.ok(nextPromptText.includes('already installed'), `missing destination reason: ${nextPromptText}`);
+            assert.ok(nextPromptText.includes('requires'), `missing force requirement: ${nextPromptText}`);
+            assert.ok(nextPromptText.includes('--force'), `missing force flag: ${nextPromptText}`);
             assert.equal(calls.length, 2);
             const { onProgress: firstProgress, ...firstRetryOptions } = calls[1][2];
             assert.equal(typeof firstProgress, 'function');
             assert.deepEqual(firstRetryOptions, {
               scope: undefined,
-              tool: undefined,
+              destinations: undefined,
               ghForce: true,
-              ghForceAgent: 'github-copilot',
+              ghForceAgent: 'standard',
             });
             input.write('\x1b[C');
             await new Promise((resolve) => setImmediate(resolve));
             input.write('\r');
             await waitForFrame(
               (frame) => frame.replace(/[│]/g, ' ').replace(/\s+/g, ' ').includes('Update complete'),
-              'second agent forced update',
+              'second destination forced update',
             );
             assert.equal(calls.length, 3);
             const { onProgress: secondProgress, ...secondRetryOptions } = calls[2][2];
             assert.equal(typeof secondProgress, 'function');
             assert.deepEqual(secondRetryOptions, {
               scope: undefined,
-              tool: undefined,
+              destinations: undefined,
               ghForce: true,
-              ghForceAgent: 'claude-code',
+              ghForceAgent: 'claude',
             });
             input.write('q');
             assert.equal(await done, true);
-          } else if (category === 'github-repeated-agent') {
-            const failure = await waitForFrame((frame) => frame.includes('UPDATE FAILED'), 'same-agent retry failure');
+          } else if (category === 'github-repeated-destination') {
+            const failure = await waitForFrame(
+              (frame) => frame.includes('UPDATE FAILED'),
+              'same-destination retry failure',
+            );
             assert.ok(
               !failure.includes('GH REQUESTS OVERWRITE'),
-              'the same agent must not get an endless force prompt',
+              'the same destination must not get an endless force prompt',
             );
             assert.equal(calls.length, 2);
             input.write('\x1b');
@@ -3551,7 +3879,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
                 frame.includes('INSTALLED RESOURCES') &&
                 frame.includes('↑↓ navigate') &&
                 !frame.includes('UPDATE FAILED'),
-              'dismissed same-agent failure',
+              'dismissed same-destination failure',
             );
             input.write('q');
             assert.equal(await done, false);
@@ -3568,11 +3896,11 @@ test('local conflicts and GH force-required updates require explicit retry conse
               ghForceRequired
                 ? {
                     scope: undefined,
-                    tool: undefined,
+                    destinations: undefined,
                     ghForce: true,
-                    ghForceAgent: 'github-copilot',
+                    ghForceAgent: 'standard',
                   }
-                : { scope: undefined, tool: undefined, force: true },
+                : { scope: undefined, destinations: undefined, force: true },
             );
             input.write('q');
             assert.equal(await done, true);
@@ -3612,7 +3940,7 @@ test('failed managed updates show an actionable error modal in compact and norma
     managed: true,
   };
   const actualError =
-    'Could not update AI-Kit catalog skill conventional-commits for github-copilot: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No agents were confirmed updated before this failure.';
+    'Could not update AI-Kit catalog skill conventional-commits for standard: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No destinations were confirmed updated before this failure.';
 
   for (const rows of [36, 56]) {
     const input = new PassThrough();
@@ -3906,16 +4234,10 @@ test('all dashboard modes show visible shortcuts for active controls', async () 
   assert.doesNotMatch(catalog, /A install|1\/2\/3 sections/);
 
   const installOptions = await captureDashboardFrame([], actions, ['b', '\r'], compactDimensions);
-  const installShortcuts = separatedPanelFrame(installOptions, 'SHORTCUTS');
-  assert.equal(
-    installShortcuts.body.length,
-    4,
-    'modal shortcut body includes the Actions and Navigation headings and their rows',
-  );
+  assert.ok(installOptions.includes('│ Standard▾'));
   assert.match(installOptions, /┌─ INSTALL OPTIONS /, 'non-table modal title bars stay unchanged');
-  assert.ok(installOptions.includes('SHORTCUTS'));
-  assert.ok(installOptions.includes('FIELD'));
-  assert.ok(installOptions.includes('ENTER REVIEW'));
+  assert.ok(installOptions.includes('TAB MOVE'));
+  assert.ok(installOptions.includes('ENTER / SPACE ACTIVATE'));
   assert.ok(installOptions.includes('ESC BACK'));
   assert.ok(!installOptions.includes('ENTER select'));
   assert.ok(!installOptions.includes('C catalog'));

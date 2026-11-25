@@ -34,7 +34,7 @@ export interface NativeDashboardCatalogs {
 export type NativeDashboardAction = InstallationRequest['operation'] | 'remove-unmanaged';
 export type NativeInstallOptions = Pick<
   InstallationRequest,
-  'scope' | 'tool' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
+  'scope' | 'destinations' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
 >;
 
 function createDashboardActionHandler(onProgress: (message: string) => void = () => {}) {
@@ -50,6 +50,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
       action === 'install' ? installOptions.scope || 'project' : (resource.scope as NativeInstallOptions['scope']);
     const target = scope === 'user' ? dashboardOptions.userTarget || os.homedir() : dashboardOptions.target;
     const messages: string[] = [];
+    let auditLines: string[] | undefined;
     let previewFiles: DashboardActionResult['previewFiles'];
     let previewTree: string[] | undefined;
     let previewAuditLines: string[] | undefined;
@@ -85,7 +86,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
             catalog: resource.catalog,
             target,
             scope,
-            tool: installOptions.tool || 'copilot',
+            destinations: installOptions.destinations,
             ref: installOptions.ref,
             force: installOptions.force,
             ghForce: installOptions.ghForce,
@@ -97,7 +98,10 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
             userTarget: dashboardOptions.userTarget || os.homedir(),
             onProgress,
             onMessage: ({ text }: InstallationMessage) => messages.push(text),
-            onAudit: (audit: AuditResult) => messages.push(...formatAuditLines(audit)),
+            onAudit: (audit: AuditResult) => {
+              auditLines = formatAuditLines(audit);
+              messages.push(...auditLines);
+            },
           },
           catalogs.sourceResources,
         );
@@ -115,6 +119,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
         recoverable: error.recoverable,
         userMessage: error.userMessage || error.message,
         agent: error.agent,
+        ...(error.code === 'AUDIT_BLOCKED' && auditLines ? { auditLines } : {}),
       };
     } finally {
       release?.();

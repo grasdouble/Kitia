@@ -30,7 +30,7 @@ test('install rejects a source without a pinned revision before writing files or
   };
 
   assert.throws(
-    () => runSourceOperation({ action: 'install', resource, target, tool: 'both' }),
+    () => runSourceOperation({ action: 'install', resource, target, destinations: ['copilot', 'claude'] }),
     /pinned source-catalog resources/,
   );
   assert.deepEqual(fs.readdirSync(target), []);

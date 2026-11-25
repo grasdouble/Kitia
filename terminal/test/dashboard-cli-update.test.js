@@ -56,7 +56,7 @@ test('dashboard update reaches the production CLI and reports a safe local-confl
   );
 
   try {
-    recordSourceInstallation(resource, target, 'github-copilot');
+    recordSourceInstallation(resource, target, '.agents/skills/demo-skill/SKILL.md');
     fs.writeFileSync(skillFile, 'Locally modified content that the updater must protect.\n');
     await assert.rejects(
       executeInstallationOperation(
@@ -67,7 +67,6 @@ test('dashboard update reaches the production CLI and reports a safe local-confl
           kind: resource.kind,
           target,
           scope: 'project',
-          tool: 'copilot',
         },
         [resource],
       ),

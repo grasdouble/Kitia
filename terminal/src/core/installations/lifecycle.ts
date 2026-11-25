@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 import type { AuditResult } from '../inspection/audit.js';
 import { auditPreparedSourceFile } from '../inspection/pinned-preview.js';
@@ -13,9 +14,11 @@ import type { InstalledSourceResource } from '../inventory/inventory.js';
 import { preparePinnedSourceFile } from '../resources/content.js';
 import { resolveSourceVersionPrefix, listSourceVersions } from '../resources/history.js';
 import type { CatalogResource, ResourceKind } from '../resources/model.js';
-import { CatalogError, USER_INSTALLABLE_KINDS } from '../resources/model.js';
+import { CatalogError } from '../resources/model.js';
 import { catalogEntries } from '../resources/queries.js';
 import { resolveCatalogResource } from '../resources/selection.js';
+import type { InstallationDestination } from './destinations.js';
+import { installationPath, resolveInstallationDestinations } from './destinations.js';
 import { targetPath } from './files.js';
 import type { GhSkillResult, SourceSkillResource } from './gh-skill.js';
 import {
@@ -25,8 +28,7 @@ import {
   formatGhDiagnostics,
   describeGhFailure,
 } from './gh-skill.js';
-import type { InstallationTool, InstallationScope, PlanAction } from './model.js';
-import { SOURCE_SKILL_DIRECTORIES } from './model.js';
+import type { InstallationScope, PlanAction } from './model.js';
 import {
   uninstallSourceResource,
   validateSourceUpdates,
@@ -46,7 +48,7 @@ export interface SourceOperationRequest {
   resource: CatalogResource;
   target: string;
   scope?: InstallationScope;
-  tool?: InstallationTool;
+  destinations?: readonly InstallationDestination[];
   force?: boolean;
   dryRun?: boolean;
   audit?: boolean;
@@ -231,12 +233,11 @@ async function executeInstallationOperation(
     if (options.operation === 'preview') {
       return await runSourceOperation({ ...options, action: 'preview', resource });
     }
-    if (options.scope === 'user' && !USER_INSTALLABLE_KINDS.has(resource.kind)) {
-      throw new CatalogError(
-        '--scope user supports source skills and agents; instructions are project-only',
-        'INVALID_ARGUMENT',
-      );
-    }
+    const destinations = resolveInstallationDestinations(
+      resource.kind,
+      options.scope ?? 'project',
+      options.destinations,
+    );
     if (options.ref) {
       const target = fs.realpathSync(options.target);
       if (!resource.source_repository || !resource.source_path) {
@@ -273,6 +274,18 @@ async function executeInstallationOperation(
         );
       }
       if (matchingInstalled.length === 1) {
+        if (options.destinations) {
+          const trackedPaths = new Set(matchingInstalled[0].installations.map((entry) => entry.path));
+          if (
+            trackedPaths.size !== destinations.length ||
+            destinations.some((layout) => !trackedPaths.has(installationPath(layout, resource.id)))
+          ) {
+            throw new CatalogError(
+              'Replacing an installed revision requires all tracked destinations. Omit --destination to replace them, or install an additional destination without --ref.',
+              'INVALID_ARGUMENT',
+            );
+          }
+        }
         const replacement = {
           ...matchingInstalled[0],
           resource: { ...matchingInstalled[0].resource, ...selectedResource },
@@ -369,9 +382,8 @@ function runSourceOperation(
       return finish(0, markdown);
     }
     if (options.action !== 'install') throw new CatalogError(`Unsupported source resource action: ${options.action}`);
-    const paths = installSourceFileResource(prepared || resource, target, options.tool || 'claude', {
-      scope: options.scope || 'project',
-      force: Boolean(options.force),
+    const paths = installSourceFileResource(prepared || resource, target, options.destinations, {
+      scope: options.scope,
       dryRun: Boolean(options.dryRun),
       onAction: options.onAction,
       onProgress: options.onProgress,
@@ -382,21 +394,23 @@ function runSourceOperation(
     return finish(0);
   }
   const skillResource = resource as SourceSkillResource;
-  const agents: (keyof typeof SOURCE_SKILL_DIRECTORIES)[] =
-    options.tool === 'both'
-      ? ['github-copilot', 'claude-code']
-      : [options.tool === 'claude' ? 'claude-code' : 'github-copilot'];
-  if (options.action === 'install' && options.scope === 'user') {
-    for (const agent of agents) targetPath(target, `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`);
-  }
+  const layouts =
+    options.action === 'install'
+      ? resolveInstallationDestinations(resource.kind, options.scope ?? 'project', options.destinations)
+      : [];
+  const skillPaths = layouts.map((layout) => {
+    const relativePath = installationPath(layout, resource.id);
+    targetPath(target, relativePath);
+    return { id: layout.id, relativePath, directory: path.join(target, layout.directory) };
+  });
 
   if (options.planOnly && options.dryRun) {
-    for (const agent of agents) {
+    for (const { relativePath, directory } of skillPaths) {
       options.onAction?.({
         action: 'delegate_install',
-        path: `${SOURCE_SKILL_DIRECTORIES[agent]}/${resource.id}/SKILL.md`,
+        path: relativePath,
         resource: { catalog: sourceCatalogName(resource), kind: 'skill', id: resource.id },
-        command: { program: 'gh', args: buildSourceSkillArgs('install', skillResource, agent, options) },
+        command: { program: 'gh', args: buildSourceSkillArgs('install', skillResource, directory, options) },
       });
     }
     output.error(
@@ -416,14 +430,14 @@ function runSourceOperation(
   }
 
   function* installSkill(): Generator<string[], InstallationResult, number | GhSkillResult> {
-    const completed: string[] = [];
-    for (const agent of agents) {
+    const completed: InstallationDestination[] = [];
+    for (const { id, relativePath, directory } of skillPaths) {
       let result: number | GhSkillResult;
       const partial = completed.length
         ? ` Already installed for ${completed.join(', ')}. Those installations remain in place.`
-        : ' No agents were confirmed installed before this failure.';
+        : ' No destinations were confirmed installed before this failure.';
       try {
-        result = yield buildSourceSkillArgs('install', skillResource, agent, options);
+        result = yield buildSourceSkillArgs('install', skillResource, directory, options);
       } catch (error) {
         const code = (error as Error & { code?: string }).code;
         if (code !== 'GH_SPAWN_FAILED' && code !== 'GH_TIMEOUT') throw error;
@@ -431,21 +445,21 @@ function runSourceOperation(
           code === 'GH_SPAWN_FAILED'
             ? 'Could not start GitHub CLI. Check that gh is installed and available on PATH.'
             : 'GitHub CLI timed out. Check network connectivity and retry.';
-        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${agent}. ${cause}${partial}`;
+        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${id}. ${cause}${partial}`;
         throw new CatalogError(userMessage, code, { category: 'github-cli', userMessage });
       }
       const status = typeof result === 'number' ? result : result.status;
       if (status !== 0) {
         const diagnostic = typeof result === 'number' ? '' : formatGhDiagnostics(result);
-        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${agent}: gh exited with status ${status}. ${describeGhFailure(diagnostic)}${partial}`;
+        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${id}: gh exited with status ${status}. ${describeGhFailure(diagnostic)}${partial}`;
         throw new CatalogError(
           `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ''}`,
           'GH_INSTALL_FAILED',
           { category: 'github-cli', userMessage, technicalDetail: diagnostic || undefined },
         );
       }
-      recordSourceInstallation(resource, target, agent);
-      completed.push(agent);
+      recordSourceInstallation(resource, target, relativePath);
+      completed.push(id);
     }
     options.onProgress?.(`Installed ${catalogLabel(resource)} skill ${resource.id} for ${completed.join(', ')}.`);
     return finish(0);

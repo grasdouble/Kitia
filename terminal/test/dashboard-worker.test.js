@@ -66,10 +66,7 @@ test('real GH update progress and sanitized output reach the TUI through its wor
   const ghPreload = path.join(temporary, 'gh-spawn-preload.cjs');
   const repository = 'https://github.com/example/worker-progress';
   const previousEnvironment = Object.fromEntries(
-    ['KITIA_CONFIG_DIR', 'KITIA_TEST_SKILL_FILE', 'KITIA_TEST_SKILL_CONTENT', 'KITIA_TEST_GH_SCRIPT'].map((key) => [
-      key,
-      process.env[key],
-    ]),
+    ['KITIA_CONFIG_DIR', 'KITIA_TEST_SKILL_CONTENT', 'KITIA_TEST_GH_SCRIPT'].map((key) => [key, process.env[key]]),
   );
   fs.mkdirSync(target, { recursive: true });
   fs.mkdirSync(userTarget, { recursive: true });
@@ -112,7 +109,8 @@ test('real GH update progress and sanitized output reach the TUI through its wor
     source_ref: sourceIndex.source_ref,
   };
   const newRef = sourceIndex.source_ref;
-  const skillFile = path.join(target, '.agents', 'skills', newResource.id, 'SKILL.md');
+  const skillPath = `.agents/skills/${newResource.id}/SKILL.md`;
+  const skillFile = path.join(target, skillPath);
   const makeSkill = (ref) =>
     [
       '---',
@@ -129,7 +127,7 @@ test('real GH update progress and sanitized output reach the TUI through its wor
     ].join('\n');
   fs.mkdirSync(path.dirname(skillFile), { recursive: true });
   fs.writeFileSync(skillFile, makeSkill(oldRef));
-  recordSourceInstallation({ ...newResource, source_ref: oldRef }, target, 'github-copilot');
+  recordSourceInstallation({ ...newResource, source_ref: oldRef }, target, skillPath);
   writeJson(path.join(configDirectory, 'catalogSources.json'), {
     catalog_version: 1,
     sources: [{ name: 'Test', repository }],
@@ -144,14 +142,16 @@ test('real GH update progress and sanitized output reach the TUI through its wor
     ghScript,
     [
       'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'const args = process.argv.slice(2);',
+      'const file = path.join(args[args.indexOf("--dir") + 1], args[3].split("/").at(-1), "SKILL.md");',
       `const output = ${JSON.stringify('\u001b[32mFetching https://user:passsecret@example.invalid/resource?token=querysecret token=verysecretcredential\u001b[0m\n')};`,
       'setTimeout(() => process.stdout.write(output), 500);',
-      'setTimeout(() => { fs.writeFileSync(process.env.KITIA_TEST_SKILL_FILE, process.env.KITIA_TEST_SKILL_CONTENT); process.exit(0); }, 800);',
+      'setTimeout(() => { fs.writeFileSync(file, process.env.KITIA_TEST_SKILL_CONTENT); process.exit(0); }, 800);',
       '',
     ].join('\n'),
   );
   process.env.KITIA_CONFIG_DIR = configDirectory;
-  process.env.KITIA_TEST_SKILL_FILE = skillFile;
   process.env.KITIA_TEST_SKILL_CONTENT = makeSkill(newRef);
   process.env.KITIA_TEST_GH_SCRIPT = ghScript;
 
@@ -161,7 +161,8 @@ test('real GH update progress and sanitized output reach the TUI through its wor
     scope: 'project',
     status: 'attention',
     managed: true,
-    issues: [{ code: 'UPDATE_AVAILABLE', paths: ['.agents/skills/demo-skill/SKILL.md'] }],
+    paths: [skillPath],
+    issues: [{ code: 'UPDATE_AVAILABLE', paths: [skillPath] }],
   };
   const input = new PassThrough();
   input.isTTY = true;
@@ -228,7 +229,7 @@ test('real GH update progress and sanitized output reach the TUI through its wor
     await waitForFrame((frame) => frame.includes('CONFIRM UPDATE'), 'update confirmation');
     input.write('y');
     const phase = await waitForFrame(
-      (frame) => frame.includes(`Invoking GitHub CLI to update ${newResource.id} for github-copilot`),
+      (frame) => frame.includes(`Invoking GitHub CLI to update ${newResource.id} for standard`),
       "the actual worker's GitHub update phase",
     );
     assert.ok(phase.includes('Invoking GitHub CLI to update'));

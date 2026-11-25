@@ -17,7 +17,10 @@ export type DashboardMouseTarget =
   | { type: 'filter-option'; filter: DashboardFilter; value: string }
   | { type: 'filter-dismiss'; filter: DashboardFilter }
   | { type: 'modal-choice'; index: number }
-  | { type: 'modal-option'; group: 'scope' | 'client'; index: number }
+  | { type: 'modal-option'; group: 'scope' | 'destination'; index: number }
+  | { type: 'modal-install-action'; action: 'review' | 'cancel' }
+  | { type: 'modal-select'; action: 'toggle'; group: 'scope' | 'destination' }
+  | { type: 'modal-select'; action: 'dismiss' | 'surface' }
   | { type: 'row'; screen: DashboardSection; index: number }
   | { type: 'action'; action: string };
 
@@ -30,6 +33,7 @@ interface MouseBounds {
 
 export interface DashboardMouseRegion extends MouseBounds {
   target: DashboardMouseTarget;
+  scroll?: DashboardScrollRegion['move'];
 }
 
 export interface DashboardScrollRegion extends MouseBounds {
@@ -82,7 +86,8 @@ export class DashboardMouseRegions {
     if (modifiers.shift || modifiers.alt || modifiers.ctrl) return;
     const contains = ({ left, right, top, bottom }: MouseBounds) => x >= left && x <= right && y >= top && y <= bottom;
     if (button === 64 || button === 65) {
-      this.scrollRegions.find(contains)?.move(button === 64 ? -1 : 1);
+      const modal = this.owners.get('modal')?.find(contains);
+      (modal ? modal.scroll : this.scrollRegions.find(contains)?.move)?.(button === 64 ? -1 : 1);
       return;
     }
     if (this.clickPending) return;

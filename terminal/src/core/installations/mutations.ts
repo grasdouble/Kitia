@@ -24,6 +24,12 @@ import type { PreparedPinnedSourceFile } from '../resources/content.js';
 import { parseInstruction } from '../resources/frontmatter.js';
 import type { CatalogResource } from '../resources/model.js';
 import { CatalogError } from '../resources/model.js';
+import type { InstallationDestination } from './destinations.js';
+import {
+  availableInstallationDestinations,
+  installationPath,
+  resolveInstallationDestinations,
+} from './destinations.js';
 import {
   addInventoryStateToPlan,
   fileFingerprint,
@@ -40,39 +46,13 @@ import {
   describeGhFailure,
   runGhSkillAsync,
 } from './gh-skill.js';
-import type { InstallationScope, InstallationTool, PlanAction } from './model.js';
+import type { InstallationScope, PlanAction } from './model.js';
 import type { InstallPlanEntry } from './plan.js';
+
+const INSTRUCTION_LAYOUTS = availableInstallationDestinations('instruction');
 
 function catalogLabel(resource: CatalogResource): string {
   return `${resource.catalog || 'source'} catalog`;
-}
-function sourceFileDestinations(
-  resource: CatalogResource,
-  tool: InstallationTool,
-  scope: InstallationScope = 'project',
-): string[] {
-  if (!['claude', 'copilot', 'both'].includes(tool)) throw new CatalogError('Tool must be claude, copilot or both');
-  if (!['project', 'user'].includes(scope)) throw new CatalogError('Scope must be project or user');
-  if (resource.kind === 'instruction' && scope === 'user') {
-    throw new CatalogError('--scope user does not support source instructions', 'INVALID_ARGUMENT');
-  }
-  const paths: string[] = [];
-  for (const runtime of tool === 'both' ? ['claude', 'copilot'] : [tool]) {
-    if (resource.kind === 'agent') {
-      paths.push(
-        runtime === 'claude'
-          ? `.claude/agents/${resource.id}.md`
-          : `${scope === 'user' ? '.copilot' : '.github'}/agents/${resource.id}.agent.md`,
-      );
-    } else if (resource.kind === 'instruction') {
-      paths.push(
-        runtime === 'claude'
-          ? `.claude/rules/${resource.id}.md`
-          : `.github/instructions/${resource.id}.instructions.md`,
-      );
-    }
-  }
-  return paths;
 }
 
 interface SourceFileInstallPlan {
@@ -109,7 +89,7 @@ function publishSourceFileInstallPlan({ target, state, inventory, files }: Sourc
 function installSourceFileResource(
   source: CatalogResource | PreparedPinnedSourceFile,
   target: string,
-  tool: InstallationTool,
+  requested: readonly InstallationDestination[] | undefined,
   options: SourceFileInstallOptions = {},
 ): string[] {
   const resource = isPreparedPinnedSourceFile(source) ? source.resource : source;
@@ -117,7 +97,9 @@ function installSourceFileResource(
     throw new CatalogError(`Unsupported source resource kind: ${resource.kind}`);
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory())
     throw new CatalogError(`Target must be an existing directory: ${target}`);
-  const destinations = sourceFileDestinations(resource, tool, options.scope);
+  const destinations = resolveInstallationDestinations(resource.kind, options.scope ?? 'project', requested).map(
+    (layout) => installationPath(layout, resource.id),
+  );
   const plan = createSourceFileInstallPlan(fs.realpathSync(target), Boolean(options.dryRun));
   stageSourceFileInstallation(source, destinations, plan, options);
   if (!options.dryRun) {
@@ -146,7 +128,7 @@ function stageSourceFileInstallation(
     const untouched = Object.keys(previous.files).filter((relativePath) => !destinations.includes(relativePath));
     if (untouched.length) {
       throw new CatalogError(
-        `Cannot change the shared pin for ${resource.kind}:${resource.id} while leaving tracked destinations unchanged. Install with --tool both or use update to replace all tracked runtimes.`,
+        `Cannot change the shared pin for ${resource.kind}:${resource.id} while leaving tracked destinations unchanged. Select all tracked destinations or use update.`,
         'SHARED_SOURCE_PIN',
         { category: 'provenance-conflict', paths: untouched },
       );
@@ -169,9 +151,12 @@ function stageSourceFileInstallation(
     } else {
       let output = content;
       if (instruction) {
-        const runtimeScope = relativePath.startsWith('.claude/')
-          ? `paths: ${JSON.stringify(instruction.applyTo)}`
-          : `applyTo: ${JSON.stringify(instruction.applyTo.join(', '))}`;
+        const scopeKey = INSTRUCTION_LAYOUTS.find(
+          (layout) => installationPath(layout, resource.id) === relativePath,
+        )?.instructionScope;
+        if (!scopeKey) throw new CatalogError(`Unsupported instruction destination: ${relativePath}`);
+        const scopeValue = scopeKey === 'paths' ? instruction.applyTo : instruction.applyTo.join(', ');
+        const runtimeScope = `${scopeKey}: ${JSON.stringify(scopeValue)}`;
         output = Buffer.from(`---\n${runtimeScope}\n---\n\n${instruction.body}`, 'utf8');
       }
       const fingerprint = sourceFingerprint ?? fileFingerprint(output, false);
@@ -272,7 +257,9 @@ function validateSourceUpdates(
     }
     if (force || !targetRoot || !state) continue;
     if (resource.kind !== 'skill') {
-      const destinations = sourceFileDestinations(resource, 'both', scope);
+      const destinations = availableInstallationDestinations(resource.kind, scope).map((layout) =>
+        installationPath(layout, resource.id),
+      );
       const managedPaths = new Set(
         Object.keys(state.sources?.[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id]?.files || {}),
       );
@@ -385,10 +372,8 @@ function* sourceUpdates(
   );
   const skills = installed.filter(({ resource }) => resource.kind === 'skill');
   let hasUpdates = false;
-  if (scope === 'user') {
-    for (const { installations } of skills) {
-      for (const installation of installations) targetPath(targetRoot, installation.path);
-    }
+  for (const { installations } of skills) {
+    for (const installation of installations) targetPath(targetRoot, installation.path);
   }
   for (const { resource, installations } of skills) {
     const stale = installations.filter(
@@ -399,18 +384,14 @@ function* sourceUpdates(
     );
     if (!stale.length) continue;
     hasUpdates = true;
-    const completed: string[] = [];
+    const completed: InstallationDestination[] = [];
     for (const installation of stale) {
-      const args = buildSourceSkillArgs(
-        'install',
-        resource as SourceSkillResource,
-        installation.agent as 'github-copilot' | 'claude-code',
-        {
-          scope,
-          target: targetRoot,
-          force: force || (ghForce && installation.agent === ghForceAgent),
-        },
-      );
+      const { destination, path: skillPath } = installation;
+      const directory = path.join(targetRoot, path.posix.dirname(path.posix.dirname(skillPath)));
+      const args = buildSourceSkillArgs('install', resource as SourceSkillResource, directory, {
+        scope,
+        force: force || (ghForce && destination === ghForceAgent),
+      });
       if (dryRun) {
         onAction({
           action: 'delegate_install',
@@ -420,7 +401,7 @@ function* sourceUpdates(
         });
         continue;
       }
-      onProgress(`Invoking GitHub CLI to update ${resource.id} for ${installation.agent}...`);
+      onProgress(`Invoking GitHub CLI to update ${resource.id} for ${destination}...`);
       let result: number | GhSkillResult;
       try {
         result = yield { args, target: targetRoot };
@@ -430,12 +411,12 @@ function* sourceUpdates(
             ? error.code
             : undefined;
         if (code !== 'GH_SPAWN_FAILED' && code !== 'GH_TIMEOUT') throw error;
-        const partial = [...messages, ...(completed.length ? [`Updated agents: ${completed.join(', ')}`] : [])];
+        const partial = [...messages, ...(completed.length ? [`Updated destinations: ${completed.join(', ')}`] : [])];
         const cause =
           code === 'GH_SPAWN_FAILED'
             ? 'Could not start GitHub CLI. Check that gh is installed and available on PATH.'
             : 'GitHub CLI timed out. Check network connectivity and retry.';
-        const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}. ${cause}${partial.length ? ` Already updated: ${partial.join('; ')}. Those updates remain in place.` : ' No agents were confirmed updated before this failure.'}`;
+        const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${destination}. ${cause}${partial.length ? ` Already updated: ${partial.join('; ')}. Those updates remain in place.` : ' No destinations were confirmed updated before this failure.'}`;
         throw new CatalogError(userMessage, code, { category: 'github-cli', userMessage });
       }
       const status = typeof result === 'number' ? result : result.status;
@@ -445,25 +426,28 @@ function* sourceUpdates(
         const cause = ghForceRequired
           ? 'GitHub CLI says this skill is already installed and requires --force to overwrite it.'
           : describeGhFailure(diagnostic);
-        const priorUpdates = [...messages, ...(completed.length ? [`Updated agents: ${completed.join(', ')}`] : [])];
+        const priorUpdates = [
+          ...messages,
+          ...(completed.length ? [`Updated destinations: ${completed.join(', ')}`] : []),
+        ];
         const partial = priorUpdates.length
           ? ` Already updated: ${priorUpdates.join('; ')}. Those updates remain in place.`
-          : ' No agents were confirmed updated before this failure.';
-        const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${installation.agent}: gh exited with status ${status}. ${cause}${partial}`;
+          : ' No destinations were confirmed updated before this failure.';
+        const userMessage = `Could not update ${catalogLabel(resource)} skill ${resource.id} for ${destination}: gh exited with status ${status}. ${cause}${partial}`;
         throw new CatalogError(
           `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ''}`,
           ghForceRequired ? 'GH_FORCE_REQUIRED' : 'GH_UPDATE_FAILED',
           {
             category: ghForceRequired ? 'github-force-required' : 'github-cli',
             recoverable: ghForceRequired,
-            ...(ghForceRequired ? { agent: installation.agent } : {}),
+            ...(ghForceRequired ? { agent: destination } : {}),
             userMessage,
             technicalDetail: diagnostic || undefined,
           },
         );
       }
-      recordSourceInstallation(resource, targetRoot, installation.agent);
-      completed.push(installation.agent);
+      recordSourceInstallation(resource, targetRoot, skillPath);
+      completed.push(destination);
     }
     if (dryRun) {
       const refs = [...new Set(stale.map(({ ref }) => ref?.slice(0, 7) || 'unknown'))];
@@ -675,22 +659,23 @@ function uninstallSourceResource(
   }
   const state: InstallState = readInstallState(targetRoot);
   const record = sourceSkillRecord(state, sourceCatalogName(resource), resource.id);
-  const matchingRecord =
-    record && record.source_repository === resource.source_repository && record.source_path === resource.source_path
-      ? record
-      : null;
+  if (
+    !record ||
+    record.source_repository !== resource.source_repository ||
+    record.source_path !== resource.source_path
+  ) {
+    throw new CatalogError(`No tracked ${catalogLabel(resource)} skill installation for ${resource.id}`);
+  }
   const skillDirectories = installed.installations.map(({ path: relativePath }) => path.posix.dirname(relativePath));
-  const candidatePaths = matchingRecord
-    ? Object.keys(matchingRecord.files).filter((relativePath) =>
-        skillDirectories.some((directory) => relativePath.startsWith(`${directory}/`)),
-      )
-    : installed.installations.filter((entry) => !entry.missing).map(({ path: relativePath }) => relativePath);
-  const paths = candidatePaths.filter((relativePath) => installedFingerprint(targetRoot, relativePath));
-  const untracked = paths.filter((relativePath) => !matchingRecord?.files[relativePath]);
-  const modified = paths.filter((relativePath) => {
-    const expected = matchingRecord?.files[relativePath];
-    return expected && !sameFingerprint(installedFingerprint(targetRoot, relativePath), expected);
-  });
+  const expectedRemovals = new Map<string, FileFingerprint>();
+  const modified: string[] = [];
+  for (const [relativePath, expected] of Object.entries(record.files)) {
+    const actual = installedFingerprint(targetRoot, relativePath);
+    if (!actual) continue;
+    expectedRemovals.set(relativePath, actual);
+    if (!sameFingerprint(actual, expected)) modified.push(relativePath);
+  }
+  const paths = [...expectedRemovals.keys()];
   if (dryRun) {
     const messages: string[] = [];
     if (!paths.length) {
@@ -719,14 +704,10 @@ function uninstallSourceResource(
       messages.push(
         `Locally modified ${catalogLabel(resource)} skill entry points require --force: ${modified.join(', ')}`,
       );
-    } else if (untracked.length) {
-      messages.push(
-        `${catalogLabel(resource)} skill changes cannot be checked against an installation baseline; reinstall or update the skill to track it, or pass --force.`,
-      );
     } else {
       messages.push(`${catalogLabel(resource)} skill entry points match their recorded installation baseline.`);
     }
-    if (matchingRecord) onAction({ action: 'overwrite', path: LOCK_PATH });
+    onAction({ action: 'overwrite', path: LOCK_PATH });
     return messages;
   }
   if (modified.length && !force) {
@@ -734,19 +715,9 @@ function uninstallSourceResource(
       `Refusing to remove locally modified ${catalogLabel(resource)} skill files: ${modified.join(', ')}. Back them up or pass --force.`,
     );
   }
-  if (untracked.length && !force) {
-    throw new CatalogError(
-      `Cannot verify whether ${catalogLabel(resource)} skill ${resource.id} was locally modified. Reinstall or update it to establish an installation baseline, or pass --force to remove its SKILL.md entry point.`,
-    );
-  }
-
   const plan = new Map<string, InstallPlanEntry>();
-  if (matchingRecord) {
-    removeSourceSkillRecord(state, resource);
-    addInventoryStateToPlan(plan, state);
-  }
-  const expectedRemovals = new Map<string, FileFingerprint | null>();
-  for (const relativePath of paths) expectedRemovals.set(relativePath, installedFingerprint(targetRoot, relativePath));
+  removeSourceSkillRecord(state, resource);
+  addInventoryStateToPlan(plan, state);
   writeInstallPlan(plan, targetRoot, {
     force: true,
     remove: paths,

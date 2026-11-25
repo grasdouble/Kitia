@@ -5,7 +5,12 @@ import path from 'node:path';
 import { loadUserSourceConfiguration } from '../core/catalogs/config.js';
 import { catalogNameKey, type SourceConfiguration } from '../core/catalogs/model.js';
 import { CATALOG_PRESETS } from '../core/catalogs/presets.js';
-import type { PlanAction, InstallationTool, InstallationScope } from '../core/installations/model.js';
+import {
+  installationDestinationIds,
+  isInstallationDestination,
+  type InstallationDestination,
+} from '../core/installations/destinations.js';
+import type { PlanAction, InstallationScope } from '../core/installations/model.js';
 import {
   CatalogError,
   RESOURCE_ID,
@@ -24,14 +29,14 @@ export interface CliOptions {
   kind?: ResourceKind;
   id?: string;
   scope?: InstallationScope;
-  tool?: InstallationTool | null;
+  destinations?: readonly InstallationDestination[];
   nonInteractive?: boolean;
   json?: boolean;
   audit?: boolean;
   dryRun?: boolean;
   force?: boolean;
   ghForce?: boolean;
-  ghForceAgent?: string;
+  ghForceAgent?: InstallationDestination;
   allCatalogs?: boolean;
   query?: string;
   tag?: string;
@@ -65,10 +70,6 @@ function isResourceKind(value: unknown): value is ResourceKind {
   return value === 'skill' || value === 'agent' || value === 'instruction';
 }
 const catalogPresetCommands = CATALOG_PRESETS.map(({ command }) => command);
-
-function isInstallationTool(value: string): value is InstallationTool {
-  return value === 'claude' || value === 'copilot' || value === 'both';
-}
 
 function catalogNames(): string[] {
   return loadUserSourceConfiguration().map((source: SourceConfiguration) => source.name);
@@ -162,6 +163,20 @@ function parseCommandArguments(args: string[]): ParsedCliOptions {
   const [firstArgument, ...remaining] = args;
   if (firstArgument === undefined) throw new CatalogError(`Unknown command: ${firstArgument}`);
   const command = firstArgument;
+  for (const argument of remaining) {
+    if (argument === '--tool' || argument.startsWith('--tool=')) {
+      throw new CatalogError(
+        '--tool was removed; use --destination instead. ' +
+          'For skills, --tool copilot used the shared .agents/skills directory: use --destination standard to keep it. ' +
+          'Replace --tool both with --destination standard --destination claude for skills, ' +
+          'or --destination copilot --destination claude for agents and instructions. ' +
+          'Replace --tool claude with --destination claude.',
+      );
+    }
+    if (command !== 'install' && (argument === '--destination' || argument.startsWith('--destination='))) {
+      throw new CatalogError('--destination is only supported for install');
+    }
+  }
   if (command === 'collection') {
     const [action, file, ...arguments_] = remaining;
     const usage =
@@ -352,11 +367,11 @@ function parseCommandArguments(args: string[]): ParsedCliOptions {
     command,
     kind,
     id,
-    tool: command === 'install' ? 'copilot' : null,
     target: '.',
     dryRun: false,
     force: false,
   };
+  let destinations: InstallationDestination[] | undefined;
   for (let index = 0; index < options.length; index += 1) {
     const option = options[index];
     if (option === '--dry-run') result.dryRun = true;
@@ -368,20 +383,23 @@ function parseCommandArguments(args: string[]): ParsedCliOptions {
         throw new CatalogError('--ref must be a 7- to 40-character hexadecimal commit SHA prefix');
       result.ref = value.toLowerCase();
       index += 1;
-    } else if (option === '--target' || (option === '--tool' && command === 'install')) {
-      const value = options[index + 1];
-      if (!value || value.startsWith('--')) throw new CatalogError(`${option} requires a value`);
-      if (option === '--target') result.target = value;
-      else {
-        if (!isInstallationTool(value)) throw new CatalogError('--tool must be one of: claude, copilot or both');
-        result.tool = value;
+    } else if (option === '--target') {
+      const value = options[++index];
+      if (!value || value.startsWith('--')) throw new CatalogError('--target requires a value');
+      result.target = value;
+    } else if (option === '--destination') {
+      const value = options[++index];
+      if (!value || value.startsWith('--')) throw new CatalogError('--destination requires a value');
+      if (!isInstallationDestination(value)) {
+        throw new CatalogError(`--destination must be one of: ${installationDestinationIds.join(', ')}`);
       }
-      index += 1;
+      (destinations ??= []).push(value);
     } else throw new CatalogError(`Unknown option: ${option}`);
   }
   if (result.ref && (!result.kind || !result.id)) {
     throw new CatalogError('--ref requires a specific skill, agent, or instruction install or update');
   }
+  if (destinations) result.destinations = destinations;
   return result;
 }
 
@@ -429,7 +447,8 @@ Options:
   --target <dir>                Installation target (default: current directory)
   --scope <project|user>        Skills/agents: project or user home; instructions are project-scoped
                                 User scope cannot be combined with --target
-  --tool <claude|copilot|both>  Install only: desired runtimes (default: copilot)
+  --destination <${installationDestinationIds.join('|')}>  Install only; repeat to select multiple destinations
+                                Defaults: standard for skills, copilot for agents and instructions
   --dry-run                     Preview files without writing
   --ref <sha-or-prefix>         Install/update a source skill, agent, or instruction at a specific commit
   --force                       Overwrite files or remove modified/untracked source skills

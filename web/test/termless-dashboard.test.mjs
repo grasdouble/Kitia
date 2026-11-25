@@ -574,7 +574,18 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
     assert.equal(session.terminal.cell(inventory.row, inventory.left).char, '│');
 
     session.input.write('\x1b[6~');
-    const laterDetails = await waitForGrid(
+    const installedDetails = await waitForGrid(
+      session,
+      (grid) => {
+        const details = workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES'));
+        return details.includes('INSTALLED FOR') && details.includes('Standard');
+      },
+      'paging the selected details shows the installed destination',
+    );
+    const installedMetadata = workspaceDetails(workspaceFrame(installedDetails, 'INSTALLED RESOURCES'));
+    assert.ok(installedMetadata.includes('INSTALLED REVISION') && installedMetadata.includes('4ae2317'));
+    session.input.write('\x1b[6~');
+    const sourceDetails = await waitForGrid(
       session,
       (grid) => {
         const details = workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES'));
@@ -583,11 +594,16 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
           !details.includes('Route repository questions')
         );
       },
-      'paging the selected details shows the installed revision and upstream source',
+      'paging further shows the upstream source',
     );
-    const metadata = workspaceDetails(workspaceFrame(laterDetails, 'INSTALLED RESOURCES')).filter(Boolean).join(' ');
-    assert.match(metadata, /INSTALLED REVISION 4ae2317/);
+    const metadata = workspaceDetails(workspaceFrame(sourceDetails, 'INSTALLED RESOURCES')).filter(Boolean).join(' ');
     assert.match(metadata.replace(/\s+/g, ''), /SOURCEPATHskills\/engineering\/ask-matt/);
+    session.input.write('\x1b[5~');
+    await waitForGrid(
+      session,
+      (grid) => workspaceDetails(workspaceFrame(grid, 'INSTALLED RESOURCES')).includes('INSTALLED REVISION'),
+      'Page Up returns to the installed metadata',
+    );
     session.input.write('\x1b[5~');
     await waitForGrid(
       session,
@@ -1234,10 +1250,22 @@ test(
           if (action === 'install') {
             return {
               code: 1,
-              messages: [],
+              messages: ['A separate operation message.'],
               resources: [],
               errors: [],
-              failure: { userMessage: 'AUDIT_BLOCKED: findings detected; installation blocked.' },
+              failure: {
+                code: 'AUDIT_BLOCKED',
+                userMessage: 'Audit findings and incomplete coverage blocked installation.',
+                auditLines: [
+                  'Audit coverage: 1/2 files analyzed; coverage incomplete.',
+                  '  Skipped skills/review/SKILL.md: is not valid UTF-8 text.',
+                  ...Array.from(
+                    { length: 18 },
+                    (_, index) =>
+                      `  WARNING skills/plan-review/SKILL.md:${index + 10} [instruction-override] Attempts to override or disregard existing instructions.`,
+                  ),
+                ],
+              },
             };
           }
           previewResource = resource;
@@ -1381,17 +1409,37 @@ test(
         await assertTableSurface(session, 'b', { selected });
       }
       await press('\r', 'INSTALL OPTIONS');
+      await press('\t', '› Destinations');
+      session.input.write('\t');
+      await waitForGrid(
+        session,
+        (grid) => grid.includes('│ REVIEW INSTALL │') && !grid.includes('› Destinations'),
+        'Tab moves from Destinations to Review install',
+      );
       await press('\r', 'CONFIRM INSTALL');
-      const blocked = await press('y', 'INSTALL FAILED');
-      assert.ok(blocked.includes('AUDIT_BLOCKED'));
+      resizeDashboard(session, { columns: 72, rows: 18 });
+      const blocked = await press('y', 'Page 1/');
+      assert.match(blocked, /INSTALL FAILED/);
+      assert.match(blocked, /AUDIT REPORT/);
+      assert.match(blocked, /Audit coverage: 1\/2 files analyzed; coverage incomplete/);
+      assert.match(blocked, /Skipped skills\/review\/SKILL\.md/);
+      assert.match(blocked, /skills\/plan-review\/SKILL\.md:10/);
+      assert.doesNotMatch(blocked, /A separate operation message/);
+      assert.match(blocked, /PgUp\/PgDn · Esc/);
+      const pageCount = Number(blocked.match(/Page 1\/(\d+)/)?.[1]);
+      assert.ok(pageCount > 1);
+      let lastPage;
+      for (let page = 2; page <= pageCount; page++) lastPage = await press('\x1b[6~', `Page ${page}/${pageCount}`);
+      assert.match(lastPage, /skills\/plan-review\/SKILL\.md:27/);
+      await press('\x1b[5~', `Page ${pageCount - 1}/${pageCount}`);
       assert.deepEqual(
         calls.map(({ action }) => action),
         ['preview', 'install'],
       );
       session.input.write('\x1b');
-      await assertTableSurface(session, '', {
-        ids: [],
-        hints: ['F filter', '? guide', 'D details', ...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
+      resizeDashboard(session, terminalSize);
+      await assertTableSurface(session, 'b', {
+        selected: 'plan-review',
         dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE'],
       });
       session.input.write('q');
@@ -2163,17 +2211,20 @@ test(
       await assertShortcutsFrame(session, ['Actions', 'ENTER CONFIRM', 'Y/N SHORTCUTS', 'Navigation', '←/→ CHOOSE']);
       assert.equal(actions.length, 0, 'the action remains undispatched after one confirmation');
 
+      resizeDashboard(session, { columns, rows: 18 });
       session.input.write('y');
-      await waitForGrid(
+      const progress = await waitForGrid(
         session,
         (value) => value.includes('LOADING') && value.includes('Removing skill:unmanaged'),
         'the second confirmation shows removal progress',
       );
+      assert.match(progress, /Inventory 3\s+Browse resources 5\s+Manage Catalogs 1/);
       // The dashboard yields after rendering progress and before invoking the handler.
       await actionStarted;
       assert.equal(actions.length, 1);
       assert.equal(actions[0][0], 'remove-unmanaged');
       assert.equal(actions[0][1].id, 'unmanaged');
+      resizeDashboard(session, { columns, rows });
       finishAction();
       await assertTableSurface(session, '', {
         selected: 'unmanaged',
@@ -2183,6 +2234,7 @@ test(
       });
       resizeDashboard(session, { columns: 120, rows: 55 });
       await assertTableSurface(session, '', { selected: 'unmanaged', hints });
+      session.input.write('\x1b[6~');
       await waitForGrid(
         session,
         (grid) =>

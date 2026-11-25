@@ -4,6 +4,7 @@ import path from 'node:path';
 import { findUnmanagedArtifacts } from '../inventory/discovery.js';
 import type { InstallState } from '../inventory/model.js';
 import type { CatalogResource } from '../resources/model.js';
+import { availableInstallationDestinations } from './destinations.js';
 import { trackedPaths } from './files.js';
 // Native-only operations; the caller holds the target's operation lock.
 function removeUnmanagedResource(targetRoot: string, state: InstallState, resource: CatalogResource): string[] {
@@ -51,7 +52,9 @@ function removeUnmanagedResource(targetRoot: string, state: InstallState, resour
       throw new Error(`Refusing to remove an unexpected skill entry file: ${relativePath}`);
     }
     const skillDirectory = path.posix.dirname(relativePath);
-    if (!['.agents/skills/', '.claude/skills/'].some((prefix) => skillDirectory.startsWith(prefix))) {
+    if (
+      !availableInstallationDestinations('skill').some(({ directory }) => skillDirectory.startsWith(`${directory}/`))
+    ) {
       throw new Error(`Refusing to remove a skill outside a supported skills directory: ${relativePath}`);
     }
     if (

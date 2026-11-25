@@ -74,7 +74,7 @@ test('audited source install blocks a matching pinned skill before writing files
             action: 'install',
             audit: true,
             target,
-            tool: 'copilot',
+            destinations: ['standard'],
             scope: 'project',
             resource: {
               id: 'demo',
@@ -137,7 +137,7 @@ test('progress-enabled source install preserves the injected GitHub runner', asy
   const operation = {
     action: 'install',
     target,
-    tool: 'copilot',
+    destinations: ['standard'],
     scope: 'project',
     nonInteractive: true,
     resource,
@@ -148,8 +148,8 @@ test('progress-enabled source install preserves the injected GitHub runner', asy
     'install',
     'example/repo',
     'skills/injected-skill',
-    '--agent',
-    'github-copilot',
+    '--dir',
+    path.join(fs.realpathSync(target), '.agents', 'skills'),
     '--scope',
     'project',
     '--pin',
@@ -169,7 +169,7 @@ test('progress-enabled source install preserves the injected GitHub runner', asy
 
     const result = await runSourceOperation(operation, async (args, cwd) => {
       invoked = { args, cwd };
-      const skillPath = path.join(target, '.agents', 'skills', resource.id, 'SKILL.md');
+      const skillPath = path.join(skillInstallDirectory(args), resource.id, 'SKILL.md');
       fs.mkdirSync(path.dirname(skillPath), { recursive: true });
       fs.writeFileSync(
         skillPath,
@@ -261,7 +261,7 @@ test('audited agent and instruction operations acquire pinned content once and d
           action,
           resource,
           target,
-          tool: 'both',
+          destinations: ['copilot', 'claude'],
           audit: true,
           onAudit: (audit) => audits.push(audit),
         });
@@ -279,14 +279,14 @@ test('audited agent and instruction operations acquire pinned content once and d
       }
       const target = path.join(temporary, `${kind}-dry`);
       fs.mkdirSync(target);
-      runSourceOperation({ action: 'install', resource, target, tool: 'both', dryRun: true });
+      runSourceOperation({ action: 'install', resource, target, destinations: ['copilot', 'claude'], dryRun: true });
       assert.equal(fs.readFileSync(trace, 'utf8').match(/built-in: git clone /g).length, clones);
       assert.deepEqual(fs.readdirSync(target), []);
       runSourceOperation({
         action: 'install',
         resource,
         target,
-        tool: 'both',
+        destinations: ['copilot', 'claude'],
         dryRun: true,
         audit: true,
       });
@@ -302,11 +302,21 @@ test('audited agent and instruction operations acquire pinned content once and d
   }
 });
 
-function writeSkillFixture(args, target) {
-  const agent = args[args.indexOf('--agent') + 1];
+function skillInstallDirectory(args) {
+  const index = args.indexOf('--dir');
+  assert.notEqual(index, -1);
+  assert.ok(path.isAbsolute(args[index + 1]));
+  return args[index + 1];
+}
+
+function relativeSkillArgs(args, target) {
+  return args.with(args.indexOf('--dir') + 1, path.relative(target, skillInstallDirectory(args)));
+}
+
+function writeSkillFixture(args) {
   const ref = args[args.indexOf('--pin') + 1];
   const id = args[3].split('/').at(-1);
-  const file = path.join(target, agent === 'claude-code' ? '.claude' : '.agents', 'skills', id, 'SKILL.md');
+  const file = path.join(skillInstallDirectory(args), id, 'SKILL.md');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
     file,
@@ -348,7 +358,7 @@ function fixtureSpawn(run) {
   };
 }
 
-test('sync and async updates share plans, resource summaries, no-update results, partial failures and agent force', async () => {
+test('sync and async updates share plans, summaries, no-update results, partial failures and destination force', async () => {
   const { updateSourceResources, updateSourceResourcesAsync } = require('../../core/installations/mutations.ts');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-update-parity-'));
   const resource = {
@@ -363,9 +373,9 @@ test('sync and async updates share plans, resource summaries, no-update results,
   const installed = [
     {
       resource,
-      installations: ['github-copilot', 'claude-code'].map((agent) => ({
-        agent,
-        path: `${agent === 'claude-code' ? '.claude' : '.agents'}/skills/demo/SKILL.md`,
+      installations: Object.entries({ standard: '.agents', claude: '.claude' }).map(([destination, directory]) => ({
+        destination,
+        path: `${directory}/skills/demo/SKILL.md`,
         ref: 'a'.repeat(40),
         missing: true,
       })),
@@ -375,7 +385,7 @@ test('sync and async updates share plans, resource summaries, no-update results,
     resource: { ...resource, id: 'prior', source_path: 'skills/prior' },
     installations: [
       {
-        agent: 'github-copilot',
+        destination: 'standard',
         path: '.agents/skills/prior/SKILL.md',
         ref: 'a'.repeat(40),
         missing: true,
@@ -387,12 +397,12 @@ test('sync and async updates share plans, resource summaries, no-update results,
       const outcomes = [];
       for (const asyncTransport of [false, true]) {
         for (const observed of [false, true]) {
-          const target = fs.mkdtempSync(path.join(directory, 'target-'));
+          const target = fs.realpathSync(fs.mkdtempSync(path.join(directory, 'target-')));
           const actions = [];
           const calls = [];
           const run = (args, cwd) => {
-            calls.push(args);
-            if (args[args.indexOf('--agent') + 1] === 'claude-code') {
+            calls.push(relativeSkillArgs(args, cwd));
+            if (skillInstallDirectory(args) === path.join(cwd, '.claude', 'skills')) {
               if (scenario === 'spawn') throw Object.assign(new Error('spawn fixture'), { code: 'ENOENT' });
               if (scenario === 'partial') return { status: 7, stderr: 'fixture failure' };
               if (scenario === 'force')
@@ -401,7 +411,7 @@ test('sync and async updates share plans, resource summaries, no-update results,
                   stderr: 'Skills already installed: demo (Use --force to overwrite)',
                 };
             }
-            writeSkillFixture(args, cwd);
+            writeSkillFixture(args);
             return { status: 0 };
           };
           const entries =
@@ -419,8 +429,12 @@ test('sync and async updates share plans, resource summaries, no-update results,
             nonInteractive: true,
             dryRun: scenario === 'dry',
             ghForce: scenario === 'retry',
-            ghForceAgent: scenario === 'retry' ? 'claude-code' : undefined,
-            onAction: (action) => actions.push(action),
+            ghForceAgent: scenario === 'retry' ? 'claude' : undefined,
+            onAction: (action) =>
+              actions.push({
+                ...action,
+                command: { ...action.command, args: relativeSkillArgs(action.command.args, target) },
+              }),
             ...(observed ? { onProgress: () => {} } : {}),
           };
           let messages, failure;
@@ -452,7 +466,7 @@ test('sync and async updates share plans, resource summaries, no-update results,
           if (['partial', 'spawn', 'force'].includes(scenario)) {
             assert.equal(Object.keys(state.Fixture.skills.demo.files).length, 1);
             assert.match(failure.message, /Already updated: Updated Fixture catalog skill: prior/);
-            assert.match(failure.message, /Updated agents: github-copilot.*remain in place/);
+            assert.match(failure.message, /Updated destinations: standard.*remain in place/);
           }
           const mentions = (id) => messages.filter((message) => message.includes(id)).length;
           if (scenario === 'success' || scenario === 'retry') {
@@ -474,7 +488,7 @@ test('sync and async updates share plans, resource summaries, no-update results,
             assert.equal(calls[1].includes('--force'), false);
             assert.equal(calls[2].includes('--force'), true);
           }
-          if (scenario === 'force') assert.equal(failure.agent, 'claude-code');
+          if (scenario === 'force') assert.equal(failure.agent, 'claude');
         }
       }
       for (const outcome of outcomes.slice(1)) assert.deepEqual(outcome, outcomes[0], scenario);
@@ -484,7 +498,7 @@ test('sync and async updates share plans, resource summaries, no-update results,
   }
 });
 
-test('install failures and successful-agent records are independent of progress and transport', async () => {
+test('install failures and successful destination records are independent of progress and transport', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-install-parity-'));
   const resource = {
     kind: 'skill',
@@ -502,8 +516,10 @@ test('install failures and successful-agent records are independent of progress 
         const target = fs.mkdtempSync(path.join(directory, 'target-'));
         const messages = [];
         const run = (args, cwd) => {
-          if (args[args.indexOf('--agent') + 1] === 'claude-code') return { status: 7, stderr: 'fixture failure' };
-          writeSkillFixture(args, cwd);
+          if (skillInstallDirectory(args) === path.join(cwd, '.claude', 'skills')) {
+            return { status: 7, stderr: 'fixture failure' };
+          }
+          writeSkillFixture(args);
           return { status: 0 };
         };
         let failure;
@@ -513,7 +529,7 @@ test('install failures and successful-agent records are independent of progress 
               action: 'install',
               resource,
               target,
-              tool: 'both',
+              destinations: ['standard', 'claude'],
               nonInteractive,
               onMessage: (message) => messages.push(message),
               ...(observed ? { onProgress: () => {} } : {}),
@@ -525,7 +541,7 @@ test('install failures and successful-agent records are independent of progress 
           failure = { code: error.code, message: error.message };
         }
         assert.equal(failure.code, 'GH_INSTALL_FAILED');
-        assert.match(failure.message, /Already installed for github-copilot.*remain in place/);
+        assert.match(failure.message, /Already installed for standard.*remain in place/);
         assert.equal(messages.length, 1);
         outcomes.push({ failure, messages, state: readInstallState(target).sources });
       }

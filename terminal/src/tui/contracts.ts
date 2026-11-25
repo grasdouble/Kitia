@@ -1,4 +1,5 @@
 import type { AddCatalogRequest, UserCatalog } from '../core/catalogs/model.js';
+import type { InstallationDestination } from '../core/installations/destinations.js';
 import type { CatalogResource } from '../core/resources/model.js';
 import type { DashboardActionResult } from './action-result.js';
 import type { CatalogFreshnessStatus } from './catalog-freshness.mjs';
@@ -33,7 +34,7 @@ export interface DashboardActions {
     resource: CatalogResource,
     options: {
       scope?: string;
-      tool?: string;
+      destinations?: readonly InstallationDestination[];
       force?: boolean;
       ref?: string;
       ghForce?: boolean;

@@ -18,17 +18,28 @@ const { createTuiDemoSession } = await vite.ssrLoadModule('/src/components/demo/
 const fixture = (session, kind, id) =>
   session.actions.catalogResources.find((entry) => entry.kind === kind && entry.id === id);
 
-test('all supported kind, scope, and client combinations retain paths and metadata on update', async () => {
+test('all supported kind, scope, and destination selections retain paths and metadata on update', async () => {
   for (const kind of ['skill', 'agent', 'instruction']) {
     for (const scope of ['project', 'user']) {
-      for (const tool of ['copilot', 'claude', 'both']) {
+      const selections =
+        kind === 'skill'
+          ? [
+              undefined,
+              ['standard'],
+              ['copilot'],
+              ['claude'],
+              ['mistral'],
+              ['standard', 'copilot', 'claude', 'mistral'],
+            ]
+          : [undefined, ['copilot'], ['claude'], ['copilot', 'claude']];
+      for (const destinations of selections) {
         const session = createTuiDemoSession();
         const source = fixture(
           session,
           kind,
           kind === 'skill' ? 'testing' : kind === 'agent' ? 'planner' : 'documentation',
         );
-        const installed = await session.actions.execute('install', source, { scope, tool });
+        const installed = await session.actions.execute('install', source, { scope, destinations });
         if (kind === 'instruction' && scope === 'user') {
           assert.equal(installed.code, 1);
           assert.match(installed.failure.userMessage, /project scope only/);
@@ -38,12 +49,28 @@ test('all supported kind, scope, and client combinations retain paths and metada
         const row = installed.resources.find(
           (entry) => entry.kind === kind && entry.id === source.id && entry.scope === scope,
         );
-        assert.equal(row.paths.length, tool === 'both' ? 2 : 1);
+        const id = source.id;
+        const copilotDirectory = scope === 'user' ? '.copilot' : '.github';
+        const paths =
+          kind === 'skill'
+            ? {
+                standard: `.agents/skills/${id}/SKILL.md`,
+                copilot: `${copilotDirectory}/skills/${id}/SKILL.md`,
+                claude: `.claude/skills/${id}/SKILL.md`,
+                mistral: `.vibe/skills/${id}/SKILL.md`,
+              }
+            : kind === 'agent'
+              ? { copilot: `${copilotDirectory}/agents/${id}.agent.md`, claude: `.claude/agents/${id}.md` }
+              : { copilot: `.github/instructions/${id}.instructions.md`, claude: `.claude/rules/${id}.md` };
+        assert.deepEqual(
+          row.paths,
+          (destinations ?? [kind === 'skill' ? 'standard' : 'copilot']).map((id) => paths[id]),
+        );
         assert.match(row.source_ref, /^[a-f0-9]{40}$/);
         const versions = await session.actions.listSourceVersions(row);
         const updated = await session.actions.execute('update', row, {
           ref: versions[2].sha,
-          tool: 'invalid-ignored-for-update',
+          destinations: ['claude'],
         });
         assert.equal(updated.code, 0);
         const updatedRow = updated.resources.find(
@@ -58,6 +85,69 @@ test('all supported kind, scope, and client combinations retain paths and metada
   }
 });
 
+test('adding a destination preserves existing files and update and uninstall affect only the chosen scope', async () => {
+  for (const [kind, id, paths] of [
+    ['skill', 'testing', ['.agents/skills/testing/SKILL.md', '.claude/skills/testing/SKILL.md']],
+    ['agent', 'planner', ['.github/agents/planner.agent.md', '.claude/agents/planner.md']],
+    [
+      'instruction',
+      'documentation',
+      ['.github/instructions/documentation.instructions.md', '.claude/rules/documentation.md'],
+    ],
+  ]) {
+    const session = createTuiDemoSession();
+    const source = fixture(session, kind, id);
+    const versions = await session.actions.listSourceVersions(source);
+    const project = () => session.resources.find((entry) => entry.id === id && entry.scope === 'project');
+    const user = () => session.resources.find((entry) => entry.id === id && entry.scope === 'user');
+    if (kind !== 'instruction') {
+      const userInstall = await session.actions.execute('install', source, { scope: 'user' });
+      assert.equal(userInstall.code, 0);
+    }
+    const beforeUser = user();
+    const initial = await session.actions.execute('install', source, kind === 'skill' ? { ref: versions[2].sha } : {});
+    assert.equal(initial.code, 0);
+    const before = await session.actions.execute('preview', project(), {});
+    assert.deepEqual(
+      before.previewFiles.map(({ path }) => path),
+      [paths[0]],
+    );
+    const addition = await session.actions.execute('install', source, { destinations: ['claude'] });
+    assert.equal(addition.code, 0);
+    assert.deepEqual(project().paths, paths);
+    const after = await session.actions.execute('preview', project(), {});
+    assert.deepEqual(after.previewFiles[0], before.previewFiles[0]);
+    if (kind === 'skill') {
+      assert.deepEqual(project().issues, [{ code: 'UPDATE_AVAILABLE', paths: [paths[0]] }]);
+      assert.notEqual(after.previewFiles[1].content, after.previewFiles[0].content);
+    }
+    if (kind === 'instruction') assert.match(after.previewFiles[1].content, /^---\npaths: \["\*\*\/\*\.md"\]/);
+    assert.deepEqual(user(), beforeUser);
+    const duplicate = await session.actions.execute('install', source, { destinations: ['claude'] });
+    assert.equal(duplicate.code, 1);
+    const update = await session.actions.execute('update', project(), { ref: versions[0].sha });
+    assert.equal(update.code, 0);
+    assert.deepEqual(project().paths, paths);
+    assert.equal(project().source_ref, versions[0].sha);
+    assert.equal((await session.actions.execute('uninstall', project(), {})).code, 0);
+    assert.equal(project(), undefined);
+    assert.deepEqual(user(), beforeUser);
+  }
+});
+
+test('adding a file destination cannot change the pin of an installed copy', async () => {
+  const session = createTuiDemoSession();
+  const source = fixture(session, 'agent', 'planner');
+  const versions = await session.actions.listSourceVersions(source);
+  const initial = await session.actions.execute('install', source, { ref: versions[2].sha });
+  assert.equal(initial.code, 0);
+  const snapshot = session.resources;
+  const addition = await session.actions.execute('install', source, { destinations: ['claude'] });
+  assert.equal(addition.code, 1);
+  assert.match(addition.failure.userMessage, /Update the existing demo installation/);
+  assert.deepEqual(session.resources, snapshot);
+});
+
 test('preview uses the installed revision and bundled content without claiming an audit', async () => {
   const session = createTuiDemoSession();
   const source = fixture(session, 'skill', 'testing');
@@ -68,7 +158,7 @@ test('preview uses the installed revision and bundled content without claiming a
   const installed = await session.actions.execute('install', source, {
     ref: versions[1].sha,
     scope: 'user',
-    tool: 'both',
+    destinations: ['standard', 'claude'],
   });
   const row = installed.resources.find((entry) => entry.id === source.id && entry.scope === 'user');
   await session.actions.refreshCatalog('toolkit');
@@ -100,12 +190,13 @@ test('conflicts protect destination ownership even with force; scope remains ind
   assert.match(duplicate.description, /Simulated bundled fixture; no GitHub fetch/);
   const conflict = await session.actions.execute('install', duplicate, {
     scope: 'project',
-    tool: 'claude',
+    destinations: ['claude'],
     force: true,
   });
   assert.equal(conflict.code, 1);
   assert.match(conflict.failure.userMessage, /destination conflict/);
-  assert.equal((await session.actions.execute('install', duplicate, { scope: 'user', tool: 'claude' })).code, 0);
+  const userInstall = await session.actions.execute('install', duplicate, { scope: 'user', destinations: ['claude'] });
+  assert.equal(userInstall.code, 0);
   const unmanaged = session.resources.find((entry) => entry.managed === false);
   assert.equal((await session.actions.execute('uninstall', unmanaged, {})).code, 1);
   assert.equal((await session.actions.execute('remove-unmanaged', unmanaged, {})).code, 0);
@@ -118,7 +209,7 @@ test('refresh and catalog edits never rewrite installed content; removal retains
   const source = fixture(session, 'agent', 'planner');
   const installed = await session.actions.execute('install', source, {
     scope: 'project',
-    tool: 'both',
+    destinations: ['copilot', 'claude'],
   });
   const row = installed.resources.find((entry) => entry.id === 'planner');
   const before = await session.actions.execute('preview', row, {});

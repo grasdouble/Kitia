@@ -5,13 +5,14 @@ import type { DOMElement } from 'ink';
 import React from 'react';
 
 import { DASHBOARD_THEME } from './colors.js';
+import { SelectInput } from './components/input/select-input.mjs';
 import { Panel } from './components/panel.mjs';
 import { categorizedShortcutLines, wrappedShortcutLines } from './components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel } from './components/shortcuts/shortcuts-panel.mjs';
 import { fitColumn, fitText, wrapText } from './helpers.mjs';
 import { DashboardMouseRegions, type DashboardMouseRegion, type DashboardMouseTarget } from './input-transport.mjs';
 
-type ModalOption = { label: string; color?: string };
+type ModalOption = { label: string; color?: string; mouseTarget?: DashboardMouseTarget };
 type ModalContentLine = {
   text: string;
   type?: 'choice-group' | 'selectable-option';
@@ -22,9 +23,11 @@ type ModalContentLine = {
   selected?: boolean;
   color?: string;
   borderColor?: string;
+  selectInput?: { compact: boolean };
   bold?: boolean;
   dimColor?: boolean;
   preserveSpacing?: boolean;
+  mouseTarget?: DashboardMouseTarget;
 };
 type ModalContentEntry = string | ModalContentLine;
 type ModalRenderedLine = ModalContentLine & { bodyText?: string; component?: 'choice-group' | 'selectable-option' };
@@ -56,6 +59,12 @@ type ModalFrameResult = {
   headerLines: Array<{ text: string }>;
   lines: ModalRenderedLine[];
   shortcuts: string[];
+  selectMenu?: {
+    group: 'scope' | 'destination';
+    items: { title: string; detail?: string; color?: string }[];
+    index: number;
+    move: NonNullable<DashboardMouseRegion['scroll']>;
+  };
 };
 type ModalElementRef = React.RefObject<DOMElement | null>;
 type ChoiceGroupRefs = { row: ModalElementRef; options: ModalElementRef[] };
@@ -150,7 +159,9 @@ export function modalFrame(
     const row: ModalContentLine = typeof entry === 'string' ? { text: entry } : entry;
     const wrapped = row.preserveSpacing ? [row.text] : wrapText(row.text, innerWidth);
     return wrapped.map((line) => ({
-      text: separateHeader ? line : `│ ${fitColumn(line, innerWidth)} │`,
+      text: separateHeader
+        ? line
+        : `│ ${row.preserveSpacing ? line.padEnd(innerWidth) : fitColumn(line, innerWidth)} │`,
       bodyText: line,
       component: wrapped.length === 1 && row.text.length <= innerWidth ? row.type : undefined,
       label: row.label,
@@ -162,6 +173,8 @@ export function modalFrame(
       bold: row.bold,
       dimColor: row.dimColor,
       borderColor: accent,
+      selectInput: row.selectInput,
+      mouseTarget: row.mouseTarget,
     }));
   });
   return {
@@ -332,6 +345,38 @@ function isSelectableOptionLine(line: ModalRenderedLine): line is SelectableOpti
     typeof line.bodyText === 'string'
   );
 }
+
+function modalLineHeight(line: ModalRenderedLine): number {
+  return isChoiceGroupLine(line) || (line.selectInput && !line.selectInput.compact) ? 3 : 1;
+}
+
+function modalSelect(line: ModalRenderedLine, compact: boolean, rowRef?: ModalElementRef) {
+  const sides = compact ? (['middle'] as const) : (['top', 'middle', 'bottom'] as const);
+  const width = line.text.length;
+  const { primary, muted, label } = semantic.accents;
+  return h(
+    Box,
+    { flexDirection: 'column', width, height: sides.length, flexShrink: 0, ref: rowRef },
+    ...sides.map((side) =>
+      h(
+        Text,
+        { key: side, color: line.borderColor, backgroundColor: MODAL_BACKGROUND },
+        '│ ',
+        h(SelectInput, {
+          side,
+          value: line.bodyText ?? '',
+          width: width - 4,
+          focused: Boolean(line.focused),
+          compact,
+          focusedColor: primary,
+          unfocusedColor: muted,
+          labelColor: label,
+        }),
+        ' │',
+      ),
+    ),
+  );
+}
 function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?: ChoiceGroupRefs | null }) {
   const commonProps = {
     color: line.color || MODAL_FOREGROUND,
@@ -345,6 +390,7 @@ function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?:
   if (isSelectableOptionLine(line)) {
     return h(SelectableOption, { line });
   }
+  if (line.selectInput) return modalSelect(line, line.selectInput.compact, choiceRefs?.row);
   const content =
     line.text?.startsWith('│') && line.text.endsWith('│')
       ? h(
@@ -360,38 +406,123 @@ function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?:
     : content;
 }
 
+function selectPopover(modal: ModalFrameResult, left: number, top: number, rows: number) {
+  const menu = modal.selectMenu;
+  if (!menu) return;
+  let fieldHeight = 1;
+  let below = top;
+  for (const line of modal.lines) {
+    const height = modalLineHeight(line);
+    below += height;
+    const target = line.mouseTarget;
+    if (target?.type === 'modal-select' && target.action === 'toggle' && target.group === menu.group) {
+      fieldHeight = height;
+      break;
+    }
+  }
+  const above = below - fieldHeight;
+  const width = modal.width - 4;
+  const inner = width - 4;
+  const needsDetailRow = menu.items.some(({ title, detail }) => detail && title.length + detail.length + 5 > inner);
+  const fullHeight = menu.items.length * (needsDetailRow ? 2 : 1) + 2;
+  const useAbove = rows - below < fullHeight && above > rows - below;
+  const room = useAbove ? above : rows - below;
+  const bordered = room >= 3;
+  const bodyRows = Math.max(1, room - (bordered ? 2 : 0));
+  const itemHeight = needsDetailRow && bodyRows >= 2 ? 2 : 1;
+  const count = Math.min(menu.items.length, Math.floor(bodyRows / itemHeight));
+  const first = Math.max(0, Math.min(menu.index - count + 1, menu.items.length - count));
+  const height = count * itemHeight + (bordered ? 2 : 0);
+  const x = left + 2;
+  const y = useAbove ? above - height : below;
+  const regions: DashboardMouseRegion[] = [];
+  const parts = [];
+  const frame = (start: string, end: string, more: string) =>
+    h(
+      Text,
+      { key: start, backgroundColor: MODAL_BACKGROUND, color: semantic.accents.primary },
+      `${start}${'─'.repeat(width - 2 - more.length)}${more}${end}`,
+    );
+  if (bordered) parts.push(frame('╭', '╮', first ? ' ↑ ' : ''));
+  for (let index = first; index < first + count; index += 1) {
+    const { title, detail, color: itemColor } = menu.items[index];
+    const active = menu.index === index;
+    const color = active ? semantic.selected : (itemColor ?? MODAL_FOREGROUND);
+    const marker = active ? '› ' : '  ';
+    const line = (text: string) => `│ ${text.padEnd(inner)} │`;
+    const label = itemHeight === 1 && detail ? `${title} · ${detail}` : title;
+    parts.push(
+      h(
+        Text,
+        { key: index, backgroundColor: MODAL_BACKGROUND, color, bold: active },
+        line(marker + fitText(label, inner - 2)),
+      ),
+    );
+    if (itemHeight === 2) {
+      parts.push(
+        h(
+          Text,
+          { key: `directory-${index}`, backgroundColor: MODAL_BACKGROUND, color, dimColor: !active },
+          line(`  ${fitText(detail, inner - 2)}`),
+        ),
+      );
+    }
+    const start = y + Number(bordered) + (index - first) * itemHeight;
+    regions.push({
+      left: x + 1,
+      right: x + width,
+      top: start + 1,
+      bottom: start + itemHeight,
+      target: { type: 'modal-option', group: menu.group, index },
+      scroll: menu.move,
+    });
+  }
+  if (bordered) parts.push(frame('╰', '╯', first + count < menu.items.length ? ' ↓ ' : ''));
+  regions.push({
+    left: x + 1,
+    right: x + width,
+    top: y + 1,
+    bottom: y + height,
+    target: { type: 'modal-select', action: 'surface' },
+    scroll: menu.move,
+  });
+  return {
+    regions,
+    element: h(Box, { position: 'absolute', top: y, left: x, width, flexDirection: 'column' }, ...parts),
+  };
+}
+
 export function ModalOverlay({
   modal,
   columns,
   rows,
   mouse,
+  tabStripBottom,
 }: {
   modal: ModalFrameResult;
   columns: number;
   rows: number;
   mouse?: DashboardMouseRegions;
+  tabStripBottom: number;
 }) {
   const shortcutsRows = modal.shortcuts.length ? wrappedShortcutLines(modal.shortcuts, modal.width).length + 4 : 0;
-  const choiceRows = modal.lines.filter(({ component }) => component === 'choice-group').length * 2;
+  const contentRows = modal.lines.reduce((height, line) => height + modalLineHeight(line), 0);
   const modalHeight =
-    modal.lines.length +
-    choiceRows +
-    modal.headerLines.length +
-    (modal.panelTitle ? 4 : 0) +
-    (shortcutsRows ? shortcutsRows + 1 : 0);
-  const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
+    contentRows + modal.headerLines.length + (modal.panelTitle ? 4 : 0) + (shortcutsRows ? shortcutsRows + 1 : 0);
+  const centeredTop = Math.max(0, Math.floor((rows - modalHeight) / 2));
+  const top = tabStripBottom + modalHeight <= rows ? Math.max(tabStripBottom, centeredTop) : centeredTop;
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
+  const popover = selectPopover(modal, left, top, rows);
   const choiceRefs = React.useRef<Array<ChoiceGroupRefs | null>>([]);
   choiceRefs.current.length = modal.lines.length;
   for (const [lineIndex, line] of modal.lines.entries()) {
-    if (!modal.panelTitle && line.options?.length && typeof line.bodyText === 'string') {
+    if (!modal.panelTitle && (line.mouseTarget || (line.options?.length && typeof line.bodyText === 'string'))) {
       const current = choiceRefs.current[lineIndex];
       choiceRefs.current[lineIndex] = {
         row: current?.row || React.createRef<DOMElement>(),
-        options:
-          line.component === 'choice-group'
-            ? line.options.map((_, index) => current?.options[index] || React.createRef<DOMElement>())
-            : [],
+        options: isChoiceGroupLine(line)
+          ? line.options.map((_, index) => current?.options[index] || React.createRef<DOMElement>())
+          : [],
       };
     } else {
       choiceRefs.current[lineIndex] = null;
@@ -401,22 +532,26 @@ export function ModalOverlay({
     const regions: DashboardMouseRegion[] = [];
     if (!modal.panelTitle) {
       for (const [lineIndex, line] of modal.lines.entries()) {
-        if (!line.options?.length || typeof line.bodyText !== 'string') continue;
-        const group = String(line.label || '')
-          .trim()
-          .toLowerCase();
-        if (group && group !== 'scope' && group !== 'client') continue;
         const refs = choiceRefs.current[lineIndex];
         const row = refs?.row.current;
         if (!row) continue;
         const rowLayout = measureElement(row);
+        if (line.mouseTarget) {
+          const inset = line.selectInput ? 2 : 0;
+          regions.push({
+            left: rowLayout.x + inset + 1,
+            right: Math.min(columns, rowLayout.x + rowLayout.clientWidth - inset),
+            top: rowLayout.y + 1,
+            bottom: Math.min(rows, rowLayout.y + rowLayout.clientHeight),
+            target: line.mouseTarget,
+          });
+          continue;
+        }
+        if (!line.options?.length || typeof line.bodyText !== 'string') continue;
         const bodyOffset = typeof line.text === 'string' ? line.text.indexOf(line.bodyText) : -1;
         for (const [index, option] of line.options.entries()) {
           const label = option.label;
-          const target: DashboardMouseTarget =
-            group === 'scope' || group === 'client'
-              ? { type: 'modal-option', group, index }
-              : { type: 'modal-choice', index };
+          const target: DashboardMouseTarget = option.mouseTarget ?? { type: 'modal-choice', index };
           const node = refs?.options[index]?.current;
           if (node) {
             const optionLayout = measureElement(node);
@@ -457,10 +592,30 @@ export function ModalOverlay({
         }
       }
     }
-    mouse?.replace('modal', regions);
+    mouse?.replace(
+      'modal',
+      popover
+        ? [
+            ...popover.regions,
+            ...regions.filter(
+              ({ target }) =>
+                target.type === 'modal-select' &&
+                target.action === 'toggle' &&
+                target.group === modal.selectMenu?.group,
+            ),
+            {
+              left: 1,
+              right: columns,
+              top: 1,
+              bottom: rows,
+              target: { type: 'modal-select', action: 'dismiss' },
+            },
+          ]
+        : regions,
+    );
     return () => mouse?.replace('modal', []);
   });
-  return h(
+  const frame = h(
     Box,
     {
       position: 'absolute',
@@ -508,4 +663,5 @@ export function ModalOverlay({
         ]
       : []),
   );
+  return popover ? h(React.Fragment, null, frame, popover.element) : frame;
 }

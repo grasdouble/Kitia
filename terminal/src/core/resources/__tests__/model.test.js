@@ -5,14 +5,12 @@ const {
   CatalogError,
   INSTALLABLE_KINDS,
   USER_INSTALLABLE_KINDS,
-  TOOLS,
   RESOURCE_ID,
   rejectUnsupportedVersion,
 } = require('../model.ts');
 test('resource model exposes stable installability and error contracts', () => {
   assert.deepEqual([...INSTALLABLE_KINDS], ['skill', 'agent', 'instruction']);
   assert.equal(USER_INSTALLABLE_KINDS.has('instruction'), false);
-  assert.equal(TOOLS.has('both'), true);
   assert.equal(RESOURCE_ID.test('good-id'), true);
   assert.equal(RESOURCE_ID.test('bad--id'), false);
   assert.throws(() => rejectUnsupportedVersion(2, 1, 'catalog', 'UNSUPPORTED_CATALOG_VERSION'), {

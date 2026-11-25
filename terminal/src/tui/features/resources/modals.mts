@@ -1,3 +1,5 @@
+import { installationPath, resolveInstallationDestinations } from '../../../core/installations/destinations.js';
+import type { InstallationScope } from '../../../core/installations/model.js';
 import type { ScanError } from '../../../core/inventory/checks.js';
 import type { CatalogResource } from '../../../core/resources/model.js';
 import { adaptiveColumnWidths } from '../../../table-layout.js';
@@ -8,68 +10,124 @@ import { fitColumn, fitText, wrapText } from '../../helpers.mjs';
 import { modalFrame, choiceGroup, categorizeShortcutHint } from '../../modals.mjs';
 import type { PendingDashboardAction } from './types.js';
 const { semantic } = DASHBOARD_THEME;
+const scopeLabel = (scope: InstallationScope) => (scope === 'user' ? 'User' : 'Project');
 
 export function optionsModal({
   resource,
   scope,
-  tool,
+  scopeChoices,
+  destinations,
   focus,
-  resources,
-  errors,
+  menu,
+  moveMenu,
+  replacing,
+  scopeError,
+  canReview,
   columns,
   ref,
+  rows,
 }: {
   resource: CatalogResource;
-  scope: string;
-  tool: string;
-  focus: number;
-  resources: CatalogResource[];
-  errors: ScanError[];
+  scope: InstallationScope;
+  scopeChoices: InstallationScope[];
+  destinations: { label: string; directory: string; tracked: boolean; selected: boolean }[];
+  focus: 'scope' | 'destinations' | 'review' | 'cancel';
+  menu: { group: 'scope' | 'destination'; index: number } | null;
+  moveMenu: (direction: -1 | 1) => void;
+  replacing: boolean;
+  scopeError?: ScanError;
+  canReview: boolean;
   columns: number;
+  rows: number;
   ref?: string | null;
 }) {
   const source = (resource.catalog || '-').toUpperCase();
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
-  const contentWidth = Math.max(1, modalWidth - 8);
-  const scopeChoices = resource.kind === 'instruction' ? ['project'] : ['project', 'user'];
-  const toolChoices = ['copilot', 'claude', 'both'];
-  const alreadyInstalled = resources.some(
-    (entry) =>
-      entry.scope === scope &&
-      entry.catalog === resource.catalog &&
-      entry.kind === resource.kind &&
-      entry.id === resource.id,
+  const contentWidth = modalWidth - 4;
+  const compact = rows < 19;
+  const fixedScope = scopeChoices.length === 1;
+  const allInstalled = destinations.length > 0 && destinations.every(({ tracked }) => tracked);
+  const selectField = (label: string, value: string, group: 'scope' | 'destination', enabled = true) => {
+    const focused = focus === (group === 'scope' ? 'scope' : 'destinations');
+    return [
+      {
+        text: `${focused ? '› ' : ''}${label}`,
+        bold: true,
+        color: focused ? semantic.accents.primary : semantic.accents.label,
+      },
+      {
+        text: `${value}${enabled ? (menu?.group === group ? '▴' : '▾') : ''}`,
+        selectInput: { compact: rows < 40 },
+        focused,
+        mouseTarget: enabled ? { type: 'modal-select' as const, action: 'toggle' as const, group } : undefined,
+      },
+    ];
+  };
+  const selected = destinations.filter(({ selected }) => selected);
+  const names = selected
+    .slice(0, 2)
+    .map(({ label }) => label)
+    .join(', ');
+  const extra = selected.length > 2 ? ` +${selected.length - 2}` : '';
+  const summary =
+    names && names.length + extra.length <= contentWidth - 5 ? `${names}${extra}` : `${selected.length} selected`;
+  const button = (action: 'review' | 'cancel', label: string) => ({
+    label,
+    color: semantic.selected,
+    mouseTarget: { type: 'modal-install-action' as const, action },
+  });
+  const cancel = button('cancel', 'Cancel');
+  const reviewLabel = replacing ? 'Review replacement' : 'Review install';
+  const review = button('review', reviewLabel.length + 4 <= contentWidth ? reviewLabel : 'Review');
+  const buttons = canReview ? [review, cancel] : [cancel];
+  const buttonGroup = choiceGroup(
+    '',
+    buttons,
+    buttons.findIndex(({ mouseTarget }) => mouseTarget.action === focus),
   );
-  const scopeError = errors.find((error) => error.scope === scope);
-
-  return modalFrame(
+  const buttonRows =
+    buttonGroup.text.length <= contentWidth
+      ? [buttonGroup]
+      : buttons.map((option) => choiceGroup('', [option], option.mouseTarget.action === focus ? 0 : -1));
+  const frame = modalFrame(
     'INSTALL OPTIONS',
     [
-      `${source} / ${resource.kind}:${resource.id}`,
-      ...wrapText(resource.description || 'No description available.', contentWidth, 3),
-      { text: `License: ${resource.license_status || 'not declared'}`, dimColor: true },
+      { text: fitText(`${source} / ${resource.kind}:${resource.id}`, contentWidth) },
+      ...(!compact
+        ? [
+            ...wrapText(resource.description || 'No description available.', contentWidth, 2),
+            { text: `License: ${resource.license_status || 'not declared'}`, dimColor: true },
+          ]
+        : []),
       ...(scopeError
         ? [
             {
               text: `${scope.toUpperCase()} unavailable: ${scopeError.code}`,
               color: semantic.accents.error,
             },
+            { text: scopeError.message, color: semantic.accents.error },
           ]
-        : alreadyInstalled
-          ? [
-              {
-                text: ref
-                  ? `Selected revision will replace the installed resource in ${scope} scope.`
-                  : `Already installed in ${scope} scope.`,
-                color: semantic.inventoryStatus.attention,
-              },
-            ]
-          : []),
-      ...(resource.kind === 'instruction' ? [{ text: 'Instructions are project-scoped.', dimColor: true }] : []),
-      '',
-      { text: 'DESTINATION', bold: true },
-      choiceGroup('SCOPE', scopeChoices, scopeChoices.indexOf(scope), focus === 0),
-      choiceGroup('CLIENT', toolChoices, toolChoices.indexOf(tool), focus === 1),
+        : []),
+      ...selectField('Scope', scopeLabel(scope), 'scope', !fixedScope),
+      ...(fixedScope ? [{ text: 'Instructions are project-scoped.', dimColor: true }] : []),
+      ...(replacing
+        ? [
+            {
+              text: `Selected revision will replace the installed resource in ${scope} scope.`,
+              color: semantic.inventoryStatus.attention,
+            },
+          ]
+        : [
+            ...selectField('Destinations', summary, 'destination'),
+            ...(!canReview && !scopeError
+              ? [
+                  {
+                    text: allInstalled ? 'All destinations already installed.' : 'Select at least one new destination.',
+                    color: semantic.inventoryStatus.attention,
+                  },
+                ]
+              : []),
+          ]),
       ...(ref
         ? [
             {
@@ -79,18 +137,44 @@ export function optionsModal({
           ]
         : []),
       {
-        text: 'Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.',
+        text: compact
+          ? 'Pinned source audit required.'
+          : 'Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.',
         color: semantic.accents.warning,
       },
-      scopeError || (alreadyInstalled && !ref)
-        ? '↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ESC BACK'
-        : alreadyInstalled
-          ? '↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REPLACE · ESC BACK'
-          : '↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REVIEW · ESC BACK',
+      ...buttonRows,
+      ...(!compact
+        ? [
+            {
+              text: !menu
+                ? 'TAB MOVE · ENTER / SPACE ACTIVATE · ESC BACK'
+                : menu.group === 'scope'
+                  ? '↑↓ MOVE · ENTER SELECT · TAB / ESC CLOSE'
+                  : '↑↓ MOVE · SPACE TOGGLE · TAB / ESC CLOSE',
+              dimColor: true,
+            },
+          ]
+        : []),
     ],
     columns,
     semantic.selected,
   );
+  if (!menu) return frame;
+  return {
+    ...frame,
+    selectMenu: {
+      ...menu,
+      move: moveMenu,
+      items:
+        menu.group === 'scope'
+          ? scopeChoices.map((choice) => ({ title: `${choice === scope ? '✓ ' : ''}${scopeLabel(choice)}` }))
+          : destinations.map(({ label, directory, selected, tracked }) => ({
+              title: tracked ? `${label} [Installed]` : `${selected ? '✓' : '□'} ${label}`,
+              detail: `${scope === 'user' ? '~/' : ''}${directory}/`,
+              color: tracked ? semantic.inventoryStatus.attention : undefined,
+            })),
+    },
+  };
 }
 
 export function confirmationModal({
@@ -163,6 +247,16 @@ export function confirmationModal({
     confirmation.resource.kind === 'skill' && confirmation.resource.source_repository
       ? 'The first gh skill install runs without --force. If GH says overwrite requires --force, Kitia asks before retrying; local safety checks apply.'
       : 'This resource update does not use gh --force. Kitia checks local conflicts and asks separately before Kitia force can overwrite them.';
+  const paths =
+    confirmation.action === 'install'
+      ? resolveInstallationDestinations(
+          confirmation.resource.kind,
+          confirmation.scope ?? 'project',
+          confirmation.destinations,
+        ).map((layout) => installationPath(layout, confirmation.resource.id))
+      : confirmation.action === 'update' || confirmation.action === 'uninstall'
+        ? confirmation.resource.paths
+        : undefined;
   return modalFrame(
     confirmation.ghForceRetry
       ? 'GH REQUESTS OVERWRITE'
@@ -173,6 +267,14 @@ export function confirmationModal({
           : `CONFIRM ${actionLabel.toUpperCase()}`,
     [
       question,
+      ...(!confirmation.forceRetry && paths?.length
+        ? [
+            confirmation.action === 'install'
+              ? `Selected paths (${confirmation.scope ?? 'project'}):`
+              : 'Tracked paths:',
+            ...paths.map((path) => `• ${path}`),
+          ]
+        : []),
       ...(confirmation.forceRetry
         ? [
             conflict?.message || conflictCategory,
@@ -184,7 +286,6 @@ export function confirmationModal({
           ]
         : confirmation.action === 'install'
           ? [
-              `Destination: ${confirmation.scope} · Client: ${confirmation.tool}`,
               ...(confirmation.ref ? [`Selected revision: ${confirmation.ref} (catalog pin unchanged).`] : []),
               'Normal CLI safeguards apply; --force is not used.',
             ]
@@ -223,19 +324,77 @@ export function confirmationModal({
     semantic.accents.warning,
   );
 }
-export function actionFailureModal({ action, message, columns }: { action: string; message: string; columns: number }) {
+export function actionFailureModal({
+  action,
+  message,
+  auditLines,
+  page,
+  columns,
+  rows,
+}: {
+  action: string;
+  message: string;
+  auditLines?: readonly string[];
+  page: number;
+  columns: number;
+  rows: number;
+}) {
+  const maxWidth = 88;
+  const title = `${action.toUpperCase()} FAILED`;
   const outputLines = message.split(/\r?\n/).filter(Boolean);
-  return modalFrame(
-    `${action.toUpperCase()} FAILED`,
-    [
-      { text: 'Kitia could not complete this action.', color: semantic.accents.error, bold: true },
-      ...(outputLines.length ? outputLines : ['No error details were provided.']),
-      'ENTER / ESC CLOSE',
-    ],
-    columns,
-    semantic.accents.error,
-    88,
-  );
+  const summary = [
+    { text: 'Kitia could not complete this action.', color: semantic.accents.error, bold: true },
+    ...(outputLines.length ? outputLines : ['No error details were provided.']).map((text) => ({ text })),
+  ];
+  const closeHint = 'ENTER / ESC CLOSE';
+  if (!auditLines?.length) {
+    return {
+      frame: modalFrame(title, [...summary, closeHint], columns, semantic.accents.error, maxWidth),
+      page: 0,
+      pageCount: 1,
+    };
+  }
+
+  const width = Math.max(20, Math.min(maxWidth, columns - 4));
+  const lineWidth = width - 4;
+  const body = [
+    ...summary,
+    { text: 'AUDIT REPORT', color: semantic.accents.label, bold: true },
+    ...auditLines.map((text) => ({ text })),
+  ].flatMap((entry) => wrapText(entry.text, lineWidth).map((text) => ({ ...entry, text, preserveSpacing: true })));
+  const shortcutsHeight = wrappedShortcutLines(categorizeShortcutHint(closeHint), width).length + 5;
+  if (body.length + 2 + shortcutsHeight <= rows) {
+    return {
+      frame: modalFrame(title, [...body, closeHint], columns, semantic.accents.error, maxWidth),
+      page: 0,
+      pageCount: 1,
+    };
+  }
+
+  // Keep the frame and pagination controls visible even when the report is taller than the terminal.
+  const pageSize = Math.max(1, rows - 4);
+  const pageCount = Math.ceil(body.length / pageSize);
+  const currentPage = Math.min(page, pageCount - 1);
+  const start = currentPage * pageSize;
+  return {
+    frame: modalFrame(
+      title,
+      [
+        ...body.slice(start, start + pageSize),
+        ...(pageCount > 1
+          ? [
+              { text: `Page ${currentPage + 1}/${pageCount}`, dimColor: true },
+              { text: 'PgUp/PgDn · Esc', dimColor: true },
+            ]
+          : [{ text: closeHint, dimColor: true }]),
+      ],
+      columns,
+      semantic.accents.error,
+      maxWidth,
+    ),
+    page: currentPage,
+    pageCount,
+  };
 }
 
 export function sourceVersionsModal({

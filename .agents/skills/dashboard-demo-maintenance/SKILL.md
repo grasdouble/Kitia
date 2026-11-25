@@ -34,9 +34,9 @@ Inspect the relevant current files before editing; follow their imports if the s
 
 Check every applicable combination, not only a skill in project scope:
 
-- Skills and agents: project and user scope; Copilot, Claude, and both clients.
-- Instructions: project scope only; unsupported user scope must fail explicitly.
-- Install/update/uninstall: independent scope ownership, destination conflicts, selected revisions, and registered client paths. Updating preserves clients; force must not silently overwrite another resource owner.
+- Skills: project and user scope; Standard, Copilot, Claude, and Mistral Vibe destinations, including multiple selections.
+- Agents: project and user scope; Copilot and Claude destinations. Instructions: the same native destinations at project scope only; unsupported user scope must fail explicitly.
+- Install/update/uninstall: independent scope ownership, destination conflicts, selected revisions, and tracked paths. Adding a destination does not replace existing copies; updating preserves destinations; force must not silently overwrite another resource owner.
 - Preview: show the bundled source corresponding to the selected catalog or installed revision, with truthful source tree and audit text. Unmanaged resources keep their own preview/removal behavior and confirmations.
 - Catalog refresh: change catalog metadata without rewriting installed content. Rename/removal retain installed ownership and content according to the CLI contract; retained resources remain previewable/removable.
 - Catalog import/export: parse and produce real configuration data. Export succeeds only if the actual clipboard operation succeeds; explain unavailable browser capabilities instead of fabricating success.

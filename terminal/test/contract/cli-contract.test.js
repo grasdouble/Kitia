@@ -127,6 +127,138 @@ test('packaged CLI reports missing-resource errors with the promised exit code',
   assert.equal(result.json.errors[0]?.code, baseline.missing_resource.error_code);
 });
 
+const installationResources = [
+  fixtureResource,
+  { ...fixtureResource, kind: 'agent', id: 'demo-agent', source_path: 'agents/demo-agent.agent.md' },
+  { ...fixtureResource, kind: 'instruction', id: 'demo-rule', source_path: 'instructions/demo-rule.instructions.md' },
+];
+
+test('packaged CLI dry runs select the registered default for each resource kind', () => {
+  writeCatalog('Fixture', 'example/catalog', installationResources);
+  const project = path.join(temporary, 'default-destinations');
+  fs.mkdirSync(project);
+  const defaults = [
+    ['demo', 'delegate_install', '.agents/skills/demo/SKILL.md'],
+    ['demo-agent', 'install', '.github/agents/demo-agent.agent.md'],
+    ['demo-rule', 'install', '.github/instructions/demo-rule.instructions.md'],
+  ];
+  for (const [id, action, entrypoint] of defaults) {
+    const result = invoke(['install', id, '--dry-run', '--json'], {
+      cwd: project,
+      preload: true,
+      env: { KITIA_TEST_GH_SCRIPT: '' },
+    });
+    assert.equal(result.status, 0, result.stdout || result.stderr);
+    assertSchema(validateReport, result.json);
+    assert.deepEqual(
+      result.json.actions.map((entry) => [entry.action, entry.path]),
+      [[action, entrypoint]],
+    );
+    if (id === 'demo') {
+      const { program, args } = result.json.actions[0].command;
+      assert.equal(program, 'gh');
+      assert.equal(args[args.indexOf('--dir') + 1], path.join(fs.realpathSync(project), '.agents', 'skills'));
+    }
+  }
+  assert.deepEqual(fs.readdirSync(project), []);
+});
+
+test('packaged CLI dry runs plan distinct skill destinations in both scopes', () => {
+  writeCatalog('Fixture', 'example/catalog', [fixtureResource]);
+  const project = path.join(temporary, 'explicit-destinations');
+  const home = path.join(temporary, 'destination-home');
+  fs.mkdirSync(project);
+  fs.mkdirSync(home);
+  for (const [scope, target, copilot] of [
+    ['project', project, '.github/skills'],
+    ['user', home, '.copilot/skills'],
+  ]) {
+    const result = invoke(
+      [
+        'install',
+        'skill',
+        'demo',
+        ...(scope === 'user' ? ['--scope', 'user'] : ['--target', project]),
+        '--destination',
+        'standard',
+        '--destination',
+        'copilot',
+        '--destination',
+        'claude',
+        '--destination',
+        'mistral',
+        '--destination',
+        'copilot',
+        '--dry-run',
+        '--json',
+      ],
+      { preload: true, env: { HOME: home, USERPROFILE: home, KITIA_TEST_GH_SCRIPT: '' } },
+    );
+    assert.equal(result.status, 0, result.stdout || result.stderr);
+    assertSchema(validateReport, result.json);
+    const directories = ['.agents/skills', copilot, '.claude/skills', '.vibe/skills'];
+    assert.deepEqual(
+      result.json.actions.map((action) => action.path),
+      directories.map((dir) => `${dir}/demo/SKILL.md`),
+    );
+    const targetRoot = fs.realpathSync(target);
+    for (const [index, { action, command }] of result.json.actions.entries()) {
+      assert.equal(action, 'delegate_install');
+      assert.equal(command.program, 'gh');
+      assert.ok(!command.args.includes('--agent'));
+      assert.equal(command.args[command.args.indexOf('--scope') + 1], scope);
+      assert.equal(command.args[command.args.indexOf('--dir') + 1], path.join(targetRoot, directories[index]));
+    }
+    assert.deepEqual(fs.readdirSync(target), []);
+  }
+});
+
+test('packaged CLI rejects destinations unsupported for the requested kind, scope or command', () => {
+  writeCatalog('Fixture', 'example/catalog', installationResources);
+  const cases = [
+    [
+      ['install', 'agent', 'demo-agent', '--destination', 'standard', '--dry-run'],
+      /Destination 'standard' does not support agents in project scope/,
+    ],
+    [
+      ['install', 'agent', 'demo-agent', '--destination', 'mistral', '--dry-run'],
+      /Destination 'mistral' does not support agents in project scope/,
+    ],
+    [
+      ['install', 'instruction', 'demo-rule', '--destination', 'mistral', '--dry-run'],
+      /Destination 'mistral' does not support instructions in project scope/,
+    ],
+    [
+      ['install', 'instruction', 'demo-rule', '--scope', 'user', '--destination', 'claude', '--dry-run'],
+      /--scope user only supports skills and agents/,
+    ],
+    [['update', '--destination', 'standard', '--dry-run'], /--destination is only supported for install/],
+    [['list', '--destination', 'standard'], /--destination is only supported for install/],
+    [
+      ['install', 'demo', '--scope', 'user', '--target', temporary, '--destination', 'standard', '--dry-run'],
+      /--scope user cannot be combined with --target/,
+    ],
+  ];
+  for (const [args, message] of cases) {
+    const result = invoke([...args, '--json']);
+    assert.equal(result.status, 1, result.stderr);
+    assertSchema(validateReport, result.json);
+    assert.equal(result.json.errors[0].code, 'INVALID_ARGUMENT');
+    assert.match(result.json.errors[0].message, message);
+  }
+});
+
+test('packaged CLI explains how to replace the removed --tool flag', () => {
+  const result = invoke(['install', 'skill', 'demo', '--tool', 'copilot', '--dry-run', '--json']);
+  assert.equal(result.status, 1, result.stderr);
+  assertSchema(validateReport, result.json);
+  const [error] = result.json.errors;
+  assert.equal(error.code, 'INVALID_ARGUMENT');
+  assert.match(error.message, /--tool copilot used the shared \.agents\/skills directory: use --destination standard/);
+  assert.match(error.message, /--tool both with --destination standard --destination claude for skills/);
+  assert.match(error.message, /--destination copilot --destination claude for agents and instructions/);
+});
+
 test('packaged CLI check resolves a committed historical inventory fixture', () => {
   writeCatalog('team-alpha', 'example/skills', [
     {
@@ -193,6 +325,8 @@ test('top-level help and doctor network probes use the executable argument contr
   const help = invoke(['--help'], { parseJson: false });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Usage:/);
+  assert.match(help.stdout, /--destination <[^>]+\bmistral\b>.*repeat/);
+  assert.doesNotMatch(help.stdout, /--tool\b/);
 
   writeCatalog('Fixture', 'example/catalog', [fixtureResource]);
   const ghScript = path.join(temporary, 'gh-fixture.cjs');

@@ -56,10 +56,34 @@ This command updates Kitia itself, not installed skills, agents, or instructions
 
 
 
-Installation defaults to Copilot and the target defaults to the current
-directory. Updates preserve registered runtimes; they do not silently remove
-resources absent from the current catalog. `--force` remains explicit and does
-not bypass path safety, operation locks or unsupported inventory formats.
+The installation target defaults to the current directory; `--target <dir>`
+overrides that base directory at project scope. A **destination** determines
+where Kitia writes an artifact, not which clients can discover it. Skills
+default to `standard`; agents and instructions default to `copilot`.
+
+| Destination | Skills: project / user | Agents: project / user | Instructions: project only |
+|---|---|---|---|
+| `standard` | `.agents/skills/` / `~/.agents/skills/` | — | — |
+| `copilot` | `.github/skills/` / `~/.copilot/skills/` | `.github/agents/<id>.agent.md` / `~/.copilot/agents/<id>.agent.md` | `.github/instructions/<id>.instructions.md` |
+| `claude` | `.claude/skills/` / `~/.claude/skills/` | `.claude/agents/<id>.md` / `~/.claude/agents/<id>.md` | `.claude/rules/<id>.md` |
+| `mistral` | `.vibe/skills/` / `~/.vibe/skills/` | — | — |
+
+Repeat `--destination` on `install` to request multiple copies, for example
+`--destination standard --destination claude`. Each shared skill copy serves
+clients that discover `.agents/skills/`, including Mistral Vibe. Choose
+`--destination mistral` only when you want a dedicated Vibe copy. Kitia uses
+the default Vibe directories shown above, independent of `VIBE_HOME`.
+`--tool` and `both` are no longer accepted. For old skill
+commands, replace `--tool copilot` with `--destination standard` and
+`--tool both` with `--destination standard --destination claude`. For agents
+and instructions, use `--destination copilot` or
+`--destination copilot --destination claude`, respectively. Replace
+`--tool claude` with `--destination claude` for any resource kind.
+
+`update` and `uninstall` act on all tracked destinations in the selected
+scope. Updating does not add destinations or silently remove resources absent
+from the catalog. `--force` remains explicit and does not bypass path safety,
+operation locks, or unsupported inventory formats.
 JSON maintenance previews imply non-interactive behavior.
 
 Explicit `uninstall --catalog` resolves its selector against the selected
@@ -94,11 +118,13 @@ network access. If either lookup fails or is invalid, `check` reports an error
 resource as current.
 An audited `install --ref` replacement of a tracked resource audits the selected
 revision before any destination or inventory write. If the audit blocks, every
-tracked runtime in the chosen scope remains unchanged.
+tracked destination in the chosen scope remains unchanged.
 An ordinary agent or instruction install cannot advance a shared resource pin
-while omitting a runtime already tracked for that resource, even with `--force`.
-Use `--tool both` to install both runtimes or use `update` to preserve tracked
-runtime coverage.
+while omitting a tracked destination, even with `--force`. Select all tracked
+destinations or use `update`. When using `install --ref` to replace an already
+installed resource, omit `--destination` to replace all its tracked copies, or
+specify exactly those destinations. To add another destination, use `install`
+without `--ref`.
 Instruction scope is parsed from the pinned Markdown (`apply_to`, `applyTo`, or
 `paths`); without frontmatter, the global default is `["**"]`. Destination
 paths remain ID-scoped; runtime metadata and inventory describe the selected
@@ -122,11 +148,11 @@ coverage limits.
 generic commands with `--catalog <source-name>`.
 Omitting scope preserves project defaults. User scope supports skills and
 agents, resolves the target with Node.js `os.homedir()`, and rejects `--target`.
-Source delegation specifies `--dir` explicitly so upstream defaults cannot
-change the managed location. User agents use `.copilot/agents/<id>.agent.md`
-for Copilot CLI and `.claude/agents/<id>.md` for Claude Code. Instructions are
-project-only. Inventories and operation locks are target-local, so the two
-scopes are managed independently. Inventory format upgrades are explicit; see
+Skill delegation specifies `--dir` explicitly at both scopes so upstream
+defaults cannot change managed locations. Existing `.agents/skills/` installs
+are recognized as Standard without moving files or rewriting their inventory.
+Inventories and operation locks are target-local, so the two scopes are
+managed independently. Inventory format upgrades are explicit; see
 the [inventory migration guide](inventory-migrations.md).
 Read-only commands and previews do not create home configuration directories.
 Kitia uses `~/.config/kitia` unless `KITIA_CONFIG_DIR` names another directory.
@@ -141,6 +167,11 @@ Dashboard actions require confirmation and use normal lifecycle checks,
 operation locks, and conflict protections; they never imply `--force`.
 Long-running dashboard operations show a centered blocking popup with an
 animated spinner and progress label. Input is ignored until the operation ends.
+Section tabs stay visible behind dialogs and progress popups when the terminal
+has room for both. They cannot be activated while a dialog blocks navigation.
+Resource actions keep the dashboard section from which they were started.
+For example, after installing or updating from **Browse resources**, the
+dashboard refreshes the installed state in Browse without opening **Inventory**.
 Operations that can block run in a worker thread so rendering and animation
 continue during the work.
 When Inventory or Browse selection details are clipped, PageUp/PageDown moves the
@@ -271,8 +302,24 @@ Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
-New installations can choose project/user scope and Copilot/Claude/both
-clients; instructions remain project-scoped. In the catalog browser, `F` enters
+
+In the dashboard, new skill and agent installs default to **User**. Open
+**Scope** to see **User** first and choose **Project** if needed. If the
+selected scope cannot be scanned, Install Options shows the inventory error
+and blocks review for that scope. Instructions have a read-only Project scope.
+The CLI still defaults to project scope.
+
+In Install Options, **Destinations** looks like an Inventory filter but
+accepts multiple values. Open it with a click, `Enter`, or `Space`. Use the
+arrows to move through the menu and `Space` to toggle an
+available destination; already installed copies are marked and cannot be
+selected. `Esc` or an outside click closes the menu without clearing choices.
+`Tab` closes it and moves to the next control. Project and user selections
+are independent. Click **Review install** to open confirmation with the full
+paths, or **Cancel** to return to the catalog without installing. Both buttons
+also work with `Tab` and `Enter` or `Space`; `Esc` cancels when no menu is open.
+Update and uninstall confirmations show the tracked destination paths.
+Instructions remain project-scoped. In the catalog browser, `F` enters
 search mode; while searching, all typed characters—including `T`, `S`, and `L`—
 are query text, and `Enter` applies the query. Outside search mode, `F` starts
 search, `C`/`K` cycle catalog/kind, and `L` cycles license within the active
@@ -304,6 +351,12 @@ not change CLI command syntax, options, output contracts, or audit semantics.
 Selected-resource details expose license status and, when source provenance is
 available, the pinned repository/path/commit. Missing license metadata is shown
 as undeclared; incomplete pin metadata may show as unknown.
+
+In Inventory, `INSTALLED FOR` lists the destinations matching the selected
+artifact's recorded or detected paths, including unmanaged copies in recognized
+locations. The field is omitted if none of its paths match an installation
+destination. The paths themselves remain visible in `INSTALLED PATH`.
+
 Inventory selection details show a `CATALOG` label for tracked artifacts with
 source-repository metadata. Custom user catalogs include the folder selected by
 the saved path mapping, such as `MattPucock[engineering]`. Browse keeps catalog
@@ -383,12 +436,11 @@ local definition and index. Installed artifacts from that source stay in place.
   path. Skills use the directory containing `SKILL.md`; agents and instructions
   use a Markdown file. IDs come from the basename.
 
-The dashboard inventory also scans known project and user install locations:
-`.agents/skills`, `.claude/skills`, `.agents/agents`, `.claude/agents`,
-`.github/agents`, `.copilot/agents`, `.agents/instructions`, `.claude/rules`,
-and `.github/instructions`. Files without a Kitia installation record appear
-with catalog `-` and status `unmanaged`; Kitia does not update or uninstall
-them. Their detected paths appear in the description.
+The dashboard inventory scans the project and user installation locations
+listed above, plus `.agents/agents/` and `.agents/instructions/` for unmanaged
+discovery only. Files without a Kitia installation record appear with catalog
+`-` and status `unmanaged`; Kitia does not update or uninstall them as managed
+resources. Their detected paths appear in the description.
 
 `kitia catalog add <name> <https-github-url>` performs Basic setup without the
 dashboard. Both paths clone the repository temporarily, pin the index to its
