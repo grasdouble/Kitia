@@ -191,7 +191,7 @@ test('custom catalog mappings index explicit paths and default unscoped instruct
   const fileActions = [];
   const agentResource = catalog.resources.find(({ kind }) => kind === 'agent');
   assert.deepEqual(
-    installSourceFileResource({ ...agentResource, catalog: 'custom' }, target, 'both', {
+    installSourceFileResource({ ...agentResource, catalog: 'custom' }, target, ['claude', 'copilot'], {
       dryRun: true,
       onAction: (action) => fileActions.push(action),
     }),
@@ -205,7 +205,7 @@ test('custom catalog mappings index explicit paths and default unscoped instruct
         catalog: 'custom',
       },
       target,
-      'both',
+      ['claude', 'copilot'],
       {
         dryRun: true,
         onAction: (action) => fileActions.push(action),

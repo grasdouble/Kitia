@@ -179,16 +179,15 @@ export function Dashboard({
         ? 'browse'
         : 'inventory';
   const selectedCandidate = visibleCatalog[activeCatalogIndex];
-  const candidateInstalledScopes = selectedCandidate
-    ? installedResources
-        .filter(
-          (resource) =>
-            resource.managed !== false &&
-            resource.catalog === selectedCandidate.catalog &&
-            resource.kind === selectedCandidate.kind &&
-            resource.id === selectedCandidate.id,
-        )
-        .map((resource) => resource.scope)
+  const candidateInstallations = selectedCandidate
+    ? installedResources.filter(
+        (resource) =>
+          resource.managed !== false &&
+          resource.scope &&
+          resource.catalog === selectedCandidate.catalog &&
+          resource.kind === selectedCandidate.kind &&
+          resource.id === selectedCandidate.id,
+      )
     : [];
   const inventoryControlsFilters: DashboardControlFilter[] = [
     {
@@ -282,7 +281,7 @@ export function Dashboard({
             actions.execute
               ? [{ id: 'revision', label: 'Revisions' }]
               : []),
-            ...(candidateInstalledScopes.length && actions.listSourceVersions && actions.execute
+            ...(candidateInstallations.length && actions.listSourceVersions && actions.execute
               ? [{ id: 'update', label: 'Update resource' }]
               : []),
           ]
@@ -395,6 +394,11 @@ export function Dashboard({
     setFilterMenu(null);
     setControlFocus(filter);
   };
+  const openCandidateVersions = () => {
+    if (!selectedCandidate?.source_repository || !selectedCandidate.source_path) return;
+    const installed = candidateInstallations.length === 1 ? candidateInstallations[0] : undefined;
+    void openSourceVersions(installed ?? selectedCandidate, installed ? 'update' : 'install');
+  };
   const activateControlAction = (action: string) => {
     if (controlSection === 'inventory') {
       if (action === 'preview' && selectedResource)
@@ -418,13 +422,7 @@ export function Dashboard({
     if (controlSection === 'browse' && selectedCandidate) {
       if (action === 'install') openInstallOptions(selectedCandidate);
       else if (action === 'preview') void runConfirmedAction({ action: 'preview', resource: selectedCandidate });
-      else if (action === 'revision' || action === 'update') {
-        const replacementScope = candidateInstalledScopes.length === 1 ? candidateInstalledScopes[0] : null;
-        void openSourceVersions(
-          replacementScope ? { ...selectedCandidate, scope: replacementScope } : selectedCandidate,
-          replacementScope ? 'update' : 'install',
-        );
-      }
+      else if (action === 'revision' || action === 'update') openCandidateVersions();
       return;
     }
     if (controlSection !== 'catalogs') return;
@@ -444,8 +442,11 @@ export function Dashboard({
       else if (confirmation) chooseConfirmation(target.index);
       return;
     }
-    if (target.type === 'modal-option') {
-      if (screenMode === 'install-options') operations.chooseOption(target.group, target.index);
+    if (target.type === 'modal-option' || target.type === 'modal-review') {
+      if (screenMode === 'install-options' && !confirmation && !actionPending) {
+        if (target.type === 'modal-review') operations.reviewOptions();
+        else operations.chooseOption(target.group, target.index);
+      }
       return;
     }
     if (
@@ -571,6 +572,11 @@ export function Dashboard({
       operations.handleConfirmationInput(input, key);
       return;
     }
+    if (screenMode === 'install-options') {
+      if ((key.ctrl && character === 'c') || character === 'q') onFinish(!lastActionFailed);
+      else operations.handleOptionsInput(input, key);
+      return;
+    }
     if (actionPending) return;
     if (filterMenu) {
       const options = controlsBase.filters?.find(({ id }) => id === filterMenu)?.options || [];
@@ -583,7 +589,7 @@ export function Dashboard({
       }
       return;
     }
-    if ((key.tab || input === '\t') && screenMode !== 'install-options') {
+    if (key.tab || input === '\t') {
       moveControlFocus(key.shift);
       return;
     }
@@ -618,7 +624,7 @@ export function Dashboard({
       return;
     }
 
-    if (!activeFilter && screenMode !== 'install-options') {
+    if (!activeFilter) {
       if (character === 'i' && screenMode !== 'inventory') {
         navigateToSection('inventory');
         return;
@@ -674,23 +680,7 @@ export function Dashboard({
         );
         setCatalogIndex(0);
       } else if (character === 'v') {
-        const resource = visibleCatalog[activeCatalogIndex];
-        if (resource?.source_repository && resource.source_path) {
-          const installedScopes = ['project', 'user'].filter((scope) =>
-            installedResources.some(
-              (installed) =>
-                installed.scope === scope &&
-                installed.catalog === resource.catalog &&
-                installed.kind === resource.kind &&
-                installed.id === resource.id,
-            ),
-          );
-          const replacementScope = installedScopes.length === 1 ? installedScopes[0] : null;
-          openSourceVersions(
-            replacementScope ? { ...resource, scope: replacementScope } : resource,
-            replacementScope ? 'update' : 'install',
-          );
-        }
+        openCandidateVersions();
       } else if (character === 'p') {
         const resource = visibleCatalog[activeCatalogIndex];
         if (resource) void runConfirmedAction({ action: 'preview', resource });
@@ -703,10 +693,6 @@ export function Dashboard({
       return;
     }
 
-    if (screenMode === 'install-options') {
-      operations.handleOptionsInput(input, key);
-      return;
-    }
     if (screenMode === 'catalog-management') {
       if (character === 'd') setShowDetails((value) => !value);
       else if (key.upArrow || key.downArrow) {

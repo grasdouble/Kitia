@@ -1,3 +1,5 @@
+import { installationPath, resolveInstallationDestinations } from '../../../core/installations/destinations.js';
+import type { InstallationScope } from '../../../core/installations/model.js';
 import type { ScanError } from '../../../core/inventory/checks.js';
 import type { CatalogResource } from '../../../core/resources/model.js';
 import { adaptiveColumnWidths } from '../../../table-layout.js';
@@ -12,41 +14,52 @@ const { semantic } = DASHBOARD_THEME;
 export function optionsModal({
   resource,
   scope,
-  tool,
+  scopeChoices,
+  destinations,
   focus,
-  resources,
-  errors,
+  replacing,
+  scopeError,
+  canReview,
   columns,
   ref,
 }: {
   resource: CatalogResource;
-  scope: string;
-  tool: string;
+  scope: InstallationScope;
+  scopeChoices: InstallationScope[];
+  destinations: { label: string; path: string; tracked: boolean; selected: boolean }[];
   focus: number;
-  resources: CatalogResource[];
-  errors: ScanError[];
+  replacing: boolean;
+  scopeError?: ScanError;
+  canReview: boolean;
   columns: number;
   ref?: string | null;
 }) {
   const source = (resource.catalog || '-').toUpperCase();
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
   const contentWidth = Math.max(1, modalWidth - 8);
-  const scopeChoices = resource.kind === 'instruction' ? ['project'] : ['project', 'user'];
-  const toolChoices = ['copilot', 'claude', 'both'];
-  const alreadyInstalled = resources.some(
-    (entry) =>
-      entry.scope === scope &&
-      entry.catalog === resource.catalog &&
-      entry.kind === resource.kind &&
-      entry.id === resource.id,
-  );
-  const scopeError = errors.find((error) => error.scope === scope);
+  const scopeIndex = scopeChoices.indexOf(scope);
+  const allInstalled = destinations.length > 0 && destinations.every(({ tracked }) => tracked);
+  const scopeControl =
+    scopeChoices.length === 1
+      ? [{ text: 'SCOPE: PROJECT (instructions are project-scoped)', dimColor: true }]
+      : modalWidth >= 34
+        ? [choiceGroup('SCOPE', scopeChoices, scopeIndex, focus < 0)]
+        : scopeChoices.map((choice, index) => ({
+            text: `${focus < 0 && index === scopeIndex ? '› ' : '  '}[${index === scopeIndex ? 'x' : ' '}] ${choice}`,
+            mouseTarget: { type: 'modal-option' as const, group: 'scope' as const, index },
+          }));
+  const shortcuts = [
+    ...(scopeChoices.length > 1 ? ['←→ SCOPE'] : []),
+    ...(!replacing && !allInstalled ? ['↑↓/TAB MOVE', 'SPACE TOGGLE'] : []),
+    ...(canReview ? [replacing ? 'ENTER REPLACE' : 'ENTER REVIEW'] : []),
+    'ESC BACK',
+  ].join(' · ');
 
   return modalFrame(
     'INSTALL OPTIONS',
     [
       `${source} / ${resource.kind}:${resource.id}`,
-      ...wrapText(resource.description || 'No description available.', contentWidth, 3),
+      ...wrapText(resource.description || 'No description available.', contentWidth, 2),
       { text: `License: ${resource.license_status || 'not declared'}`, dimColor: true },
       ...(scopeError
         ? [
@@ -55,21 +68,36 @@ export function optionsModal({
               color: semantic.accents.error,
             },
           ]
-        : alreadyInstalled
-          ? [
-              {
-                text: ref
-                  ? `Selected revision will replace the installed resource in ${scope} scope.`
-                  : `Already installed in ${scope} scope.`,
-                color: semantic.inventoryStatus.attention,
-              },
-            ]
-          : []),
-      ...(resource.kind === 'instruction' ? [{ text: 'Instructions are project-scoped.', dimColor: true }] : []),
-      '',
-      { text: 'DESTINATION', bold: true },
-      choiceGroup('SCOPE', scopeChoices, scopeChoices.indexOf(scope), focus === 0),
-      choiceGroup('CLIENT', toolChoices, toolChoices.indexOf(tool), focus === 1),
+        : []),
+      ...scopeControl,
+      ...(replacing
+        ? [
+            {
+              text: `Selected revision will replace the installed resource in ${scope} scope.`,
+              color: semantic.inventoryStatus.attention,
+            },
+          ]
+        : [
+            { text: 'DESTINATIONS', bold: true },
+            ...destinations.map(({ label, path, tracked, selected }, index) => ({
+              text: `${focus === index ? '› ' : '  '}[${tracked ? '−' : selected ? 'x' : ' '}] ${label}${tracked ? ' (installed)' : ''} · ${path}`,
+              color: focus === index ? semantic.selected : tracked ? semantic.inventoryStatus.attention : undefined,
+              bold: focus === index,
+              mouseTarget: tracked
+                ? undefined
+                : { type: 'modal-option' as const, group: 'destination' as const, index },
+            })),
+            ...(!canReview && !scopeError
+              ? [
+                  {
+                    text: allInstalled
+                      ? `All destinations are already installed in ${scope} scope.`
+                      : 'Select at least one new destination.',
+                    color: semantic.inventoryStatus.attention,
+                  },
+                ]
+              : []),
+          ]),
       ...(ref
         ? [
             {
@@ -82,11 +110,17 @@ export function optionsModal({
         text: 'Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.',
         color: semantic.accents.warning,
       },
-      scopeError || (alreadyInstalled && !ref)
-        ? '↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ESC BACK'
-        : alreadyInstalled
-          ? '↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REPLACE · ESC BACK'
-          : '↑↓ FIELD · ←→ CHOOSE · TAB FOCUS · ENTER REVIEW · ESC BACK',
+      ...(canReview
+        ? [
+            {
+              text: replacing ? '[ Review replacement ]' : '[ Review install ]',
+              bold: true,
+              color: semantic.accents.primary,
+              mouseTarget: { type: 'modal-review' as const },
+            },
+          ]
+        : []),
+      shortcuts,
     ],
     columns,
     semantic.selected,
@@ -163,6 +197,16 @@ export function confirmationModal({
     confirmation.resource.kind === 'skill' && confirmation.resource.source_repository
       ? 'The first gh skill install runs without --force. If GH says overwrite requires --force, Kitia asks before retrying; local safety checks apply.'
       : 'This resource update does not use gh --force. Kitia checks local conflicts and asks separately before Kitia force can overwrite them.';
+  const paths =
+    confirmation.action === 'install'
+      ? resolveInstallationDestinations(
+          confirmation.resource.kind,
+          confirmation.scope ?? 'project',
+          confirmation.destinations,
+        ).map((layout) => installationPath(layout, confirmation.resource.id))
+      : confirmation.action === 'update' || confirmation.action === 'uninstall'
+        ? confirmation.resource.paths
+        : undefined;
   return modalFrame(
     confirmation.ghForceRetry
       ? 'GH REQUESTS OVERWRITE'
@@ -173,6 +217,14 @@ export function confirmationModal({
           : `CONFIRM ${actionLabel.toUpperCase()}`,
     [
       question,
+      ...(!confirmation.forceRetry && paths?.length
+        ? [
+            confirmation.action === 'install'
+              ? `Selected paths (${confirmation.scope ?? 'project'}):`
+              : 'Tracked paths:',
+            ...paths.map((path) => `• ${path}`),
+          ]
+        : []),
       ...(confirmation.forceRetry
         ? [
             conflict?.message || conflictCategory,
@@ -184,7 +236,6 @@ export function confirmationModal({
           ]
         : confirmation.action === 'install'
           ? [
-              `Destination: ${confirmation.scope} · Client: ${confirmation.tool}`,
               ...(confirmation.ref ? [`Selected revision: ${confirmation.ref} (catalog pin unchanged).`] : []),
               'Normal CLI safeguards apply; --force is not used.',
             ]

@@ -25,6 +25,7 @@ type ModalContentLine = {
   bold?: boolean;
   dimColor?: boolean;
   preserveSpacing?: boolean;
+  mouseTarget?: DashboardMouseTarget;
 };
 type ModalContentEntry = string | ModalContentLine;
 type ModalRenderedLine = ModalContentLine & { bodyText?: string; component?: 'choice-group' | 'selectable-option' };
@@ -162,6 +163,7 @@ export function modalFrame(
       bold: row.bold,
       dimColor: row.dimColor,
       borderColor: accent,
+      mouseTarget: row.mouseTarget,
     }));
   });
   return {
@@ -384,14 +386,13 @@ export function ModalOverlay({
   const choiceRefs = React.useRef<Array<ChoiceGroupRefs | null>>([]);
   choiceRefs.current.length = modal.lines.length;
   for (const [lineIndex, line] of modal.lines.entries()) {
-    if (!modal.panelTitle && line.options?.length && typeof line.bodyText === 'string') {
+    if (!modal.panelTitle && (line.mouseTarget || (line.options?.length && typeof line.bodyText === 'string'))) {
       const current = choiceRefs.current[lineIndex];
       choiceRefs.current[lineIndex] = {
         row: current?.row || React.createRef<DOMElement>(),
-        options:
-          line.component === 'choice-group'
-            ? line.options.map((_, index) => current?.options[index] || React.createRef<DOMElement>())
-            : [],
+        options: isChoiceGroupLine(line)
+          ? line.options.map((_, index) => current?.options[index] || React.createRef<DOMElement>())
+          : [],
       };
     } else {
       choiceRefs.current[lineIndex] = null;
@@ -401,22 +402,30 @@ export function ModalOverlay({
     const regions: DashboardMouseRegion[] = [];
     if (!modal.panelTitle) {
       for (const [lineIndex, line] of modal.lines.entries()) {
-        if (!line.options?.length || typeof line.bodyText !== 'string') continue;
-        const group = String(line.label || '')
-          .trim()
-          .toLowerCase();
-        if (group && group !== 'scope' && group !== 'client') continue;
         const refs = choiceRefs.current[lineIndex];
         const row = refs?.row.current;
         if (!row) continue;
         const rowLayout = measureElement(row);
+        if (line.mouseTarget) {
+          regions.push({
+            left: rowLayout.x + 1,
+            right: Math.min(columns, rowLayout.x + rowLayout.clientWidth),
+            top: rowLayout.y + 1,
+            bottom: Math.min(rows, rowLayout.y + rowLayout.clientHeight),
+            target: line.mouseTarget,
+          });
+          continue;
+        }
+        if (!line.options?.length || typeof line.bodyText !== 'string') continue;
+        const group = String(line.label || '')
+          .trim()
+          .toLowerCase();
+        if (group && group !== 'scope') continue;
         const bodyOffset = typeof line.text === 'string' ? line.text.indexOf(line.bodyText) : -1;
         for (const [index, option] of line.options.entries()) {
           const label = option.label;
           const target: DashboardMouseTarget =
-            group === 'scope' || group === 'client'
-              ? { type: 'modal-option', group, index }
-              : { type: 'modal-choice', index };
+            group === 'scope' ? { type: 'modal-option', group, index } : { type: 'modal-choice', index };
           const node = refs?.options[index]?.current;
           if (node) {
             const optionLayout = measureElement(node);

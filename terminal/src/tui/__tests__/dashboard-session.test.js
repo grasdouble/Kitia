@@ -90,6 +90,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
     source_repository: 'org/repo',
     source_path: 'skills/revision-skill',
     source_ref: 'a'.repeat(40),
+    paths: ['.agents/skills/revision-skill/SKILL.md', '.github/skills/revision-skill/SKILL.md'],
   };
   let resolveHistory;
   const historyRequest = new Promise((resolve) => {
@@ -117,7 +118,13 @@ test('dashboard replaces an installed skill with the selected full revision thro
     ],
     listSourceVersions: () => historyRequest,
     execute: async (action, resource, options) => {
-      actions.push({ action, resource: resource.id, scope: resource.scope, ref: options.ref });
+      actions.push({
+        action,
+        resource: resource.id,
+        scope: resource.scope,
+        ref: options.ref,
+        destinations: options.destinations,
+      });
       markUpdateStarted();
       await updateRequest;
       return {
@@ -173,6 +180,8 @@ test('dashboard replaces an installed skill with the selected full revision thro
   assert.match(confirmationFrame, /Replace the installed skill:revision-skill/);
   assert.match(confirmationFrame, /revision in project scope\?/);
   assert.match(confirmationFrame, /Selected revision: b{40}/);
+  assert.match(confirmationFrame, /Tracked paths:/);
+  for (const path of installed.paths) assert.ok(confirmationFrame.includes(path));
   input.write('y');
   await waitForFrame((frame) => frame.includes('Updating skill:revision-skill'), 'update loading popup');
   await updateStarted;
@@ -182,6 +191,7 @@ test('dashboard replaces an installed skill with the selected full revision thro
       resource: 'revision-skill',
       scope: 'project',
       ref: selectedSha,
+      destinations: undefined,
     },
   ]);
   input.write('q');
@@ -295,6 +305,7 @@ test('dashboard revision picker applies a selected full SHA to a confirmed instr
     source_repository: 'org/repo',
     source_path: '.github/instructions/review.instructions.md',
     source_ref: 'a'.repeat(40),
+    paths: ['.github/instructions/review.instructions.md', '.claude/rules/review.md'],
   };
   const actions = [];
   const done = runDashboard([installedInstruction], input, output, [], {
@@ -356,12 +367,13 @@ test('dashboard revision picker applies a selected full SHA to a confirmed instr
       (frame) => frame.includes('RESOURCE REVISIONS') && frame.includes('› ccccccc'),
       'selected revision',
     );
-    await press(
+    const confirmation = await press(
       '\r',
       (frame) =>
         frame.includes('CONFIRM UPDATE') && frame.includes(selectedSha) && !frame.includes('RESOURCE REVISIONS'),
       'update confirmation with selected SHA',
     );
+    for (const path of installedInstruction.paths) assert.ok(confirmation.includes(path));
     let updated = await press(
       'y',
       (frame) =>

@@ -66,9 +66,9 @@ function checkInstalledResources(
   };
 
   const currentSourceRevisions = revisionCache || new Map<string, string | null>();
-  for (const { resource, installations, removed, tracked = true } of installedSourceResources) {
-    if (!tracked) continue;
+  for (const { resource, installations, removed } of installedSourceResources) {
     const result = resultFor(resource);
+    if (includeUnmanaged) result.paths = installations.map(({ path }) => path);
     result.version =
       [...new Set(installations.map(({ ref }) => ref?.slice(0, 7)).filter(Boolean))].join(', ') ||
       resource.source_ref?.slice(0, 7) ||
@@ -133,7 +133,7 @@ function checkInstalledResources(
       );
     }
   }
-  if (!updateAvailable && installedSourceResources.some(({ tracked }) => tracked)) {
+  if (!updateAvailable && installedSourceResources.length) {
     messages.push('All installed source catalog resources match their pinned commits.');
   }
   if (includeUnmanaged) {

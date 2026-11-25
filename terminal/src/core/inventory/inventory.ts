@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import type { InstallationDestination } from '../installations/destinations.js';
+import { availableInstallationDestinations, installationPath } from '../installations/destinations.js';
 import {
   installedFingerprint,
   sameFingerprint,
@@ -8,7 +10,6 @@ import {
   writeInstallPlan,
   targetPath,
 } from '../installations/files.js';
-import { SOURCE_SKILL_DIRECTORIES } from '../installations/model.js';
 import type { InstallPlanEntry } from '../installations/plan.js';
 import { readUtf8 } from '../resources/content.js';
 import { parseFrontmatter } from '../resources/frontmatter.js';
@@ -19,6 +20,11 @@ import type { InstallState, SourceResourceInventoryRecord, FileFingerprint } fro
 import { LOCK_PATH } from './model.js';
 import { CURRENT_INVENTORY_VERSION } from './version.js';
 const CATALOG_NAME = 'grasdouble/Kitia';
+const SKILL_LAYOUTS = availableInstallationDestinations('skill');
+const FILE_LAYOUTS = {
+  agent: availableInstallationDestinations('agent'),
+  instruction: availableInstallationDestinations('instruction'),
+};
 
 function isFileFingerprint(value: unknown): value is FileFingerprint {
   return (
@@ -97,7 +103,7 @@ function readInstallState(targetRoot: string): InstallState {
       }
       if (!isJsonObject(recordsValue)) return fail();
       const records = recordsValue;
-      const kind = collection.slice(0, -1);
+      const kind = collection.slice(0, -1) as CatalogResource['kind'];
       for (const [id, recordValue] of Object.entries(records)) {
         const record = isJsonObject(recordValue) ? recordValue : fail();
         if (Object.keys(record).some((field) => !SOURCE_RECORD_FIELDS.has(field))) fail();
@@ -125,16 +131,12 @@ function readInstallState(targetRoot: string): InstallState {
         )
           fail();
         const allowedPaths =
-          kind === 'skill'
-            ? null
-            : kind === 'agent'
-              ? new Set([`.claude/agents/${id}.md`, `.github/agents/${id}.agent.md`, `.copilot/agents/${id}.agent.md`])
-              : new Set([`.claude/rules/${id}.md`, `.github/instructions/${id}.instructions.md`]);
+          kind === 'skill' ? null : new Set(FILE_LAYOUTS[kind].map((layout) => installationPath(layout, id)));
         let hasSkillEntryPoint = false;
         for (const [relativePath, file] of Object.entries(files)) {
           const validSkillFile =
             kind === 'skill' &&
-            Object.values(SOURCE_SKILL_DIRECTORIES).some((directory) => {
+            SKILL_LAYOUTS.some(({ directory }) => {
               const skillPrefix = `${directory}/${id}/`;
               return (
                 relativePath.startsWith(skillPrefix) &&
@@ -143,10 +145,7 @@ function readInstallState(targetRoot: string): InstallState {
             });
           if ((kind === 'skill' ? !validSkillFile : !allowedPaths?.has(relativePath)) || !isFileFingerprint(file))
             fail();
-          if (
-            kind === 'skill' &&
-            Object.values(SOURCE_SKILL_DIRECTORIES).some((directory) => relativePath === `${directory}/${id}/SKILL.md`)
-          )
+          if (kind === 'skill' && SKILL_LAYOUTS.some((layout) => relativePath === installationPath(layout, id)))
             hasSkillEntryPoint = true;
           targetPath(targetRoot, relativePath);
         }
@@ -158,7 +157,7 @@ function readInstallState(targetRoot: string): InstallState {
 }
 
 export interface SourceResourceInstallation {
-  agent: string;
+  destination: InstallationDestination;
   path: string;
   ref: string | null;
   missing: boolean;
@@ -170,7 +169,6 @@ export interface InstalledSourceResource {
   resource: CatalogResource;
   installations: SourceResourceInstallation[];
   removed: boolean;
-  tracked?: boolean;
 }
 
 function sourceCatalogName(resource: CatalogResource): string {
@@ -302,6 +300,9 @@ function readInstalledSourceResources(
     if (!record || resource.kind === 'skill') continue;
     const installations: SourceResourceInstallation[] = [];
     for (const [relativePath, expected] of Object.entries(record.files || {})) {
+      const layout = FILE_LAYOUTS[resource.kind].find(
+        (entry) => installationPath(entry, resource.id) === relativePath,
+      )!;
       let current;
       try {
         current = installedFingerprint(targetRoot, relativePath);
@@ -309,7 +310,7 @@ function readInstalledSourceResources(
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       installations.push({
-        agent: relativePath.includes('.claude/') ? 'claude' : 'copilot',
+        destination: layout.id,
         path: relativePath,
         ref: record.source_ref || null,
         missing: !current,
@@ -376,30 +377,28 @@ function readInstalledSourceSkills(
   const installed: InstalledSourceResource[] = [];
   for (const [key, resource] of candidates) {
     const record = records[key];
+    if (!record) continue;
     const installations: SourceResourceInstallation[] = [];
-    for (const [agent, directory] of Object.entries(SOURCE_SKILL_DIRECTORIES)) {
-      const relativePath = `${directory}/${resource.id}/SKILL.md`;
+    for (const layout of SKILL_LAYOUTS) {
+      const directoryPrefix = `${layout.directory}/${resource.id}/`;
+      const trackedFiles = Object.entries(record.files).filter(([filePath]) => filePath.startsWith(directoryPrefix));
+      if (!trackedFiles.length) continue;
+      const relativePath = installationPath(layout, resource.id);
       const skillFile = targetPath(targetRoot, relativePath);
-      const expected = record?.files[relativePath];
-      const directoryPrefix = `${directory}/${resource.id}/`;
-      const trackedFiles = Object.entries(record?.files || {}).filter(([filePath]) =>
-        filePath.startsWith(directoryPrefix),
-      );
+      const expected = record.files[relativePath];
       let stat;
       try {
         stat = fs.lstatSync(skillFile);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          if (trackedFiles.length) {
-            installations.push({
-              agent,
-              path: relativePath,
-              ref: null,
-              missing: true,
-              modified: false,
-              provenanceMatches: false,
-            });
-          }
+          installations.push({
+            destination: layout.id,
+            path: relativePath,
+            ref: null,
+            missing: true,
+            modified: false,
+            provenanceMatches: false,
+          });
           continue;
         }
         throw error;
@@ -413,14 +412,7 @@ function readInstalledSourceSkills(
       } catch (error) {
         if (!expected || !(error instanceof CatalogError)) throw error;
       }
-      const provenanceMatches =
-        metadata instanceof Map &&
-        matchesSourceRepository(metadata.get('github-repo'), resource.source_repository!) &&
-        metadata.get('github-path') === resource.source_path;
-      if (!(metadata instanceof Map)) metadata = undefined;
-      if (!provenanceMatches && !trackedFiles.length) continue;
-      const pinnedRef = metadata?.get('github-pinned');
-      const ref = typeof pinnedRef === 'string' && pinnedRef ? pinnedRef : metadata?.get('github-ref');
+      const { matches: provenanceMatches, ref } = skillProvenance(metadata, resource);
       let missing = false;
       let modified = Boolean(expected && !provenanceMatches);
       for (const [trackedPath, expectedFingerprint] of trackedFiles) {
@@ -434,9 +426,9 @@ function readInstalledSourceSkills(
         else if (!sameFingerprint(current, expectedFingerprint)) modified = true;
       }
       installations.push({
-        agent,
+        destination: layout.id,
         path: relativePath,
-        ref: typeof ref === 'string' && ref ? ref : null,
+        ref,
         missing,
         modified,
         provenanceMatches,
@@ -447,7 +439,6 @@ function readInstalledSourceSkills(
         resource,
         installations,
         removed: Boolean(resource.removed),
-        tracked: Boolean(record),
       });
     }
   }
@@ -475,29 +466,43 @@ function installedSkillFiles(targetRoot: string, relativeDirectory: string): str
   visit(relativeDirectory);
   return files.sort();
 }
-function recordSourceInstallation(resource: CatalogResource, target: string, agent: string): void {
+function skillProvenance(metadata: unknown, resource: CatalogResource): { matches: boolean; ref: string | null } {
+  if (!(metadata instanceof Map)) return { matches: false, ref: null };
+  const pinnedRef = metadata.get('github-pinned');
+  const ref = typeof pinnedRef === 'string' && pinnedRef ? pinnedRef : metadata.get('github-ref');
+  return {
+    matches:
+      matchesSourceRepository(metadata.get('github-repo'), resource.source_repository!) &&
+      metadata.get('github-path') === resource.source_path,
+    ref: typeof ref === 'string' && ref ? ref : null,
+  };
+}
+
+function recordSourceInstallation(resource: CatalogResource, target: string, relativePath: string): void {
   const targetRoot = fs.realpathSync(target);
-  const installed = readInstalledSourceSkills(targetRoot, [resource]).find(
-    ({ resource: installedResource }) => sourceSkillKey(installedResource) === sourceSkillKey(resource),
-  );
-  const installation = installed?.installations.find((entry) => entry.agent === agent);
-  if (
-    !installation ||
-    installation.missing ||
-    !installation.provenanceMatches ||
-    installation.ref?.toLowerCase() !== resource.source_ref!.toLowerCase()
-  ) {
+  const skillFile = targetPath(targetRoot, relativePath);
+  let verified = false;
+  try {
+    if (fs.lstatSync(skillFile).isFile()) {
+      const metadata = parseFrontmatter(readUtf8(skillFile, 'Installed source skill'), skillFile).get('metadata');
+      const { matches, ref } = skillProvenance(metadata, resource);
+      verified = matches && ref?.toLowerCase() === resource.source_ref!.toLowerCase();
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (!verified) {
     throw new CatalogError(
-      `GitHub CLI reported a successful ${agent} installation for ${resource.id}, but no provenance-matched SKILL.md at the requested commit was found.`,
+      `GitHub CLI reported a successful installation for ${resource.id}, but no provenance-matched skill at the requested commit was found at ${relativePath}.`,
     );
   }
 
   const state: InstallState = readInstallState(targetRoot);
   const previous = sourceSkillRecord(state, sourceCatalogName(resource), resource.id);
   const files = previous && sameSourceRecord(previous, resource) ? { ...previous.files } : {};
-  const skillDirectory = path.posix.dirname(installation.path);
-  const runtimePrefix = `${skillDirectory}/`;
-  for (const filePath of Object.keys(files)) if (filePath.startsWith(runtimePrefix)) delete files[filePath];
+  const skillDirectory = path.posix.dirname(relativePath);
+  const destinationPrefix = `${skillDirectory}/`;
+  for (const filePath of Object.keys(files)) if (filePath.startsWith(destinationPrefix)) delete files[filePath];
   for (const filePath of installedSkillFiles(targetRoot, skillDirectory)) {
     const fingerprint = installedFingerprint(targetRoot, filePath);
     if (!fingerprint) throw new CatalogError(`Installed source file disappeared: ${filePath}`);

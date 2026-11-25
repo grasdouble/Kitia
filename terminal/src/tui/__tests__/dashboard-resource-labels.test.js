@@ -309,7 +309,10 @@ test('inventory TUI labels a tracked user skill with its custom source folder', 
       sourceResource.source_repository,
       sourceResource.source_path,
     ]);
-    writeArtifact(`.agents/skills/${sourceResource.id}/SKILL.md`, [
+    assert.equal(args.includes('--agent'), false);
+    const directory = args[args.indexOf('--dir') + 1];
+    assert.equal(directory, path.join(fs.realpathSync(target), '.agents/skills'));
+    writeArtifact(path.relative(fs.realpathSync(target), path.join(directory, sourceResource.id, 'SKILL.md')), [
       '---',
       `name: ${sourceResource.id}`,
       `description: ${sourceResource.description}`,
@@ -328,7 +331,6 @@ test('inventory TUI labels a tracked user skill with its custom source folder', 
         action: 'install',
         resource: sourceResource,
         target,
-        tool: 'copilot',
         scope: 'user',
       },
       invokeInstall,

@@ -34,7 +34,7 @@ export interface NativeDashboardCatalogs {
 export type NativeDashboardAction = InstallationRequest['operation'] | 'remove-unmanaged';
 export type NativeInstallOptions = Pick<
   InstallationRequest,
-  'scope' | 'tool' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
+  'scope' | 'destinations' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
 >;
 
 function createDashboardActionHandler(onProgress: (message: string) => void = () => {}) {
@@ -85,7 +85,7 @@ function createDashboardActionHandler(onProgress: (message: string) => void = ()
             catalog: resource.catalog,
             target,
             scope,
-            tool: installOptions.tool || 'copilot',
+            destinations: installOptions.destinations,
             ref: installOptions.ref,
             force: installOptions.force,
             ghForce: installOptions.ghForce,

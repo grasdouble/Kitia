@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import type { CatalogResource } from '../resources/model.js';
 import { CatalogError } from '../resources/model.js';
-import { SOURCE_SKILL_DIRECTORIES } from './model.js';
+import type { InstallationScope } from './model.js';
 const DEFAULT_GH_SKILL_TIMEOUT_MS = 120_000;
 
 export type GhSkillResult = {
@@ -19,28 +19,27 @@ export type SourceSkillResource = CatalogResource & {
 function buildSourceSkillArgs(
   action: string,
   resource: SourceSkillResource,
-  agent?: 'claude-code' | 'github-copilot',
-  { force = false, scope = 'project', target }: { force?: boolean; scope?: string; target?: string } = {},
+  directory?: string,
+  { force = false, scope = 'project' }: { force?: boolean; scope?: InstallationScope } = {},
 ): string[] {
   if (action === 'preview') {
     return ['skill', 'preview', resource.source_repository, `${resource.source_path}@${resource.source_ref}`];
   }
-  if (action === 'install' && (agent === 'claude-code' || agent === 'github-copilot')) {
-    if (scope === 'user' && (!target || !path.isAbsolute(target))) {
-      throw new CatalogError('User-scope source installation requires an absolute home directory');
+  if (action === 'install') {
+    if (!directory || !path.isAbsolute(directory)) {
+      throw new CatalogError('Source skill installation requires an absolute destination directory');
     }
     return [
       'skill',
       'install',
       resource.source_repository,
       resource.source_path,
-      '--agent',
-      agent,
+      '--dir',
+      directory,
       '--scope',
       scope,
       '--pin',
       resource.source_ref,
-      ...(scope === 'user' ? ['--dir', path.join(target!, SOURCE_SKILL_DIRECTORIES[agent])] : []),
       ...(force ? ['--force'] : []),
     ];
   }

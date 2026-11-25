@@ -1,13 +1,6 @@
 import type { FileFingerprint } from '../inventory/model.js';
 import type { ResourceKind } from '../resources/model.js';
 
-const SOURCE_SKILL_DIRECTORIES = {
-  'github-copilot': '.agents/skills',
-  'claude-code': '.claude/skills',
-};
-
-export type InstallationTool = 'claude' | 'copilot' | 'both';
-
 export type InstallationScope = 'project' | 'user';
 
 export interface PlanAction {
@@ -24,5 +17,3 @@ export interface InstallPlanOptions {
   expectedRemovals?: Map<string, FileFingerprint | null>;
   onAction?: (action: PlanAction) => void;
 }
-
-export { SOURCE_SKILL_DIRECTORIES };

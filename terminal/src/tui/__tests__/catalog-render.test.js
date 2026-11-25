@@ -2050,7 +2050,7 @@ test('mouse wheel keeps separate page positions for the active preview panes', a
   }
 });
 
-test('mouse selects rendered resources and modal buttons preserve install safety', async () => {
+test('mouse selects rendered resources, destination checkboxes, and install confirmation', async () => {
   const candidates = ['candidate-one', 'candidate-two'].map((id) => ({
     catalog: 'sample',
     kind: 'skill',
@@ -2096,15 +2096,22 @@ test('mouse selects rendered resources and modal buttons preserve install safety
     );
     await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'install options modal');
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-option' && target.group === 'scope', '│ USER │');
-    await dashboard.flush();
+    await dashboard.wait((frame) => frame.includes('.copilot/skills/candidate-two/SKILL.md'), 'user destinations');
     clickRenderedTarget(
       dashboard,
-      (target) => target.type === 'modal-option' && target.group === 'client',
-      '│ CLAUDE │',
+      (target) => target.type === 'modal-option' && target.group === 'destination',
+      '[ ] Claude Code',
     );
-    await dashboard.flush();
-    dashboard.input.write('\r');
-    await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
+    await dashboard.wait(
+      (frame) => frame.includes('[x] Claude Code'),
+      'Claude selected alongside the Standard default',
+    );
+    clickRenderedTarget(dashboard, (target) => target.type === 'modal-review', '[ Review install ]');
+    const confirmation = await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
+    assert.ok(confirmation.includes('Selected paths (user):'));
+    assert.ok(confirmation.includes('• .agents/skills/candidate-two/SKILL.md'));
+    assert.ok(confirmation.includes('• .claude/skills/candidate-two/SKILL.md'));
+    assert.ok(!confirmation.includes('• .copilot/skills/candidate-two/SKILL.md'));
     clickAt(dashboard.input, browseTab);
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 1, '│ INSTALL │');
     await dashboard.wait(
@@ -2116,13 +2123,92 @@ test('mouse selects rendered resources and modal buttons preserve install safety
         operation,
         id,
         scope: options.scope,
-        tool: options.tool,
+        destinations: options.destinations,
       })),
-      [{ operation: 'install', id: 'candidate-two', scope: 'user', tool: 'claude' }],
+      [{ operation: 'install', id: 'candidate-two', scope: 'user', destinations: ['standard', 'claude'] }],
     );
   } finally {
     await dashboard.stop();
   }
+});
+
+test('install options keep scope selections independent and only add newly selected destinations', async () => {
+  const source = { catalog: 'sample', kind: 'skill', id: 'review' };
+  const standardPath = '.agents/skills/review/SKILL.md';
+  const copilotPath = '.github/skills/review/SKILL.md';
+  const installed = { ...source, scope: 'project', managed: true, paths: [standardPath] };
+  const calls = [];
+  const dashboard = await startInteractiveDashboard([installed], {
+    catalogResources: [source],
+    execute: async (action, resource, { scope, destinations }) => {
+      calls.push({ action, id: resource.id, scope, destinations });
+      return { code: 0, resources: [{ ...installed, paths: [standardPath, copilotPath] }] };
+    },
+  });
+  const press = (key, text) => {
+    dashboard.input.write(key);
+    return dashboard.wait((frame) => frame.includes(text), text);
+  };
+  try {
+    await press('b', 'CATALOG RESOURCES');
+    const options = await press('\r', 'INSTALL OPTIONS');
+    assert.ok(options.includes('Standard (installed)'));
+    assert.ok(options.includes(standardPath));
+    assert.ok(options.includes('Select at least one new destination.'));
+    dashboard.input.write('\r');
+    await dashboard.flush();
+    assert.ok(!dashboard.frame().includes('CONFIRM INSTALL'));
+    await press('\t', '› [−] Standard');
+    await press('\x1b[B', '› [ ] GitHub Copilot');
+    await press(' ', '› [x] GitHub Copilot');
+    await press('\x1b[A', '› [−] Standard');
+    dashboard.input.write('\x1b[A');
+    await dashboard.wait((frame) => !frame.includes('› [−] Standard'), 'scope focused');
+    const userOptions = await press('\x1b[C', '.copilot/skills/review/SKILL.md');
+    assert.ok(userOptions.includes('[x] Standard'));
+    assert.ok(userOptions.includes('[ ] GitHub Copilot'));
+    const projectOptions = await press('\x1b[D', copilotPath);
+    assert.ok(projectOptions.includes('[x] GitHub Copilot'));
+    const confirmation = await press('\r', 'CONFIRM INSTALL');
+    assert.ok(confirmation.includes(`• ${copilotPath}`));
+    assert.ok(!confirmation.includes(`• ${standardPath}`));
+    assert.deepEqual(calls, []);
+    dashboard.input.write('y');
+    await dashboard.wait(
+      (frame) =>
+        frame.includes('INSTALLED RESOURCES') && !frame.includes('CONFIRM INSTALL') && !frame.includes('LOADING'),
+      'inventory after adding the destination',
+    );
+    assert.deepEqual(calls, [{ action: 'install', id: source.id, scope: 'project', destinations: ['copilot'] }]);
+    const uninstall = await press('\x1b[3~', 'CONFIRM UNINSTALL');
+    assert.ok(uninstall.includes(`• ${standardPath}`));
+    assert.ok(uninstall.includes(`• ${copilotPath}`));
+  } finally {
+    await dashboard.stop();
+  }
+});
+
+test('install options use kind defaults and block a scope with an inventory scan error', async () => {
+  const candidate = { catalog: 'sample', kind: 'instruction', id: 'review' };
+  const actions = { catalogResources: [candidate] };
+  const dimensions = { columns: 80, rows: 40 };
+  const project = await captureDashboardFrame([], actions, ['b', '\r'], dimensions);
+  assert.ok(project.includes('SCOPE: PROJECT (instructions are project-scoped)'));
+  assert.ok(project.includes('[x] GitHub Copilot'));
+  assert.ok(project.includes('.github/instructions/review.instructions.md'));
+  assert.ok(project.includes('.claude/rules/review.md'));
+  assert.ok(!project.includes('[ ] Standard'));
+  assert.ok(!project.includes('│ USER │'));
+  const user = await captureDashboardFrame(
+    [],
+    { catalogResources: [{ ...candidate, kind: 'agent' }] },
+    ['b', '\r', '\x1b[C'],
+    dimensions,
+    [{ scope: 'user', code: 'CATALOG_ERROR', message: 'Cannot read user inventory.' }],
+  );
+  assert.ok(user.includes('USER unavailable: CATALOG_ERROR'));
+  assert.ok(user.includes('.copilot/agents/review.agent.md'));
+  assert.ok(!user.includes('[ Review install ]'));
 });
 
 test('Inventory Remove button accepts the production xterm cell click', async () => {
@@ -3264,7 +3350,7 @@ test('managed inventory U confirms an update and renders the successful result',
     assert.equal(executions[0][0], 'update');
     assert.deepEqual(executions[0][1], resource);
     assert.equal(executions[0][2].scope, undefined);
-    assert.equal(executions[0][2].tool, undefined);
+    assert.equal(executions[0][2].destinations, undefined);
     assert.equal(typeof executions[0][2].onProgress, 'function');
     assert.ok(completed.includes('Current'), 'the returned refreshed resource replaces its old status');
     input.write('q');
@@ -3351,7 +3437,7 @@ test('managed inventory U selects Update and Enter executes the confirmed action
     assert.equal(executions[0][0], 'update');
     assert.deepEqual(executions[0][1], resource);
     assert.equal(executions[0][2].scope, undefined);
-    assert.equal(executions[0][2].tool, undefined);
+    assert.equal(executions[0][2].destinations, undefined);
     assert.equal(typeof executions[0][2].onProgress, 'function');
     assert.ok(completed.includes('Update complete'));
     assert.ok(completed.includes('Current'), 'the refreshed resource replaces its old status');
@@ -3382,8 +3468,8 @@ test('local conflicts and GH force-required updates require explicit retry conse
     'tracked-modification',
     'untracked-skill-content',
     'github-force-required',
-    'github-next-agent',
-    'github-repeated-agent',
+    'github-next-destination',
+    'github-repeated-destination',
   ]) {
     const ghForceRequired = category.startsWith('github-');
     const responses = ghForceRequired ? ['no', 'escape', 'yes'] : ['no', 'yes'];
@@ -3413,7 +3499,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
             error.category = 'github-force-required';
             error.paths = [];
             error.recoverable = true;
-            error.agent = 'github-copilot';
+            error.agent = 'standard';
             error.userMessage = 'GitHub CLI says this skill is already installed and requires --force.';
             error.technicalDetail = 'raw secret diagnostic: token=secret-value';
             throw error;
@@ -3430,23 +3516,23 @@ test('local conflicts and GH force-required updates require explicit retry conse
             error.recoverable = true;
             throw error;
           }
-          if (calls.length === 2 && category === 'github-next-agent') {
-            const error = new Error('raw GH overwrite diagnostic for another agent');
+          if (calls.length === 2 && category === 'github-next-destination') {
+            const error = new Error('raw GH overwrite diagnostic for another destination');
             error.code = 'GH_FORCE_REQUIRED';
             error.category = 'github-force-required';
             error.paths = [];
             error.recoverable = true;
-            error.agent = 'claude-code';
-            error.userMessage = 'GitHub CLI says this skill is already installed and requires --force for claude-code.';
+            error.agent = 'claude';
+            error.userMessage = 'GitHub CLI says this skill is already installed and requires --force for claude.';
             throw error;
           }
-          if (calls.length === 2 && category === 'github-repeated-agent') {
+          if (calls.length === 2 && category === 'github-repeated-destination') {
             const error = new Error('raw GH overwrite diagnostic repeated');
             error.code = 'GH_FORCE_REQUIRED';
             error.category = 'github-force-required';
             error.paths = [];
             error.recoverable = true;
-            error.agent = 'github-copilot';
+            error.agent = 'standard';
             error.userMessage = 'GitHub CLI says this skill is already installed and requires --force.';
             throw error;
           }
@@ -3480,7 +3566,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
           assert.ok(promptText.includes('already installed'), `missing installation reason: ${promptText}`);
           assert.ok(promptText.includes('requires'), `missing GH force requirement: ${promptText}`);
           assert.ok(promptText.includes('--force'), `missing explicit force flag: ${promptText}`);
-          assert.ok(promptText.includes('github-copilot'), `missing retry target in modal: ${promptText}`);
+          assert.ok(promptText.includes('for standard'), `missing retry target in modal: ${promptText}`);
           assert.ok(promptText.includes('local-modification and untracked-content checks still apply'));
           assert.ok(!promptText.includes('secret-value'));
         } else {
@@ -3495,54 +3581,57 @@ test('local conflicts and GH force-required updates require explicit retry conse
         assert.ok(conflict.includes('YES, RETRY WITH --FORCE'));
         assert.equal(calls.length, 1, 'the first update attempt has no retry flag');
         assert.equal(calls[0][2].scope, undefined);
-        assert.equal(calls[0][2].tool, undefined);
+        assert.equal(calls[0][2].destinations, undefined);
         assert.equal(typeof calls[0][2].onProgress, 'function');
 
         if (accept) {
           input.write('\x1b[C');
           await new Promise((resolve) => setImmediate(resolve));
           input.write('\r');
-          if (category === 'github-next-agent') {
+          if (category === 'github-next-destination') {
             const nextPrompt = await waitForFrame((frame) => {
               const text = frame.replace(/[│]/g, ' ').replace(/\s+/g, ' ');
-              return text.includes('GH REQUESTS OVERWRITE') && text.includes('for claude-code');
-            }, 'second agent force confirmation');
+              return text.includes('GH REQUESTS OVERWRITE') && text.includes('for claude');
+            }, 'second destination force confirmation');
             const nextPromptText = nextPrompt.replace(/[│]/g, ' ').replace(/\s+/g, ' ');
-            assert.ok(nextPromptText.includes('already installed'), `missing second-agent reason: ${nextPromptText}`);
-            assert.ok(nextPromptText.includes('requires'), `missing second-agent force requirement: ${nextPromptText}`);
-            assert.ok(nextPromptText.includes('--force'), `missing second-agent force flag: ${nextPromptText}`);
+            assert.ok(nextPromptText.includes('already installed'), `missing destination reason: ${nextPromptText}`);
+            assert.ok(nextPromptText.includes('requires'), `missing force requirement: ${nextPromptText}`);
+            assert.ok(nextPromptText.includes('--force'), `missing force flag: ${nextPromptText}`);
             assert.equal(calls.length, 2);
             const { onProgress: firstProgress, ...firstRetryOptions } = calls[1][2];
             assert.equal(typeof firstProgress, 'function');
             assert.deepEqual(firstRetryOptions, {
               scope: undefined,
-              tool: undefined,
+              destinations: undefined,
               ghForce: true,
-              ghForceAgent: 'github-copilot',
+              ghForceAgent: 'standard',
             });
             input.write('\x1b[C');
             await new Promise((resolve) => setImmediate(resolve));
             input.write('\r');
             await waitForFrame(
               (frame) => frame.replace(/[│]/g, ' ').replace(/\s+/g, ' ').includes('Update complete'),
-              'second agent forced update',
+              'second destination forced update',
             );
             assert.equal(calls.length, 3);
             const { onProgress: secondProgress, ...secondRetryOptions } = calls[2][2];
             assert.equal(typeof secondProgress, 'function');
             assert.deepEqual(secondRetryOptions, {
               scope: undefined,
-              tool: undefined,
+              destinations: undefined,
               ghForce: true,
-              ghForceAgent: 'claude-code',
+              ghForceAgent: 'claude',
             });
             input.write('q');
             assert.equal(await done, true);
-          } else if (category === 'github-repeated-agent') {
-            const failure = await waitForFrame((frame) => frame.includes('UPDATE FAILED'), 'same-agent retry failure');
+          } else if (category === 'github-repeated-destination') {
+            const failure = await waitForFrame(
+              (frame) => frame.includes('UPDATE FAILED'),
+              'same-destination retry failure',
+            );
             assert.ok(
               !failure.includes('GH REQUESTS OVERWRITE'),
-              'the same agent must not get an endless force prompt',
+              'the same destination must not get an endless force prompt',
             );
             assert.equal(calls.length, 2);
             input.write('\x1b');
@@ -3551,7 +3640,7 @@ test('local conflicts and GH force-required updates require explicit retry conse
                 frame.includes('INSTALLED RESOURCES') &&
                 frame.includes('↑↓ navigate') &&
                 !frame.includes('UPDATE FAILED'),
-              'dismissed same-agent failure',
+              'dismissed same-destination failure',
             );
             input.write('q');
             assert.equal(await done, false);
@@ -3568,11 +3657,11 @@ test('local conflicts and GH force-required updates require explicit retry conse
               ghForceRequired
                 ? {
                     scope: undefined,
-                    tool: undefined,
+                    destinations: undefined,
                     ghForce: true,
-                    ghForceAgent: 'github-copilot',
+                    ghForceAgent: 'standard',
                   }
-                : { scope: undefined, tool: undefined, force: true },
+                : { scope: undefined, destinations: undefined, force: true },
             );
             input.write('q');
             assert.equal(await done, true);
@@ -3612,7 +3701,7 @@ test('failed managed updates show an actionable error modal in compact and norma
     managed: true,
   };
   const actualError =
-    'Could not update AI-Kit catalog skill conventional-commits for github-copilot: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No agents were confirmed updated before this failure.';
+    'Could not update AI-Kit catalog skill conventional-commits for standard: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No destinations were confirmed updated before this failure.';
 
   for (const rows of [36, 56]) {
     const input = new PassThrough();
@@ -3914,7 +4003,7 @@ test('all dashboard modes show visible shortcuts for active controls', async () 
   );
   assert.match(installOptions, /┌─ INSTALL OPTIONS /, 'non-table modal title bars stay unchanged');
   assert.ok(installOptions.includes('SHORTCUTS'));
-  assert.ok(installOptions.includes('FIELD'));
+  assert.ok(installOptions.includes('SPACE TOGGLE'));
   assert.ok(installOptions.includes('ENTER REVIEW'));
   assert.ok(installOptions.includes('ESC BACK'));
   assert.ok(!installOptions.includes('ENTER select'));

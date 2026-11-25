@@ -79,6 +79,7 @@ test('native local preview and unmanaged removal tolerate unavailable configured
     const installedPreview = await execute('preview', tracked, options, catalogs);
     assert.equal(installedPreview.code, 0);
     assert.deepEqual(installedPreview.previewFiles, [{ path: trackedPath, content: trackedContent }]);
+    assert.deepEqual(installedPreview.resources.find(({ id }) => id === tracked.id).paths, [trackedPath]);
     assert.ok(installedPreview.previewTree.some((line) => line.includes(trackedPath)));
     assert.match(installedPreview.previewAuditLines.join('\n'), /1\/1 files analyzed/);
     assert.match(installedPreview.previewAuditLines.join('\n'), /instruction-override/);
@@ -191,7 +192,7 @@ test('native audited failure retains license warnings and audit facts in its typ
   }
 });
 
-test('native partial update returns current inventory and preserves the agent-specific force retry', () => {
+test('native partial update returns current inventory and preserves the destination-specific force retry', () => {
   const { recordSourceInstallation, readInstallState } = require('../../core/inventory/inventory.ts');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-native-force-parity-'));
   const project = path.join(directory, 'project'),
@@ -222,12 +223,12 @@ test('native partial update returns current inventory and preserves the agent-sp
       '',
     ].join('\n');
   const paths = {
-    'github-copilot': '.agents/skills/demo/SKILL.md',
-    'claude-code': '.claude/skills/demo/SKILL.md',
+    standard: '.agents/skills/demo/SKILL.md',
+    claude: '.claude/skills/demo/SKILL.md',
   };
-  for (const [agent, relativePath] of Object.entries(paths)) {
+  for (const relativePath of Object.values(paths)) {
     writeFile(project, relativePath, skill('a'.repeat(40)));
-    recordSourceInstallation({ ...resource, source_ref: 'a'.repeat(40) }, project, agent);
+    recordSourceInstallation({ ...resource, source_ref: 'a'.repeat(40) }, project, relativePath);
   }
   const registry = {
     catalog_version: 1,
@@ -262,19 +263,19 @@ test('native partial update returns current inventory and preserves the agent-sp
       'const fs = require("node:fs");',
       'const path = require("node:path");',
       'const args = process.argv.slice(2);',
-      `const paths = ${JSON.stringify(paths)};`,
       `const skill = ${JSON.stringify(skill(resource.source_ref))};`,
       'if (args[0] === "api") {',
       '  const sha = args.find((arg) => arg.startsWith("sha=")).slice(4);',
       '  console.log(JSON.stringify([{ sha }]));',
       '} else {',
       `  fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + String.fromCharCode(10));`,
-      '  const agent = args[args.indexOf("--agent") + 1];',
-      '  if (agent === "claude-code" && !args.includes("--force")) {',
+      '  const directory = args[args.indexOf("--dir") + 1];',
+      '  if (!path.isAbsolute(directory) || args.includes("--agent")) throw new Error("Expected an absolute --dir only");',
+      '  if (path.basename(path.dirname(directory)) === ".claude" && !args.includes("--force")) {',
       '    console.error("Skills already installed: demo (Use --force to overwrite)");',
       '    process.exitCode = 7;',
       '  } else {',
-      '    fs.writeFileSync(path.join(process.cwd(), paths[agent]), skill);',
+      '    fs.writeFileSync(path.join(directory, "demo", "SKILL.md"), skill);',
       '  }',
       '}',
       '',
@@ -298,8 +299,8 @@ test('native partial update returns current inventory and preserves the agent-sp
       '  const options = { target: project, userTarget: user };',
       '  const catalogs = { sourceResources: [resource] };',
       '  const first = await execute("update", resource, options, catalogs);',
-      `  const firstFiles = Object.fromEntries(Object.entries(paths).map(([agent, relativePath]) => [`,
-      '    agent, fs.readFileSync(path.join(project, relativePath), "utf8"),',
+      '  const firstFiles = Object.fromEntries(Object.entries(paths).map(([destination, relativePath]) => [',
+      '    destination, fs.readFileSync(path.join(project, relativePath), "utf8"),',
       '  ]));',
       '  const { createForceRetryPrompt } = await import(pathToFileURL(process.env.KITIA_TEST_RETRY).href);',
       '  const retry = createForceRetryPrompt({ action: "update", resource }, first.failure);',
@@ -337,17 +338,16 @@ test('native partial update returns current inventory and preserves the agent-sp
     assert.equal(first.failure.code, 'GH_FORCE_REQUIRED');
     assert.equal(first.failure.category, 'github-force-required');
     assert.equal(first.failure.recoverable, true);
-    assert.equal(first.failure.agent, 'claude-code');
-    assert.match(first.failure.userMessage, /Updated agents: github-copilot.*remain in place/);
+    assert.equal(first.failure.agent, 'claude');
+    assert.match(first.failure.userMessage, /Updated destinations: standard.*remain in place/);
     assert.equal(first.resources.length, 1);
     assert.deepEqual(new Set(first.resources[0].version.split(', ')), new Set(['a'.repeat(7), 'b'.repeat(7)]));
-    assert.deepEqual(first.resources[0].issues.find(({ code }) => code === 'UPDATE_AVAILABLE').paths, [
-      paths['claude-code'],
-    ]);
+    assert.deepEqual(first.resources[0].issues.find(({ code }) => code === 'UPDATE_AVAILABLE').paths, [paths.claude]);
+    assert.deepEqual(new Set(first.resources[0].paths), new Set(Object.values(paths)));
     assert.deepEqual(first.errors, []);
-    assert.match(firstFiles['github-copilot'], /github-pinned: b{40}/);
-    assert.match(firstFiles['claude-code'], /github-pinned: a{40}/);
-    assert.equal(retry.confirmation.ghForceAgent, 'claude-code');
+    assert.match(firstFiles.standard, /github-pinned: b{40}/);
+    assert.match(firstFiles.claude, /github-pinned: a{40}/);
+    assert.equal(retry.confirmation.ghForceAgent, 'claude');
     assert.equal(second.code, 0);
     assert.equal(second.failure, undefined);
     assert.equal(second.messages.length, 1);
@@ -359,11 +359,16 @@ test('native partial update returns current inventory and preserves the agent-sp
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(invocations.length, 3, 'the confirmed Copilot update is not repeated on retry');
+    assert.equal(invocations.length, 3, 'the confirmed Standard update is not repeated on retry');
     assert.equal(invocations[0].includes('--force'), false);
     assert.equal(invocations[1].includes('--force'), false);
     assert.equal(invocations[2].includes('--force'), true);
-    assert.equal(invocations[2][invocations[2].indexOf('--agent') + 1], 'claude-code');
+    assert.deepEqual(
+      invocations.map((args) => args[args.indexOf('--dir') + 1]),
+      ['.agents/skills', '.claude/skills', '.claude/skills'].map((directory) =>
+        path.join(fs.realpathSync(project), directory),
+      ),
+    );
     assert.equal(readInstallState(project).sources.Fixture.skills.demo.source_ref, resource.source_ref);
     assert.equal(sourceRef, resource.source_ref);
     assert.equal(retryConsumed, true);

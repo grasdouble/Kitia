@@ -110,7 +110,6 @@ test('identical skill IDs from different sources cannot collide in one installat
           action: 'install',
           resource,
           target,
-          tool: 'copilot',
           scope: 'project',
         },
         () => assert.fail('a colliding install must not invoke gh'),
@@ -173,7 +172,6 @@ test('configured source skills use the same pinned install, check, update and un
         action: 'install',
         resource: sourceResource,
         target,
-        tool: 'copilot',
         scope: 'project',
       },
       invoke,
@@ -238,7 +236,7 @@ test('configured source skills use the same pinned install, check, update and un
       updateSourceResources(
         readInstalledSourceSkills(target, [failedResource]),
         target,
-        { ghForce: true, ghForceAgent: 'github-copilot' },
+        { ghForce: true, ghForceAgent: 'standard' },
         () => {
           guardedGhCalls++;
           return 0;
@@ -280,7 +278,7 @@ test('configured source skills use the same pinned install, check, update and un
       updateSourceResources(
         readInstalledSourceSkills(target, [failedResource]),
         target,
-        { ghForce: true, ghForceAgent: 'github-copilot' },
+        { ghForce: true, ghForceAgent: 'standard' },
         () => {
           guardedGhCalls++;
           return 0;
@@ -321,7 +319,7 @@ test('configured source skills use the same pinned install, check, update and un
   );
   assert.equal(
     ghFailure.message,
-    'Could not update team-alpha catalog skill demo-skill for github-copilot: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No agents were confirmed updated before this failure. gh diagnostic: GitHub API rate limit exceeded; retry later token [REDACTED] GH_TOKEN=[REDACTED]',
+    'Could not update team-alpha catalog skill demo-skill for standard: gh exited with status 1. GitHub reports an API rate limit; wait for the limit to reset, then retry. No destinations were confirmed updated before this failure. gh diagnostic: GitHub API rate limit exceeded; retry later token [REDACTED] GH_TOKEN=[REDACTED]',
   );
   assert.doesNotMatch(
     ghFailure.message,
@@ -358,7 +356,7 @@ test('configured source skills use the same pinned install, check, update and un
       assert.equal(error.code, 'GH_FORCE_REQUIRED');
       assert.equal(error.category, 'github-force-required');
       assert.equal(error.recoverable, true);
-      assert.equal(error.agent, 'github-copilot');
+      assert.equal(error.agent, 'standard');
       assert.match(error.userMessage, /already installed and requires --force/);
       assert.doesNotMatch(error.userMessage, /Skills already installed/);
       return true;
@@ -385,7 +383,7 @@ test('configured source skills use the same pinned install, check, update and un
   updateSourceResources(
     readInstalledSourceSkills(target, [forceRequiredResource]),
     target,
-    { ghForce: true, ghForceAgent: 'github-copilot' },
+    { ghForce: true, ghForceAgent: 'standard' },
     invoke,
   );
   assert.ok(updateArgs.includes('--force'));
@@ -428,7 +426,7 @@ test('configured source skills use the same pinned install, check, update and un
   const partialInstalled = readInstalledSourceSkills(target, [partialResource]);
   partialInstalled[0].installations.push({
     ...partialInstalled[0].installations[0],
-    agent: 'claude-code',
+    destination: 'claude',
     path: '.claude/skills/demo-skill/SKILL.md',
   });
   let partialCalls = 0;
@@ -440,9 +438,9 @@ test('configured source skills use the same pinned install, check, update and un
       }),
     (error) => {
       assert.equal(error.code, 'GH_UPDATE_FAILED');
-      assert.match(error.userMessage, /for claude-code: gh exited with status 1/);
+      assert.match(error.userMessage, /for claude: gh exited with status 1/);
       assert.match(error.userMessage, /did not provide a recognized cause/);
-      assert.match(error.userMessage, /github-copilot/);
+      assert.match(error.userMessage, /Updated destinations: standard/);
       assert.doesNotMatch(error.userMessage, /unexpected failure/);
       return true;
     },
@@ -502,7 +500,6 @@ test('an explicit skill ref is installed and recorded without changing the catal
         action: 'install',
         resource: { ...catalogResource, source_ref: requestedRef },
         target,
-        tool: 'copilot',
         scope: 'project',
       },
       invoke,
@@ -522,7 +519,91 @@ test('an explicit skill ref is installed and recorded without changing the catal
   );
   assert.equal(catalogResource.source_ref, 'a'.repeat(40));
   assert.equal(
-    buildSourceSkillArgs('install', { ...catalogResource, source_ref: requestedRef }, 'github-copilot').at(-1),
+    buildSourceSkillArgs(
+      'install',
+      { ...catalogResource, source_ref: requestedRef },
+      path.join(target, '.agents/skills'),
+    ).at(-1),
     requestedRef,
   );
 });
+
+for (const [scope, copilotDirectory] of [
+  ['project', '.github/skills'],
+  ['user', '.copilot/skills'],
+]) {
+  test(`adds the dedicated Copilot skill in ${scope} without taking ownership of other copies`, () => {
+    const target = fs.realpathSync(makeTemporaryDirectory('kitia-skill-destinations-'));
+    const resource = {
+      catalog: 'team-alpha',
+      kind: 'skill',
+      id: 'demo',
+      source_repository: 'example/team-alpha',
+      source_path: 'skills/demo',
+      source_ref: 'a'.repeat(40),
+      license_status: 'MIT',
+    };
+    const standard = '.agents/skills/demo/SKILL.md';
+    const copilot = `${copilotDirectory}/demo/SKILL.md`;
+    const unmanaged = '.claude/skills/demo/SKILL.md';
+    const body = (ref) =>
+      `---\nname: demo\ndescription: A fixture skill.\nmetadata:\n  github-repo: ${resource.source_repository}\n  github-path: ${resource.source_path}\n  github-pinned: ${ref}\n---\nSkill body at ${ref}.\n`;
+    const write = (file, content) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, content);
+    };
+    write(path.join(target, standard), body(resource.source_ref));
+    write(path.join(target, unmanaged), body(resource.source_ref));
+    const lockFile = path.join(target, '.agents/kitia-lock.json');
+    write(
+      lockFile,
+      JSON.stringify({
+        lock_version: 1,
+        catalog: 'grasdouble/Kitia',
+        sources: {
+          [resource.catalog]: {
+            skills: {
+              demo: {
+                source_repository: resource.source_repository,
+                source_path: resource.source_path,
+                source_ref: resource.source_ref,
+                files: { [standard]: installedFingerprint(target, standard) },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    const paths = () =>
+      readInstalledSourceSkills(target, [resource])[0].installations.map(({ destination, path }) => [
+        destination,
+        path,
+      ]);
+    const before = fs.readFileSync(lockFile);
+    assert.deepEqual(paths(), [['standard', standard]]);
+    assert.deepEqual(fs.readFileSync(lockFile), before, 'recognition does not rewrite the inventory');
+    const seen = [];
+    const invoke = (args) => {
+      const file = path.join(args[args.indexOf('--dir') + 1], 'demo/SKILL.md');
+      seen.push(path.relative(target, file));
+      write(file, body(args[args.indexOf('--pin') + 1]));
+      return 0;
+    };
+    runSourceOperation({ action: 'install', target, scope, resource, destinations: ['copilot'] }, invoke);
+    assert.deepEqual(seen, [copilot]);
+    assert.deepEqual(paths(), [
+      ['standard', standard],
+      ['copilot', copilot],
+    ]);
+    assert.equal(fs.readFileSync(path.join(target, standard), 'utf8'), body(resource.source_ref));
+    const next = { ...resource, source_ref: 'b'.repeat(40) };
+    updateSourceResources(readInstalledSourceSkills(target, [next]), target, { scope }, invoke);
+    assert.deepEqual(seen, [copilot, standard, copilot]);
+    assert.equal(fs.readFileSync(path.join(target, unmanaged), 'utf8'), body(resource.source_ref));
+    uninstallSourceResource(next, target);
+    assert.equal(fs.existsSync(path.join(target, standard)), false);
+    assert.equal(fs.existsSync(path.join(target, copilot)), false);
+    assert.equal(fs.readFileSync(path.join(target, unmanaged), 'utf8'), body(resource.source_ref));
+  });
+}

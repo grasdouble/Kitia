@@ -2,6 +2,11 @@ import type {
   AddCatalogRequest as CatalogRequest,
   UserCatalog as Catalog,
 } from '@grasdouble/kitia/src/core/catalogs/model.ts';
+import {
+  installationPath,
+  resolveInstallationDestinations,
+} from '@grasdouble/kitia/src/core/installations/destinations.ts';
+import type { InstallationScope } from '@grasdouble/kitia/src/core/installations/model.ts';
 import type { CatalogResource } from '@grasdouble/kitia/src/core/resources/model.ts';
 import type { DashboardActionResult as ActionResult } from '@grasdouble/kitia/src/tui/action-result.ts';
 import type {
@@ -18,11 +23,10 @@ import {
   type DemoResource,
 } from './demoData';
 
-type Scope = 'project' | 'user';
-type Tool = 'copilot' | 'claude' | 'both';
 type IndexedResource = { resource: CatalogResource; sample: DemoResource };
 type CatalogState = { config: Catalog; revision: number; entries: IndexedResource[] };
-type Installation = IndexedResource & { scope: Scope; tool: Tool; ref: string; content: string };
+type DemoFile = { ref: string; content: string };
+type Installation = { resource: CatalogResource & { scope: InstallationScope }; files: Map<string, DemoFile> };
 
 const versions = revisions.map(({ sha, label }, index) => ({
   sha: sha.padEnd(40, '0'),
@@ -155,7 +159,7 @@ function indexCatalog(config: CatalogRequest, revision = 0): CatalogState {
         license_spdx: sample.license,
         limitations: [demoNotice],
         ...(sample.kind === 'instruction'
-          ? { apply_to: [sample.id === 'typescript' ? '**/*.ts,**/*.tsx' : '**/*.md'] }
+          ? { apply_to: sample.id === 'typescript' ? ['**/*.ts', '**/*.tsx'] : ['**/*.md'] }
           : {}),
       },
     });
@@ -177,22 +181,19 @@ function indexCatalog(config: CatalogRequest, revision = 0): CatalogState {
   return { config: copy(config), revision, entries: selected };
 }
 
-function installedPaths(resource: CatalogResource, tool: Tool, scope: Scope): string[] {
-  return (tool === 'both' ? ['copilot', 'claude'] : [tool]).map((client) => {
-    if (resource.kind === 'skill')
-      return `${client === 'claude' ? '.claude' : '.agents'}/skills/${resource.id}/SKILL.md`;
-    if (resource.kind === 'agent')
-      return client === 'claude'
-        ? `.claude/agents/${resource.id}.md`
-        : `${scope === 'user' ? '.copilot' : '.github'}/agents/${resource.id}.agent.md`;
-    return client === 'claude'
-      ? `.claude/rules/${resource.id}.md`
-      : `.github/instructions/${resource.id}.instructions.md`;
-  });
-}
-
 function contentAt(sample: DemoResource, ref: string): string {
   return sample.content + (ref === versions[0].sha ? '' : `\n<!-- Simulated historical demo fixture: ${ref} -->\n`);
+}
+
+function installedFileAt({ resource, sample }: IndexedResource, ref: string, path: string): DemoFile {
+  const content = contentAt(sample, ref);
+  return {
+    ref,
+    content:
+      resource.kind === 'instruction' && path.startsWith('.claude/')
+        ? content.replace(/^---\napplyTo: [^\n]*\n---/, `---\npaths: ${JSON.stringify(resource.apply_to)}\n---`)
+        : content,
+  };
 }
 
 /** A reset creates a completely independent, browser-only installation and catalog store. */
@@ -215,19 +216,24 @@ export function createTuiDemoSession(): { resources: CatalogResource[]; actions:
   const sourceSnapshot = () => copy(candidates().map(({ resource }) => resource));
   const inventory = (): CatalogResource[] =>
     [...installations.values()]
-      .map((installation) => {
-        const resource = installation.resource;
+      .map(({ resource, files }) => {
         const source = findSource(resource);
-        const removed = resource.managed !== false && !source;
-        const outdated = resource.managed !== false && source && source.resource.source_ref !== installation.ref;
+        const managed = resource.managed !== false;
+        const removed = managed && !source;
+        const refs = [...new Set([...files.values()].map(({ ref }) => ref))];
+        const stale = source ? [...files].filter(([, file]) => file.ref !== source.resource.source_ref) : [];
         return copy({
           ...resource,
-          scope: installation.scope,
-          source_ref: resource.managed === false ? undefined : installation.ref,
-          version: resource.managed === false ? '-' : installation.ref.slice(0, 7),
+          paths: [...files.keys()],
+          source_ref: managed && refs.length === 1 ? refs[0] : undefined,
+          version: managed ? refs.map((ref) => ref.slice(0, 7)).join(', ') : '-',
           removed,
-          status: resource.managed === false ? 'unmanaged' : removed || outdated ? 'attention' : 'current',
-          issues: removed ? [{ code: 'REMOVED_FROM_CATALOG' }] : outdated ? [{ code: 'UPDATE_AVAILABLE' }] : [],
+          status: managed ? (removed || stale.length ? 'attention' : 'current') : 'unmanaged',
+          issues: removed
+            ? [{ code: 'REMOVED_FROM_CATALOG' }]
+            : stale.length
+              ? [{ code: 'UPDATE_AVAILABLE', paths: stale.map(([path]) => path) }]
+              : [],
         });
       })
       .sort((left, right) => key(left).localeCompare(key(right)));
@@ -243,34 +249,26 @@ export function createTuiDemoSession(): { resources: CatalogResource[]; actions:
       ...copy(entry.resource),
       scope: initial.scope,
       managed: true,
-      paths: installedPaths(entry.resource, 'copilot', initial.scope),
     };
-    installations.set(key(resource), {
-      ...entry,
-      resource,
-      scope: initial.scope,
-      tool: 'copilot',
-      ref,
-      content: contentAt(entry.sample, ref),
-    });
+    const files = new Map<string, DemoFile>();
+    for (const layout of resolveInstallationDestinations(resource.kind, initial.scope)) {
+      const path = installationPath(layout, resource.id);
+      files.set(path, installedFileAt(entry, ref, path));
+    }
+    installations.set(key(resource), { resource, files });
   }
   const localSample = samples.find((sample) => sample.id === 'testing')!;
-  const localResource: CatalogResource = {
+  const localResource: Installation['resource'] = {
     id: 'local-testing',
     kind: 'skill',
     scope: 'project',
     managed: false,
     description: '[Demo fixture] Unmanaged local copy of the bundled testing skill.',
-    paths: ['.agents/skills/local-testing/SKILL.md'],
     limitations: [demoNotice],
   };
   installations.set(key(localResource), {
     resource: localResource,
-    sample: localSample,
-    scope: 'project',
-    tool: 'copilot',
-    ref: versions[0].sha,
-    content: localSample.content,
+    files: new Map([['.agents/skills/local-testing/SKILL.md', { ref: versions[0].sha, content: localSample.content }]]),
   });
 
   const result = (messages: string[] = []): ActionResult => ({
@@ -331,16 +329,23 @@ export function createTuiDemoSession(): { resources: CatalogResource[]; actions:
         if (resource.scope && (!current || !sameSource(current.resource, resource)))
           return fail('Demo installation no longer exists.');
         if (!resource.scope && !source) return fail('Demo source no longer exists in a configured catalog.');
-        const ref = current && resource.scope ? current.ref : source!.resource.source_ref!;
-        const content = current && resource.scope ? current.content : contentAt(source!.sample, ref);
-        const paths = current && resource.scope ? current.resource.paths! : [sourcePath(source!.sample)];
-        const files = paths.map((path) => ({ path, content }));
+        const files =
+          current && resource.scope
+            ? [...current.files].map(([path, { content, ref }]) => ({ path, content, ref }))
+            : [
+                {
+                  path: sourcePath(source!.sample),
+                  content: contentAt(source!.sample, source!.resource.source_ref!),
+                  ref: source!.resource.source_ref!,
+                },
+              ];
+        const refs = [...new Set(files.map(({ ref }) => ref))];
         return {
-          ...result([`Demo preview at ${ref}. ${demoNotice}`]),
-          previewFiles: files,
+          ...result([`Demo preview at ${refs.join(', ')}. ${demoNotice}`]),
+          previewFiles: files.map(({ path, content }) => ({ path, content })),
           previewTree: [
             resource.scope ? `demo ${scope} installation/` : 'bundled demo source/',
-            ...paths.map((path, index) => `${index === paths.length - 1 ? '└──' : '├──'} ${path}`),
+            ...files.map(({ path }, index) => `${index === files.length - 1 ? '└──' : '├──'} ${path}`),
           ],
           previewAuditLines: [
             'Demo only: no security audit was run.',
@@ -373,32 +378,43 @@ export function createTuiDemoSession(): { resources: CatalogResource[]; actions:
         );
       }
       if (operation === 'update' && !current) return fail('No matching demo installation exists to update.');
-      if (operation === 'install' && current && !options.ref)
-        return fail('Already installed in this demo scope; use update or select a revision.');
-      const tool = operation === 'update' ? current!.tool : (options.tool ?? 'copilot');
-      if (tool !== 'copilot' && tool !== 'claude' && tool !== 'both')
-        return fail('Demo client must be copilot, claude, or both.');
+      const replacing = operation === 'update' || Boolean(current && options.ref);
+      const trackedPaths = current ? [...current.files.keys()] : [];
+      let paths = trackedPaths;
+      if (operation === 'install' && (!replacing || options.destinations)) {
+        try {
+          paths = resolveInstallationDestinations(resource.kind, scope, options.destinations).map((layout) =>
+            installationPath(layout, resource.id),
+          );
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (replacing && (paths.length !== trackedPaths.length || paths.some((path) => !current?.files.has(path)))) {
+        return fail('Replacing a demo revision requires all tracked destinations; omit the destination selection.');
+      }
+      if (!replacing) {
+        paths = paths.filter((path) => !current?.files.has(path));
+        if (!paths.length) return fail('The selected demo destinations are already installed.');
+      }
       const ref = options.ref ?? source.resource.source_ref!;
       if (!versions.some((version) => version.sha === ref))
         return fail('Demo only: that revision is not bundled. Select one of the three fixture commits.');
+      if (
+        !replacing &&
+        resource.kind !== 'skill' &&
+        current &&
+        [...current.files.values()].some((file) => file.ref !== ref)
+      ) {
+        return fail('Update the existing demo installation to the catalog revision before adding another destination.');
+      }
       options.onProgress?.(`Applying bundled ${resource.kind}:${resource.id} in demo memory...`);
-      const installed = {
-        ...copy(source.resource),
-        scope,
-        managed: true,
-        source_ref: ref,
-        paths: installedPaths(source.resource, tool, scope),
-      };
-      installations.set(key(installed), {
-        ...source,
-        resource: installed,
-        scope,
-        tool,
-        ref,
-        content: contentAt(source.sample, ref),
-      });
+      const installed: Installation['resource'] = { ...copy(source.resource), scope, managed: true };
+      const files = new Map(current?.files);
+      for (const path of paths) files.set(path, installedFileAt(source, ref, path));
+      installations.set(key(installed), { resource: installed, files });
       return result([
-        `Demo only: ${operation === 'update' ? 'updated' : 'installed'} ${resource.kind}:${resource.id} at ${ref.slice(0, 7)} (${scope}, ${tool}).`,
+        `Demo only: ${replacing ? 'updated' : 'installed'} ${resource.kind}:${resource.id} at ${ref.slice(0, 7)} (${scope}: ${paths.join(', ')}).`,
         'Only browser memory changed. No security audit was run.',
       ]);
     },

@@ -33,12 +33,12 @@ test('local update conflicts produce a confirmation prompt without losing ref or
   });
 });
 
-test('GitHub force retries are limited to one retry per reported agent', () => {
-  const requested = { action: 'update', resource, ghForceAgents: ['already-retried'] };
+test('GitHub force retries are limited to one retry per reported destination', () => {
+  const requested = { action: 'update', resource, ghForceAgents: ['standard'] };
   const prompt = createForceRetryPrompt(requested, {
     code: 'GH_FORCE_REQUIRED',
     recoverable: true,
-    agent: 'new-agent',
+    agent: 'claude',
     paths: ['file'],
   });
   assert.deepEqual(prompt.confirmation, {
@@ -46,8 +46,8 @@ test('GitHub force retries are limited to one retry per reported agent', () => {
     resource,
     forceRetry: true,
     ghForceRetry: true,
-    ghForceAgent: 'new-agent',
-    ghForceAgents: ['already-retried', 'new-agent'],
+    ghForceAgent: 'claude',
+    ghForceAgents: ['standard', 'claude'],
     conflict: { category: 'github-force-required', paths: ['file'] },
   });
   assert.equal(prompt.message, 'GitHub CLI requested overwrite; confirm whether to retry with --force.');
@@ -55,7 +55,7 @@ test('GitHub force retries are limited to one retry per reported agent', () => {
     createForceRetryPrompt(requested, {
       code: 'GH_FORCE_REQUIRED',
       recoverable: true,
-      agent: 'already-retried',
+      agent: 'standard',
     }),
     null,
   );

@@ -97,7 +97,16 @@ function fixture(t) {
     cloneCount: () => (fs.readFileSync(trace, 'utf8').match(/built-in: git clone /g) || []).length,
     operate(operation, target, resources, options = {}) {
       return executeInstallationOperation(
-        { operation, target, userTarget, scope: 'project', tool: 'both', ...options },
+        {
+          operation,
+          target,
+          userTarget,
+          scope: 'project',
+          ...(operation === 'install' && !options.ref
+            ? { destinations: [options.resource?.kind === 'skill' ? 'standard' : 'copilot', 'claude'] }
+            : {}),
+          ...options,
+        },
         resources,
       );
     },
@@ -146,13 +155,13 @@ test('audited selected replacements block incomplete coverage before touching ei
     const { kind, source_ref: initialRef } = resource;
     const target = repo.target(kind);
     if (kind === 'skill') {
-      for (const [i, location] of destinations.skill.entries()) {
+      for (const location of destinations.skill) {
         write(
           target,
           location,
           `${skillHeader}metadata:\n  github-repo: ${repository}\n  github-path: ${resource.source_path}\n  github-pinned: ${initialRef}\n---\nSkill body.\n`,
         );
-        recordSourceInstallation(resource, target, i === 0 ? 'claude-code' : 'github-copilot');
+        recordSourceInstallation(resource, target, location);
       }
     } else {
       await repo.operate('install', target, initial, { resource });
@@ -234,7 +243,7 @@ test('failed inventory publication restores installations and a bulk update, inc
   assertInventoryMatchesFiles(target, initial);
 });
 
-test('one-runtime installs cannot advance a shared pin; both runtimes or update can', async (t) => {
+test('one destination cannot advance a shared pin; all tracked destinations or update can', async (t) => {
   const repo = fixture(t);
   const initial = repo.commit({ agent: `${agentHeader}First agent.\n`, instruction: globalInstruction });
   const next = repo.commit({
@@ -243,16 +252,17 @@ test('one-runtime installs cannot advance a shared pin; both runtimes or update 
   });
   for (const resource of initial) {
     const target = repo.target(resource.kind);
-    for (const tool of ['claude', 'copilot']) await repo.operate('install', target, initial, { resource, tool });
+    for (const destination of ['claude', 'copilot'])
+      await repo.operate('install', target, initial, { resource, destinations: [destination] });
     const paths = [lock, ...destinations[resource.kind]];
     const before = snapshot(target, paths);
     const upcoming = next.find(({ kind }) => kind === resource.kind);
-    for (const [i, tool] of ['claude', 'copilot'].entries()) {
+    for (const [i, destination] of ['claude', 'copilot'].entries()) {
       await assert.rejects(
-        repo.operate('install', target, next, { resource: upcoming, tool, force: true }),
+        repo.operate('install', target, next, { resource: upcoming, destinations: [destination], force: true }),
         (error) => {
           assert.equal(error.code, 'SHARED_SOURCE_PIN');
-          assert.match(error.message, /--tool both or use update/);
+          assert.match(error.message, /Select all tracked destinations or use update/);
           assert.deepEqual(error.paths, [destinations[resource.kind][1 - i]]);
           return true;
         },
@@ -301,7 +311,16 @@ test('historical instructions use pinned scopes for both runtimes and bulk updat
 
   beforeClones = repo.cloneCount();
   const ref = global[0].source_ref;
-  await repo.operate('install', target, latest, { resource: currentInstruction, tool: 'claude', ref, audit: true });
+  await assert.rejects(
+    repo.operate('install', target, latest, {
+      resource: currentInstruction,
+      destinations: ['claude'],
+      ref,
+      audit: true,
+    }),
+    /Replacing an installed revision requires all tracked destinations/,
+  );
+  await repo.operate('install', target, latest, { resource: currentInstruction, ref, audit: true });
   assert.equal(repo.cloneCount() - beforeClones, 1, 'audited replacement reuses acquisition');
   assertInstruction(['**'], globalInstruction);
   assertInventoryMatchesFiles(target, [{ ...currentInstruction, source_ref: ref }]);

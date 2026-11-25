@@ -1,6 +1,14 @@
 import type { Key } from 'ink';
 import { useState } from 'react';
 
+import {
+  availableInstallationDestinations,
+  installationPath,
+  installationScopes,
+  resolveInstallationDestinations,
+  type InstallationDestination,
+} from '../../../core/installations/destinations.js';
+import type { InstallationScope } from '../../../core/installations/model.js';
 import type { ScanError } from '../../../core/inventory/checks.js';
 import type { CatalogResource } from '../../../core/resources/model.js';
 import type { DashboardActionResult } from '../../action-result.js';
@@ -24,9 +32,11 @@ export function useResourceWorkflow(
   const [installedResources, setInstalledResources] = useState(() => [...resources]);
   const [scanErrors, setScanErrors] = useState(() => [...errors]);
   const [installResource, setInstallResource] = useState<CatalogResource | null>(null);
-  const [installScope, setInstallScope] = useState('project');
-  const [installTool, setInstallTool] = useState('copilot');
-  const [installFocus, setInstallFocus] = useState(0);
+  const [installScope, setInstallScope] = useState<InstallationScope>('project');
+  const [destinationSelections, setDestinationSelections] = useState<
+    Partial<Record<InstallationScope, readonly InstallationDestination[]>>
+  >({});
+  const [installFocus, setInstallFocus] = useState(-1);
   const [confirmation, setConfirmation] = useState<PendingDashboardAction | null>(null);
   const [confirmationChoice, setConfirmationChoice] = useState(0);
   const [confirmationStage, setConfirmationStage] = useState(1);
@@ -38,6 +48,42 @@ export function useResourceWorkflow(
     action: 'install' | 'update';
   } | null>(null);
   const [installRef, setInstallRef] = useState<string | null>(null);
+
+  const scopeChoices = installResource
+    ? installationScopes.filter((scope) => availableInstallationDestinations(installResource.kind, scope).length)
+    : [];
+  const installed = installResource
+    ? installedResources.find(
+        (resource) =>
+          resource.managed !== false &&
+          resource.scope === installScope &&
+          resource.catalog === installResource.catalog &&
+          resource.kind === installResource.kind &&
+          resource.id === installResource.id,
+      )
+    : undefined;
+  const replacing = Boolean(installed && installRef);
+  const scopeError = scanErrors.find((error) => error.scope === installScope);
+  const selection = installResource
+    ? (destinationSelections[installScope] ??
+      resolveInstallationDestinations(installResource.kind, installScope).map(({ id }) => id))
+    : [];
+  const destinationChoices =
+    installResource && !replacing
+      ? availableInstallationDestinations(installResource.kind, installScope).map((layout) => {
+          const path = installationPath(layout, installResource.id);
+          const tracked = installed?.paths?.includes(path) ?? false;
+          return {
+            id: layout.id,
+            label: layout.label,
+            path,
+            tracked,
+            selected: !tracked && selection.includes(layout.id),
+          };
+        })
+      : [];
+  const selectedDestinations = destinationChoices.filter(({ selected }) => selected).map(({ id }) => id);
+  const canReview = !scopeError && (replacing || selectedDestinations.length > 0);
 
   const queueForceRetry = (
     requested: PendingDashboardAction,
@@ -114,7 +160,7 @@ export function useResourceWorkflow(
       if (!actions.execute) throw new Error('Dashboard action handler is unavailable.');
       const result = await actions.execute(requested.action, requested.resource, {
         scope: requested.scope,
-        tool: requested.tool,
+        destinations: requested.destinations,
         ...(requested.ref ? { ref: requested.ref } : {}),
         ...(requested.forceRetry && !requested.ghForceRetry ? { force: true } : {}),
         ...(requested.ghForceRetry ? { ghForce: true, ghForceAgent: requested.ghForceAgent } : {}),
@@ -161,12 +207,12 @@ export function useResourceWorkflow(
     }
   };
 
-  const openInstallOptions = (resource: CatalogResource) => {
+  const openInstallOptions = (resource: CatalogResource, ref: string | null = null) => {
     setInstallResource(resource);
-    setInstallRef(null);
+    setInstallRef(ref);
     setInstallScope('project');
-    setInstallTool('copilot');
-    setInstallFocus(resource.kind === 'instruction' ? 1 : 0);
+    setDestinationSelections({});
+    setInstallFocus(availableInstallationDestinations(resource.kind, 'user').length ? -1 : 0);
     setScreenMode('install-options');
     setActionMessage('');
   };
@@ -189,7 +235,10 @@ export function useResourceWorkflow(
     setConfirmation(null);
     setConfirmationStage(1);
     setConfirmationChoice(0);
-    if (requested.action === 'install') setScreenMode('inventory');
+    if (requested.action === 'install' || (requested.action === 'update' && requested.scope)) {
+      setScreenMode('inventory');
+      setInstallResource(null);
+    }
     void runConfirmedAction(requested);
   };
 
@@ -216,35 +265,9 @@ export function useResourceWorkflow(
       const ref = versions[selectedIndex].sha;
       setSourceVersionPicker(null);
       if (action === 'update') {
-        setConfirmation({ action, resource, ref });
-        setConfirmationChoice(1);
-        setConfirmationStage(1);
-        setActionMessage('');
+        requestConfirmation({ action, resource, ref }, 1);
       } else {
-        const installedScopes = ['project', 'user'].filter((scope) =>
-          installedResources.some(
-            (installed) =>
-              installed.scope === scope &&
-              installed.catalog === resource.catalog &&
-              installed.kind === resource.kind &&
-              installed.id === resource.id,
-          ),
-        );
-        if (installedScopes.length === 1) {
-          const scope = installedScopes[0];
-          setConfirmation({ action: 'update', resource: { ...resource, scope }, scope, ref });
-          setConfirmationChoice(1);
-          setConfirmationStage(1);
-          setActionMessage('');
-        } else {
-          setInstallResource(resource);
-          setInstallRef(ref);
-          setInstallScope('project');
-          setInstallTool('copilot');
-          setInstallFocus(0);
-          setScreenMode('install-options');
-          setActionMessage('');
-        }
+        openInstallOptions(resource, ref);
       }
     }
   };
@@ -256,52 +279,55 @@ export function useResourceWorkflow(
     } else if (character === 'y') chooseConfirmation(1);
     else if (key.return) chooseConfirmation(confirmationChoice);
   };
-  const handleOptionsInput = (input: string, key: Key) => {
-    if (!installResource) return;
-    if (key.escape) setScreenMode('catalog');
-    else if (key.tab) {
-      setInstallFocus(installResource.kind === 'instruction' ? 1 : installFocus === 0 ? 1 : 0);
-    } else if ((key.upArrow || key.downArrow) && installResource.kind !== 'instruction') {
-      setInstallFocus(installFocus === 0 ? 1 : 0);
-    } else if (key.leftArrow || key.rightArrow) {
-      const scopeFocused = installFocus === 0 && installResource.kind !== 'instruction';
-      const choices = scopeFocused ? ['project', 'user'] : ['copilot', 'claude', 'both'];
-      const current = scopeFocused ? installScope : installTool;
-      const offset = key.rightArrow ? 1 : -1;
-      const index = cycleIndex(choices.length, choices.indexOf(current), offset);
-      if (scopeFocused) setInstallScope(choices[index]);
-      else setInstallTool(choices[index]);
-    } else if (key.return) {
-      const alreadyInstalled = installedResources.some(
-        (resource) =>
-          resource.scope === installScope &&
-          resource.catalog === installResource.catalog &&
-          resource.kind === installResource.kind &&
-          resource.id === installResource.id,
-      );
-      const scopeError = scanErrors.find((error) => error.scope === installScope);
-      if ((!alreadyInstalled || installRef) && !scopeError) {
-        const replacement = alreadyInstalled && Boolean(installRef);
-        setConfirmation({
-          action: replacement ? 'update' : 'install',
-          resource: { ...installResource, scope: installScope },
-          scope: installScope,
-          tool: installTool,
-          ...(installRef ? { ref: installRef } : {}),
-        });
-        setConfirmationChoice(replacement ? 1 : 0);
-      }
+  const reviewOptions = () => {
+    if (!installResource || !canReview) return;
+    if (installed && installRef) {
+      requestConfirmation({ action: 'update', resource: installed, scope: installScope, ref: installRef }, 1);
+    } else {
+      requestConfirmation({
+        action: 'install',
+        resource: { ...installResource, scope: installScope },
+        scope: installScope,
+        destinations: selectedDestinations,
+        ...(installRef ? { ref: installRef } : {}),
+      });
     }
   };
-  const chooseOption = (group: 'scope' | 'client', index: number) => {
-    if (!installResource) return;
+  const chooseOption = (group: 'scope' | 'destination', index: number) => {
     if (group === 'scope') {
-      const choices = installResource.kind === 'instruction' ? ['project'] : ['project', 'user'];
-      setInstallScope(choices[Math.min(index, choices.length - 1)]);
-      setInstallFocus(0);
-    } else {
-      setInstallTool(['copilot', 'claude', 'both'][Math.min(index, 2)]);
-      setInstallFocus(1);
+      const scope = scopeChoices[index];
+      if (!scope) return;
+      setInstallScope(scope);
+      setInstallFocus(-1);
+      return;
+    }
+    const choice = destinationChoices[index];
+    if (!choice || choice.tracked) return;
+    setInstallFocus(index);
+    setDestinationSelections((current) => {
+      const selected = current[installScope] ?? selection;
+      return {
+        ...current,
+        [installScope]: selected.includes(choice.id)
+          ? selected.filter((id) => id !== choice.id)
+          : [...selected, choice.id],
+      };
+    });
+  };
+  const handleOptionsInput = (input: string, key: Key) => {
+    if (!installResource) return;
+    if (key.escape) {
+      setScreenMode('catalog');
+      setInstallResource(null);
+    } else if (key.return) reviewOptions();
+    else if (input === ' ' && installFocus >= 0) chooseOption('destination', installFocus);
+    else if ((key.leftArrow || key.rightArrow) && installFocus < 0) {
+      const offset = key.rightArrow ? 1 : -1;
+      chooseOption('scope', cycleIndex(scopeChoices.length, scopeChoices.indexOf(installScope), offset));
+    } else if (key.tab || input === '\t' || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+      const first = scopeChoices.length > 1 ? -1 : 0;
+      const offset = key.shift || key.upArrow || key.leftArrow ? -1 : 1;
+      setInstallFocus(first + cycleIndex(destinationChoices.length - first, installFocus - first, offset));
     }
   };
   const modal = (columns: number, rows: number, optionsVisible: boolean) => {
@@ -318,11 +344,13 @@ export function useResourceWorkflow(
       return optionsModal({
         resource: installResource,
         scope: installScope,
-        tool: installTool,
+        scopeChoices,
+        destinations: destinationChoices,
         ref: installRef,
         focus: installFocus,
-        resources: installedResources,
-        errors: scanErrors,
+        replacing,
+        scopeError,
+        canReview,
         columns,
       });
     return null;
@@ -340,6 +368,7 @@ export function useResourceWorkflow(
     requestConfirmation,
     chooseConfirmation,
     chooseOption,
+    reviewOptions,
     handleVersionInput,
     handleConfirmationInput,
     handleOptionsInput,

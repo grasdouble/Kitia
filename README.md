@@ -2,7 +2,7 @@
 
 Your AI toolkit, in good hands.
 
-Kitia is a terminal user interface (TUI) for discovering and managing skills, agents, and instructions from external GitHub repositories, then installing them for Claude Code and GitHub Copilot. Its interactive dashboard is the primary interface; the CLI supports automation and scripted workflows. Catalog metadata stays on your machine; resource content remains in its upstream repository.
+Kitia is a terminal user interface (TUI) for discovering and managing skills, agents, and instructions from external GitHub repositories. Install skills in the shared `.agents/skills/` directory or in dedicated locations for GitHub Copilot and Claude Code. Its interactive dashboard is the primary interface; the CLI supports automation and scripted workflows. Catalog metadata stays on your machine; resource content remains in its upstream repository.
 
 **[Project website](https://grasdouble.github.io/Kitia/)** · **[CLI contract](docs/cli-contract.md)**
 
@@ -15,12 +15,12 @@ npm install --global @grasdouble/kitia
 kitia catalog add ai-kit https://github.com/grasdouble/AI-Kit
 kitia search "documentation" --catalog ai-kit
 kitia preview skill create-readme --catalog ai-kit
-kitia install skill create-readme --catalog ai-kit --tool both --dry-run
+kitia install skill create-readme --catalog ai-kit --destination standard --destination claude --dry-run
 ```
 
 After the dry run, remove `--dry-run` to install. Global installation adds the `kitia` command; if your shell cannot find it, add npm's global executable directory to `PATH`. To run Kitia without a global install, use `npx --yes @grasdouble/kitia <command>` instead.
 
-By default, Kitia installs to the current project for Copilot. Choose `--tool claude`, `--tool copilot`, or `--tool both`; skills can also be installed for your user account with `--scope user`.
+Kitia installs into the current project by default. Skills default to `standard`; agents and instructions default to `copilot`. Repeat `--destination` to install to multiple locations. Skills and agents also support `--scope user`; instructions remain project-only.
 
 ## Update Kitia
 

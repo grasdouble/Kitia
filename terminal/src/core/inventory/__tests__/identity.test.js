@@ -45,8 +45,9 @@ const unrelatedResources = [
   },
 ];
 const skillDirectories = {
-  copilot: ['.agents/skills', 'github-copilot'],
-  claude: ['.claude/skills', 'claude-code'],
+  standard: { project: '.agents/skills', user: '.agents/skills' },
+  copilot: { project: '.github/skills', user: '.copilot/skills' },
+  claude: { project: '.claude/skills', user: '.claude/skills' },
 };
 let temporary;
 
@@ -57,14 +58,13 @@ afterEach(() => {
 
 for (const order of ['skill-first', 'skill-last']) {
   for (const scope of ['project', 'user']) {
-    for (const tool of ['copilot', 'claude', 'both']) {
-      test(`mixed-kind catalog identity keeps tracked ${scope} ${tool} skill when ${order}`, () => {
+    for (const selected of [['standard'], ['copilot'], ['claude'], ['standard', 'copilot', 'claude']]) {
+      test(`mixed-kind catalog identity keeps tracked ${scope} ${selected.join('+')} skill when ${order}`, () => {
         temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'kitia-inventory-identity-'));
         const target = path.join(temporary, 'target');
         fs.mkdirSync(target);
-        const agents = tool === 'both' ? Object.keys(skillDirectories) : [tool];
-        for (const agent of agents) {
-          const [directory, installationAgent] = skillDirectories[agent];
+        for (const destination of selected) {
+          const directory = skillDirectories[destination][scope];
           const relativePath = `${directory}/shared-id/SKILL.md`;
           const skillFile = path.join(target, relativePath);
           fs.mkdirSync(path.dirname(skillFile), { recursive: true });
@@ -84,7 +84,7 @@ for (const order of ['skill-first', 'skill-last']) {
               '',
             ].join('\n'),
           );
-          recordSourceInstallation(resource, target, installationAgent);
+          recordSourceInstallation(resource, target, relativePath);
         }
 
         const catalogResources =
@@ -100,8 +100,10 @@ for (const order of ['skill-first', 'skill-last']) {
           [{ kind: 'skill', id: resource.id, catalog }],
         );
         assert.equal(installed[0].removed, false);
-        assert.equal(installed[0].tracked, true);
-        assert.equal(installed[0].installations.length, agents.length);
+        assert.deepEqual(
+          installed[0].installations.map(({ destination }) => destination),
+          selected,
+        );
         assert.ok(
           installed[0].installations.every(({ provenanceMatches, ref }) => provenanceMatches && ref === pinnedRef),
         );
@@ -127,7 +129,6 @@ for (const order of ['skill-first', 'skill-last']) {
         assert.equal(afterUpdate.length, 1);
         assert.equal(afterUpdate[0].resource.kind, 'skill');
         assert.equal(afterUpdate[0].removed, false);
-        assert.equal(afterUpdate[0].tracked, true);
         assert.ok(
           afterUpdate[0].installations.every(({ provenanceMatches, ref }) => provenanceMatches && ref === pinnedRef),
         );

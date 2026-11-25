@@ -366,7 +366,6 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
       {
         ...options,
         target: options.target!, // Only mutations use the target, and their parser always sets it.
-        tool: options.tool ?? undefined,
         planOnly: options.json,
         operation,
         onMessage: ({ level, text }: InstallationMessage) => output[level](text),
