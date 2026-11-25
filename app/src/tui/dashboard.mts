@@ -8,6 +8,7 @@ import {
   filterInventory,
   inventoryCatalogLabels,
 } from '../core/inventory/view.js';
+import { filterCatalogResources } from '../core/resources/catalog-view.js';
 import type { CatalogResource } from '../core/resources/model.js';
 import { dashboardControlsLayout } from './components/controls/control-layout-plan.mjs';
 import type {
@@ -27,7 +28,6 @@ import {
   cycleFilter,
   cycleIndex,
   cycleInventoryLicense,
-  filterCatalogResources,
   inventoryFilterOptions,
 } from './helpers.mjs';
 import {

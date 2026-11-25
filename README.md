@@ -34,6 +34,8 @@ Run `kitia dashboard` to browse project and user inventories, inspect resources,
 
 Run `kitia web` from your project to search and filter the project and user inventories, inspect installation details, and preview and audit installed files. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop. Use the dashboard or CLI to change installations and catalogs.
 
+In **Browse resources**, search your configured catalogs, preview pinned sources, and inspect revision history without installing anything.
+
 - **Basic** discovers skills recursively under `skills/**/SKILL.md`.
 - **Custom** maps selected repository-relative paths for skills, agents, and instructions. Multiple paths can be registered in one catalog.
 

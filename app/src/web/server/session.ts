@@ -4,6 +4,7 @@ import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import path from 'node:path';
 
+import type { CatalogResourceSelector } from '../../application/catalog-preview.js';
 import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
 import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
 import { runOperation } from '../../application/worker-client.js';
@@ -29,24 +30,36 @@ async function resolveDirectory(directory: string) {
   return resolved;
 }
 
-const previewRoute = '/api/inventory/preview?';
+const localPreviewRoute = '/api/inventory/preview?';
+const catalogPreviewRoute = '/api/catalog/preview?';
+const catalogRevisionsRoute = '/api/catalog/revisions?';
+
+function resourceIdentity(params: URLSearchParams) {
+  const catalog = params.get('catalog');
+  const kind = params.get('kind');
+  const id = params.get('id');
+  if (catalog === null || !id || (kind !== 'skill' && kind !== 'agent' && kind !== 'instruction')) return undefined;
+  return { catalog, kind, id } as const;
+}
+
 function installedSelector(query: string): InstalledResourceSelector | undefined {
   const params = new URLSearchParams(query);
   if (params.size !== 5) return undefined;
+  const identity = resourceIdentity(params);
   const scope = params.get('scope');
-  const kind = params.get('kind');
-  const id = params.get('id');
-  const catalog = params.get('catalog');
   const managed = params.get('managed');
-  if (
-    (scope !== 'project' && scope !== 'user') ||
-    (kind !== 'skill' && kind !== 'agent' && kind !== 'instruction') ||
-    !id ||
-    catalog === null ||
-    (managed !== 'true' && managed !== 'false')
-  )
+  if (!identity || (scope !== 'project' && scope !== 'user') || (managed !== 'true' && managed !== 'false'))
     return undefined;
-  return { scope, kind, id, catalog, managed: managed === 'true' };
+  return { ...identity, scope, managed: managed === 'true' };
+}
+
+function catalogSelector(query: string): CatalogResourceSelector | undefined {
+  const params = new URLSearchParams(query);
+  if (params.size !== 4) return undefined;
+  const identity = resourceIdentity(params);
+  const ref = params.get('ref');
+  if (!identity?.catalog || !ref || !/^[a-f0-9]{40}$/i.test(ref)) return undefined;
+  return { ...identity, ref };
 }
 
 export async function startWebSession(requestedTargets: InstallationTargets) {
@@ -91,13 +104,24 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       response.end(asset.body);
       return;
     }
-    if (route !== '/api/inventory' && !route.startsWith(previewRoute)) {
+    const isLocalPreview = route.startsWith(localPreviewRoute);
+    const isCatalogPreview = route.startsWith(catalogPreviewRoute);
+    const isCatalogRevisions = route.startsWith(catalogRevisionsRoute);
+    if (
+      !(
+        route === '/api/inventory' ||
+        route === '/api/catalog' ||
+        isLocalPreview ||
+        isCatalogPreview ||
+        isCatalogRevisions
+      )
+    ) {
       sendJson(response, 404, { error: 'Not found.' });
       return;
     }
     const fetchSite = request.headers['sec-fetch-site'];
     if (fetchSite !== undefined && fetchSite !== 'same-origin') {
-      sendJson(response, 403, { error: 'Inventory requests must come from this session.' });
+      sendJson(response, 403, { error: 'API requests must come from this session.' });
       return;
     }
     const supplied = Buffer.from(request.headers.authorization || '');
@@ -113,16 +137,36 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         sendJson(response, 200, { targets, ...(await inventoryRead) });
         return;
       }
-      const selector = installedSelector(route.slice(previewRoute.length));
-      if (!selector) {
-        sendJson(response, 400, { error: 'Invalid installed resource selector.' });
+      if (route === '/api/catalog') {
+        sendJson(response, 200, await runOperation({ task: 'catalog-read' }));
         return;
       }
-      const inspection = await runOperation({ task: 'inventory-preview', targets, selector });
-      if (inspection) sendJson(response, 200, inspection);
-      else sendJson(response, 404, { error: 'This resource is not available for local preview.' });
+      if (isLocalPreview) {
+        const selector = installedSelector(route.slice(localPreviewRoute.length));
+        if (!selector) {
+          sendJson(response, 400, { error: 'Invalid installed resource selector.' });
+          return;
+        }
+        const inspection = await runOperation({ task: 'inventory-preview', targets, selector });
+        if (inspection) sendJson(response, 200, inspection);
+        else sendJson(response, 404, { error: 'This resource is not available for local preview.' });
+        return;
+      }
+      const selector = catalogSelector(
+        route.slice((isCatalogPreview ? catalogPreviewRoute : catalogRevisionsRoute).length),
+      );
+      if (!selector) {
+        sendJson(response, 400, { error: 'Invalid pinned resource selector.' });
+        return;
+      }
+      const result = isCatalogPreview
+        ? await runOperation({ task: 'catalog-preview', selector, project: targets.project })
+        : await runOperation({ task: 'catalog-revisions', selector });
+      sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: error instanceof Error ? error.message : 'Could not read the inventory.' });
+      const code = (error as NodeJS.ErrnoException)?.code;
+      const status = code === 'RESOURCE_NOT_FOUND' ? 404 : code === 'STALE_SOURCE' ? 409 : 500;
+      sendJson(response, status, { error: error instanceof Error ? error.message : 'Could not complete the request.' });
     }
   });
 

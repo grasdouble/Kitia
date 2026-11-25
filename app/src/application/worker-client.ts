@@ -7,8 +7,9 @@ import type {
   CatalogRefreshResult,
 } from '../core/catalogs/manage.js';
 import type { ResourceInspection } from '../core/inspection/model.js';
+import type { SourceInspection } from './catalog-preview.js';
 import type { ResourceActionResult } from './resource-actions.js';
-import type { CatalogSnapshot, InventoryWorkspace } from './snapshot.js';
+import type { CatalogSnapshot, InventoryWorkspace, ResourceRevision } from './snapshot.js';
 import type { OperationTask } from './worker.js';
 
 type CatalogMutation = CatalogSnapshot & { catalog: string; count: number };
@@ -16,6 +17,9 @@ type OperationResults = {
   'inventory-read': InventoryWorkspace;
   'inventory-preview': ResourceInspection | null;
   'resource-action': ResourceActionResult;
+  'catalog-read': CatalogSnapshot;
+  'catalog-preview': SourceInspection;
+  'catalog-revisions': ResourceRevision[];
   'catalog-add': CatalogMutation;
   'catalog-update': CatalogMutation;
   'catalog-remove': CatalogSnapshot;

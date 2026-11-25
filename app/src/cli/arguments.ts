@@ -417,7 +417,7 @@ function printHelp() {
   console.log(`Usage:
   Kitia onboarding                 Show the getting-started guide again
   Kitia [dashboard] [--non-interactive] (dashboard is the default command)
-  Kitia web [--no-open]             Open the local project and user inventories in a browser
+  Kitia web [--no-open]             Open local inventories and browse catalogs in a browser
   Kitia self-update [--yes]         Update the current global npm or pnpm installation
   Kitia list [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]
   Kitia search "<query>" [--catalog <catalog>] [--kind <kind>] [--tag <tag>] [--status <status>] [--license <value>] [--json]

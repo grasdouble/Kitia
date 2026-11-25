@@ -4,14 +4,9 @@ import type { InventorySnapshot, InventoryWorkspace } from '../../application/sn
 import type { InstallationScope } from '../../core/installations/model.js';
 import { filterInventory, inventoryCatalogLabels, summarizeInventory } from '../../core/inventory/view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
-import { InstalledInspection } from './inspection.js';
+import { InspectionDialog } from './inspection.js';
 import { InventoryDetails, installationStatus } from './inventory-details.js';
-
-function choices(values: Iterable<string | undefined>): string[] {
-  return [...new Set([...values].filter((value): value is string => Boolean(value)))].sort((a, b) =>
-    a.localeCompare(b),
-  );
-}
+import { ResourceFilters, resourceFilterOptions, useResourceFilters } from './resource-filters.js';
 
 export function InventorySummary({ inventory }: { inventory: InventorySnapshot }) {
   const { project, user, current, updates, warnings } = summarizeInventory(inventory.resources);
@@ -65,10 +60,7 @@ export function Inventory({
   target: string;
   token: string;
 }) {
-  const [query, setQuery] = useState('');
-  const [kind, setKind] = useState('all');
-  const [catalog, setCatalog] = useState('all');
-  const [license, setLicense] = useState('all');
+  const { filters, set } = useResourceFilters();
   const [selection, setSelection] = useState<CatalogResource>();
   const [preview, setPreview] = useState<CatalogResource>();
   const { inventory, catalogs } = data;
@@ -77,16 +69,17 @@ export function Inventory({
     () => inventory.resources.filter((resource) => resource.scope === scope),
     [inventory.resources, scope],
   );
-  const filters = useMemo(
-    () => ({
-      kinds: choices(resources.map(({ kind }) => kind)),
-      catalogs: choices(resources.map((resource) => labels.get(resource))),
-      licenses: choices(resources.flatMap(({ license_status, license_spdx }) => [license_status, license_spdx])),
-    }),
-    [resources, labels],
-  );
+  const options = useMemo(() => resourceFilterOptions(resources, labels), [resources, labels]);
   const issues = inventory.errors.filter((issue) => issue.scope === scope || issue.scope === 'catalog');
-  const visible = filterInventory(resources, query, catalog, kind, catalogs, labels, license);
+  const visible = filterInventory(
+    resources,
+    filters.query,
+    filters.catalog,
+    filters.kind,
+    catalogs,
+    labels,
+    filters.license,
+  );
   const selected = selection && visible.includes(selection) ? selection : visible[0];
   return (
     <section aria-label={`${scope === 'project' ? 'Project' : 'User'} inventory`}>
@@ -105,56 +98,7 @@ export function Inventory({
           ))}
         </ul>
       ) : null}
-      <div className="filters" role="search" aria-label="Filter resources">
-        <label>
-          Search
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-        <label>
-          Kind
-          <select value={kind} onChange={(event) => setKind(event.target.value)}>
-            <option value="all">All kinds</option>
-            {filters.kinds.map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Catalog
-          <select value={catalog} onChange={(event) => setCatalog(event.target.value)}>
-            <option value="all">All catalogs</option>
-            {filters.catalogs.map((value) => (
-              <option key={value} value={value}>
-                {value === '-' ? 'No catalog' : value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          License
-          <select value={license} onChange={(event) => setLicense(event.target.value)}>
-            <option value="all">All licenses</option>
-            {filters.licenses.map((value) => (
-              <option key={value} value={value}>
-                {value === 'not-declared' ? 'Not declared' : value}
-              </option>
-            ))}
-          </select>
-        </label>
-        {query || kind !== 'all' || catalog !== 'all' || license !== 'all' ? (
-          <button
-            type="button"
-            onClick={() => {
-              setQuery('');
-              setKind('all');
-              setCatalog('all');
-              setLicense('all');
-            }}
-          >
-            Clear filters
-          </button>
-        ) : null}
-      </div>
+      <ResourceFilters filters={filters} set={set} options={options} />
       <div className="workspace">
         <section className="panel resource-list" aria-labelledby="installed-heading">
           <h2 id="installed-heading">Installed resources</h2>
@@ -215,7 +159,19 @@ export function Inventory({
         ) : null}
       </div>
       {preview ? (
-        <InstalledInspection scope={scope} resource={preview} token={token} onClose={() => setPreview(undefined)} />
+        <InspectionDialog
+          title={preview.id}
+          subtitle={`Installed source · ${scope}`}
+          endpoint={`/api/inventory/preview?${new URLSearchParams({
+            scope,
+            kind: preview.kind,
+            id: preview.id,
+            catalog: preview.catalog || '',
+            managed: String(preview.managed !== false),
+          })}`}
+          token={token}
+          onClose={() => setPreview(undefined)}
+        />
       ) : null}
     </section>
   );

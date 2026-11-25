@@ -1,5 +1,3 @@
-import { basename, extname } from 'node:path';
-
 import type { Grammar, Token, TokenStream } from 'prismjs';
 // Load Prism core before the explicitly supported grammars, in dependency order.
 // Consume token streams, never the DOM/HTML APIs, plugins, or automatic loader.
@@ -448,8 +446,9 @@ function highlightLanguage(lines: readonly string[], language: Language): Syntax
  * Spans contain only original text, never HTML or terminal escape sequences.
  */
 export function highlightSource(path: string, lines: readonly string[]): SyntaxLine[] {
-  const filename = basename(path).toLowerCase();
-  const extension = extname(filename);
+  const filename = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1).toLowerCase();
+  const dot = filename.lastIndexOf('.');
+  const extension = dot > 0 ? filename.slice(dot) : '';
   const language = SHELL_FILENAMES.has(filename)
     ? 'bash'
     : Object.hasOwn(EXTENSION_LANGUAGES, extension)

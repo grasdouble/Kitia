@@ -1,0 +1,107 @@
+'use strict';
+
+const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { writeJson } = require('./source-catalog-fixtures.js');
+
+function seedWebCatalog(root) {
+  const project = path.join(root, 'project');
+  const user = path.join(root, 'user');
+  const config = path.join(root, 'config');
+  const repo = path.join(root, 'source');
+  for (const directory of [project, user, config, repo]) fs.mkdirSync(directory, { recursive: true });
+  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+  const commit = (subject) => {
+    git('add', '.');
+    git(
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--quiet',
+      '-m',
+      subject,
+    );
+    return git('rev-parse', 'HEAD');
+  };
+  git('init', '--quiet');
+  const items = [
+    {
+      kind: 'agent',
+      id: 'catalog-agent',
+      source_path: 'agents/catalog-agent.md',
+      file: 'agents/catalog-agent.md',
+      license_status: 'Apache-2.0',
+    },
+    {
+      kind: 'instruction',
+      id: 'catalog-rules',
+      source_path: 'instructions/catalog-rules.md',
+      file: 'instructions/catalog-rules.md',
+      license_status: 'MIT',
+    },
+    {
+      kind: 'skill',
+      id: 'catalog-skill',
+      source_path: 'skills/catalog-skill',
+      file: 'skills/catalog-skill/SKILL.md',
+      license_status: 'MIT',
+    },
+  ];
+  for (const item of items) {
+    item.content = `# Pinned ${item.kind}\n\nInspect the ${item.kind} fixture.\n`;
+    const file = path.join(repo, item.file);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, item.content);
+  }
+  const extra = 'skills/catalog-skill/references/review.md';
+  fs.mkdirSync(path.dirname(path.join(repo, extra)), { recursive: true });
+  fs.writeFileSync(path.join(repo, extra), '<strong>Supporting source text</strong>\n');
+  const ref = commit('Publish pinned resources');
+  for (const { file } of items) fs.writeFileSync(path.join(repo, file), '# Unpinned source\n');
+  const head = commit('Advance source files');
+  const repository = 'example/web-catalog';
+  const source = { name: 'Fixture', repository: `https://github.com/${repository}` };
+  const registry = {
+    catalog_version: 1,
+    sources: [source, { name: 'Unavailable', repository: 'https://github.com/example/unavailable' }],
+  };
+  writeJson(path.join(config, 'catalogSources.json'), registry);
+  writeJson(path.join(config, 'source-catalogs', 'catalogSources.json'), registry);
+  writeJson(path.join(config, 'source-catalogs', 'Fixture.json'), {
+    catalog_version: 1,
+    catalog_name: source.name,
+    source_repository: repository,
+    source_ref: ref,
+    resources: items.map(({ content, file, ...item }) => ({
+      ...item,
+      description: `Review the ${item.kind} fixture.`,
+    })),
+  });
+  return {
+    project,
+    user,
+    config,
+    repo,
+    ref,
+    head,
+    items,
+    env: {
+      HOME: user,
+      USERPROFILE: user,
+      KITIA_CONFIG_DIR: config,
+      KITIA_TEST_GH_SCRIPT: path.join(__dirname, 'web-catalog-gh.cjs'),
+      KITIA_TEST_WEB_CATALOG_REPO: repo,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.${pathToFileURL(repo).href}.insteadOf`,
+      GIT_CONFIG_VALUE_0: `${source.repository}.git`,
+    },
+  };
+}
+
+module.exports = { seedWebCatalog };

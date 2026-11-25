@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 
 import type { AuditResult } from '../core/inspection/audit.js';
-import type { PreviewFile, PreviewTreeEntry } from '../core/inspection/model.js';
-import { decodeSourcePreview } from '../core/inspection/source-preview.js';
+import type { ResourceInspection } from '../core/inspection/model.js';
 import { executeInstallationOperation, type InstallationRequest } from '../core/installations/lifecycle.js';
 import { acquireOperationLock } from '../core/installations/lock.js';
 import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
 import { readInstallState } from '../core/inventory/inventory.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import { inspectPinnedSource, type SourceInspection } from './catalog-preview.js';
 import { inspectInstalledFiles } from './inventory-preview.js';
 import { readCatalogSnapshot, readInventory, type InstallationTargets, type InventorySnapshot } from './snapshot.js';
 
@@ -31,13 +31,7 @@ export type ResourceActionResult = InventorySnapshot & {
   code: number;
   messages: Array<string | AuditResult>;
   failure?: ActionFailure;
-  inspection?: {
-    origin: 'local' | 'source';
-    root: string;
-    files: PreviewFile[];
-    treeEntries: PreviewTreeEntry[];
-    audit?: AuditResult;
-  };
+  inspection?: SourceInspection | (ResourceInspection & { origin: 'local'; root: string });
 };
 
 export async function runResourceAction(
@@ -66,6 +60,12 @@ export async function runResourceAction(
     } else if (action === 'preview' && resource.scope) {
       const local = inspectInstalledFiles(targetRoot, resource);
       inspection = { ...local, origin: 'local', root: 'local installations' };
+    } else if (action === 'preview') {
+      readInstallState(targetRoot);
+      const preview = await inspectPinnedSource(resource, target);
+      code = preview.code;
+      messages.push(...preview.messages);
+      inspection = preview.inspection;
     } else {
       // Keep the inventory format check before invoking any lifecycle operation.
       readInstallState(targetRoot);
@@ -79,26 +79,20 @@ export async function runResourceAction(
           catalog: resource.catalog,
           target,
           scope,
-          audit: action === 'install' || action === 'preview',
+          audit: action === 'install',
           nonInteractive: true,
-          captureOutput: action === 'preview',
           projectTarget: targets.project,
           userTarget: targets.user,
           onProgress,
           onMessage: ({ text }) => messages.push(text),
           onAudit: (report) => {
             audit = report;
-            if (action !== 'preview') messages.push(report);
+            messages.push(report);
           },
         },
         catalog.resources,
       );
       code = result.status;
-      if (action === 'preview' && code === 0) {
-        const content = result.preview ?? result.messages.find(({ level }) => level === 'log')?.text ?? '';
-        messages.length = 0;
-        inspection = { ...decodeSourcePreview(resource, content), origin: 'source', audit };
-      }
     }
   } catch (error) {
     if (!(error instanceof CatalogError)) throw error;

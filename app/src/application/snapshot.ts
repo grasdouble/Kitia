@@ -16,6 +16,7 @@ export type CatalogSnapshot = {
 
 export type InventorySnapshot = { resources: CatalogResource[]; errors: ScanError[] };
 export type InventoryWorkspace = { inventory: InventorySnapshot; catalogs: UserCatalog[] };
+export type ResourceRevision = { sha: string; prefix: string; date: string; subject: string };
 
 export function readCatalogSnapshot(sourceResources?: CatalogResource[]): CatalogSnapshot {
   const sources = loadUserSourceConfiguration();
@@ -37,7 +38,7 @@ export function readInventory(targets: InstallationTargets, catalog: CatalogSnap
   return { resources: enrichInstalledResources(resources, catalog.resources), errors };
 }
 
-export async function listResourceRevisions(resource: CatalogResource) {
+export async function listResourceRevisions(resource: CatalogResource): Promise<ResourceRevision[]> {
   const versions = await listSourceVersionsAsync(resource);
   const prefixes = uniqueSourceVersionPrefixes(versions);
   return versions.map((version, index) => ({ ...version, prefix: prefixes[index] }));

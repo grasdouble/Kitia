@@ -32,7 +32,7 @@ Other commands and non-interactive dashboard launches skip the notice.
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
 | `versions <kind> <id>` | List up to 500 newest GitHub commits affecting a skill entrypoint or an agent/instruction Markdown file, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
-| `web [--no-open]` | Start a local browser session to search and inspect project and user inventories |
+| `web [--no-open]` | Start a local browser session to search and inspect inventories and catalog resources |
 | `self-update [--yes]` | Install the latest Kitia release using the package manager that owns the running global npm or pnpm installation; confirm first unless `--yes` is passed |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
@@ -53,9 +53,13 @@ unless `--no-open` is supplied. Keep the URL private. The project is fixed to
 the working directory at launch, and the user scope is the user's home
 directory. Press `Ctrl+C` to stop. The browser inventory supports search,
 kind/catalog/license filters, installation details, and read-only preview and
-audit of installed skills, agents, and instructions. Use the CLI or TUI to
-manage installations and catalogs. The local HTTP API is an internal
-interface, not part of the public CLI compatibility contract.
+audit of installed skills, agents, and instructions. **Browse resources**
+searches the configured catalog indexes and opens the pinned source files,
+their entry-file audit, and the GitHub commit history. Catalog previews require
+access to the configured source; skill previews and revision history use the
+GitHub CLI. Use the CLI or TUI to manage installations and catalogs. The local
+HTTP API is an internal interface, not part of the public CLI compatibility
+contract.
 
 `kitia self-update` leaves local dependencies, one-off caches, linked
 checkouts, and installations of unknown or ambiguous origin untouched.

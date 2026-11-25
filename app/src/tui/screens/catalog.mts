@@ -4,6 +4,7 @@ import { Box, Text } from 'ink';
 import React from 'react';
 
 import { inventoryCatalogLabels, type InventoryCatalogConfiguration } from '../../core/inventory/view.js';
+import { catalogCandidateLabel, filterCatalogResources } from '../../core/resources/catalog-view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { adaptiveColumnWidths } from '../../table-layout.js';
 import { DASHBOARD_THEME, resolveRowColor } from '../colors.js';
@@ -16,7 +17,7 @@ import { categorizedShortcutLines, sectionNavigationHints } from '../components/
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
-import { filterCatalogResources, fitText, tableLine } from '../helpers.mjs';
+import { fitText, tableLine } from '../helpers.mjs';
 import { JoinedWorkspace } from '../layouts/joined-workspace.mjs';
 import { DashboardHeader } from '../sections/header.mjs';
 const h = React.createElement;
@@ -58,12 +59,10 @@ export function CatalogScreen({
   tourStep?: number | null;
 }) {
   const candidateLabels = inventoryCatalogLabels(candidates, catalogs);
-  const candidateLabel = (resource: CatalogResource) =>
-    resource.managed === false || !resource.source_repository
-      ? resource.catalog || '-'
-      : candidateLabels.get(resource) || resource.catalog || '-';
+  const candidateLabel = (resource: CatalogResource) => catalogCandidateLabel(resource, candidateLabels);
   const visible = filterCatalogResources(candidates, query, catalogFilter, kindFilter, catalogs, {
     license: licenseFilter === 'all' ? undefined : licenseFilter,
+    labels: candidateLabels,
   });
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];

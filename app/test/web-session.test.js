@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createInterface } = require('node:readline');
 const { test } = require('node:test');
+const { seedWebCatalog } = require('./fixtures/web-catalog.js');
 
 const executable = process.env.KITIA_TEST_WEB_EXECUTABLE || path.resolve(__dirname, '../dist/kitia.js');
 
@@ -174,6 +175,84 @@ test(
         assert.deepEqual(await exited, [0, null]);
         await assert.rejects(request(origin), { code: 'ECONNREFUSED' });
       }
+    } finally {
+      stdout.close();
+      child.kill();
+      await exited;
+      await fs.rm(temporary, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'browse previews the pinned files and reads history for each indexed resource kind',
+  { timeout: 10_000 },
+  async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-web-catalog-'));
+    const { project, config, env, ref, head, items } = seedWebCatalog(temporary);
+    const preload = path.join(__dirname, 'gh-process-preload.cjs');
+    const child = spawn(process.execPath, ['--require', preload, executable, 'web', '--no-open'], {
+      cwd: project,
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const exited = once(child, 'exit');
+    const stdout = createInterface({ input: child.stdout });
+    try {
+      const [line] = await Promise.race([
+        once(stdout, 'line'),
+        exited.then(([code]) => assert.fail(`Kitia exited early (${code})`)),
+      ]);
+      const url = new URL(line.slice('Kitia web: '.length));
+      const api = `${url.origin}/api/catalog`;
+      const authorization = `Bearer ${url.hash.slice('#session='.length)}`;
+      const headers = { authorization };
+      assert.equal((await request(api)).status, 401);
+      const catalogResponse = await request(api, headers);
+      assert.equal(catalogResponse.status, 200, catalogResponse.body);
+      const { resources, unavailable, warnings } = JSON.parse(catalogResponse.body);
+      assert.deepEqual(unavailable, ['Unavailable']);
+      assert.deepEqual(
+        warnings.map(({ catalog }) => catalog),
+        ['Unavailable'],
+      );
+      assert.deepEqual(
+        resources.map(({ kind, id, source_ref }) => [kind, id, source_ref]),
+        items.map(({ kind, id }) => [kind, id, ref]),
+      );
+      const index = path.join(config, 'source-catalogs', 'Fixture.json');
+      const initialIndex = await fs.readFile(index, 'utf8');
+
+      for (const item of items) {
+        const selector = new URLSearchParams({ catalog: 'Fixture', kind: item.kind, id: item.id, ref });
+        const preview = await request(`${api}/preview?${selector}`, headers);
+        assert.equal(preview.status, 200, preview.body);
+        const inspection = JSON.parse(preview.body);
+        assert.equal(inspection.files[0].content.trimEnd(), item.content.trimEnd());
+        assert.equal(inspection.audit.coverage.analyzed, 1);
+        if (item.kind === 'skill') {
+          assert.ok(inspection.treeEntries.some(({ path, type }) => path === 'references' && type === 'directory'));
+          assert.equal(
+            inspection.files.find(({ path }) => path === 'references/review.md').content,
+            '<strong>Supporting source text</strong>',
+          );
+        }
+        const history = await request(`${api}/revisions?${selector}`, headers);
+        assert.equal(history.status, 200, history.body);
+        assert.deepEqual(
+          JSON.parse(history.body).map(({ sha, subject }) => [sha, subject]),
+          [
+            [head, 'Advance source files'],
+            [ref, 'Publish pinned resources'],
+          ],
+        );
+      }
+      const stale = new URLSearchParams({ catalog: 'Fixture', kind: 'skill', id: 'catalog-skill', ref: head });
+      assert.equal((await request(`${api}/preview?${stale}`, headers)).status, 409);
+      stale.set('id', 'unknown');
+      assert.equal((await request(`${api}/revisions?${stale}`, headers)).status, 404);
+      assert.deepEqual(await fs.readdir(project), []);
+      assert.equal(await fs.readFile(index, 'utf8'), initialIndex);
     } finally {
       stdout.close();
       child.kill();

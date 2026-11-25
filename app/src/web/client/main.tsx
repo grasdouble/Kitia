@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
 import type { InstallationScope } from '../../core/installations/model.js';
+import { BrowseCatalog } from './catalog.js';
 import { Inventory, InventorySummary } from './inventory.js';
 import { readSessionJson } from './session-api.js';
 
@@ -11,6 +12,7 @@ import './style.css';
 type SessionInventory = InventoryWorkspace & { targets: InstallationTargets };
 
 function App() {
+  const [section, setSection] = useState<'inventory' | 'browse'>('inventory');
   const [scope, setScope] = useState<InstallationScope>('project');
   const [data, setData] = useState<{ snapshot: SessionInventory; token: string }>();
   const [error, setError] = useState<string>();
@@ -41,29 +43,41 @@ function App() {
     <main>
       <header>
         <p className="eyebrow">Kitia · Local session</p>
-        <h1>Inventory</h1>
+        <h1>{section === 'inventory' ? 'Inventory' : 'Browse resources'}</h1>
       </header>
-      {data ? <InventorySummary inventory={data.snapshot.inventory} /> : null}
-      <nav aria-label="Inventory scope">
-        <button type="button" aria-pressed={scope === 'project'} onClick={() => setScope('project')}>
-          Project
+      <nav className="app-sections" aria-label="Kitia sections">
+        <button type="button" aria-pressed={section === 'inventory'} onClick={() => setSection('inventory')}>
+          Inventory
         </button>
-        <button type="button" aria-pressed={scope === 'user'} onClick={() => setScope('user')}>
-          User
+        <button type="button" aria-pressed={section === 'browse'} onClick={() => setSection('browse')}>
+          Browse resources
         </button>
       </nav>
       {error ? (
         <p role="alert">{error}</p>
       ) : !data ? (
         <p role="status">Loading inventory…</p>
+      ) : section === 'browse' ? (
+        <BrowseCatalog inventory={data.snapshot.inventory} token={data.token} />
       ) : (
-        <Inventory
-          key={scope}
-          data={data.snapshot}
-          scope={scope}
-          target={data.snapshot.targets[scope]}
-          token={data.token}
-        />
+        <>
+          <InventorySummary inventory={data.snapshot.inventory} />
+          <nav aria-label="Inventory scope">
+            <button type="button" aria-pressed={scope === 'project'} onClick={() => setScope('project')}>
+              Project
+            </button>
+            <button type="button" aria-pressed={scope === 'user'} onClick={() => setScope('user')}>
+              User
+            </button>
+          </nav>
+          <Inventory
+            key={scope}
+            data={data.snapshot}
+            scope={scope}
+            target={data.snapshot.targets[scope]}
+            token={data.token}
+          />
+        </>
       )}
     </main>
   );

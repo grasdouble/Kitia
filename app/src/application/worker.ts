@@ -9,10 +9,11 @@ import {
   updateCatalog,
 } from '../core/catalogs/manage.js';
 import type { AddCatalogRequest } from '../core/catalogs/model.js';
-import type { CatalogResource } from '../core/resources/model.js';
+import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import { inspectPinnedSource, resolvePinnedCatalogResource, type CatalogResourceSelector } from './catalog-preview.js';
 import { readInstalledPreview, type InstalledResourceSelector } from './inventory-preview.js';
 import { runResourceAction, type ResourceAction, type ResourceActionOptions } from './resource-actions.js';
-import { readCatalogSnapshot, readInventory, type InstallationTargets } from './snapshot.js';
+import { listResourceRevisions, readCatalogSnapshot, readInventory, type InstallationTargets } from './snapshot.js';
 
 export type OperationTask =
   | {
@@ -24,6 +25,9 @@ export type OperationTask =
     }
   | { task: 'inventory-read'; targets: InstallationTargets }
   | { task: 'inventory-preview'; targets: InstallationTargets; selector: InstalledResourceSelector }
+  | { task: 'catalog-read' }
+  | { task: 'catalog-preview'; selector: CatalogResourceSelector; project: string }
+  | { task: 'catalog-revisions'; selector: CatalogResourceSelector }
   | { task: 'catalog-add'; request: AddCatalogRequest }
   | { task: 'catalog-update'; originalName: string; request: AddCatalogRequest }
   | { task: 'catalog-remove'; name: string }
@@ -39,6 +43,17 @@ async function execute(data: OperationTask) {
     }
     case 'inventory-preview':
       return readInstalledPreview(data.targets, data.selector);
+    case 'catalog-read':
+      return readCatalogSnapshot();
+    case 'catalog-preview': {
+      const resource = resolvePinnedCatalogResource(data.selector);
+      const preview = await inspectPinnedSource(resource, data.project);
+      if (!preview.inspection)
+        throw new CatalogError(preview.messages.join('\n') || 'The source preview failed.', 'PREVIEW_FAILED');
+      return preview.inspection;
+    }
+    case 'catalog-revisions':
+      return listResourceRevisions(resolvePinnedCatalogResource(data.selector));
     case 'resource-action':
       return runResourceAction(data.action, data.resource, data.targets, data.options, (progress) =>
         parentPort?.postMessage({ progress }),
