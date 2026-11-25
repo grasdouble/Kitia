@@ -1,144 +1,72 @@
-import fs from 'node:fs';
-import os from 'node:os';
+import { execFile } from 'node:child_process';
 
-import { formatAuditLines } from '../cli/inspection-format.js';
-import { formatSourceResource } from '../cli/resource-format.js';
-import { loadCatalogs, type CatalogLoadWarning } from '../core/catalogs/indexes.js';
-import type { AuditResult } from '../core/inspection/audit.js';
-import { localPreviewFiles } from '../core/inspection/local-preview.js';
-import type { ResourceInspection } from '../core/inspection/model.js';
 import {
-  executeInstallationOperation,
-  type InstallationMessage,
-  type InstallationRequest,
-} from '../core/installations/lifecycle.js';
-import { acquireOperationLock } from '../core/installations/lock.js';
-import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
-import { collectInstalledScopes } from '../core/inventory/checks.js';
-import { readInstallState } from '../core/inventory/inventory.js';
-import { CatalogError, type CatalogResource } from '../core/resources/model.js';
-import { catalogEntries, enrichInstalledResources } from '../core/resources/queries.js';
+  runResourceAction,
+  type ResourceAction,
+  type ResourceActionOptions,
+  type ResourceActionResult,
+} from '../application/resource-actions.js';
+import type { InstallationTargets } from '../application/snapshot.js';
+import { formatAuditLines } from '../cli/inspection-format.js';
+import type { CatalogResource } from '../core/resources/model.js';
 import type { DashboardActionResult } from './action-result.js';
+import { formatPreviewTree } from './preview-tree.js';
 
-// Native dashboard adapter: translate structured domain facts into the dashboard refresh envelope.
-export interface NativeDashboardOptions {
-  target: string;
-  userTarget?: string;
-}
-
-export interface NativeDashboardCatalogs {
-  sourceResources: CatalogResource[];
-  warnings?: CatalogLoadWarning[];
-}
-
-export type NativeDashboardAction = InstallationRequest['operation'] | 'remove-unmanaged';
-export type NativeInstallOptions = Pick<
-  InstallationRequest,
-  'scope' | 'destinations' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
->;
-
-function createDashboardActionHandler(onProgress: (message: string) => void = () => {}) {
-  return async function executeDashboardAction(
-    action: NativeDashboardAction,
-    resource: CatalogResource,
-    dashboardOptions: NativeDashboardOptions,
-    catalogs: NativeDashboardCatalogs,
-    installOptions: NativeInstallOptions = {},
-  ): Promise<DashboardActionResult> {
-    // Installed rows receive their scope from the native project/user inventory scan.
-    const scope =
-      action === 'install' ? installOptions.scope || 'project' : (resource.scope as NativeInstallOptions['scope']);
-    const target = scope === 'user' ? dashboardOptions.userTarget || os.homedir() : dashboardOptions.target;
-    const messages: string[] = [];
-    let auditLines: string[] | undefined;
-    let previewFiles: DashboardActionResult['previewFiles'];
-    let previewTree: string[] | undefined;
-    let previewAuditLines: string[] | undefined;
-    let release: (() => void) | undefined;
-    let code = 0;
-    let failure: DashboardActionResult['failure'];
-    try {
-      if (action !== 'preview') release = acquireOperationLock(target);
-      const targetRoot = fs.realpathSync(target);
-      const state = readInstallState(targetRoot);
-      if (action === 'remove-unmanaged') {
-        if (resource.managed !== false) {
-          throw new Error('Only unmanaged dashboard artifacts can be removed this way.');
-        }
-        messages.push(...removeUnmanagedResource(targetRoot, state, resource));
-      } else if (action === 'preview' && resource.scope) {
-        const local: ResourceInspection = localPreviewFiles(targetRoot, state, resource);
-        previewFiles = local.files;
-        previewTree = [
-          'local installations/',
-          ...local.treeEntries.map(
-            (entry, index) => `${index === local.treeEntries.length - 1 ? '└──' : '├──'} ${entry.path}`,
-          ),
-        ];
-        previewAuditLines = formatAuditLines(local.audit);
-      } else {
-        const result = await executeInstallationOperation(
-          {
-            operation: action,
-            resource,
-            id: resource.id,
-            kind: resource.kind,
-            catalog: resource.catalog,
-            target,
-            scope,
-            destinations: installOptions.destinations,
-            ref: installOptions.ref,
-            force: installOptions.force,
-            ghForce: installOptions.ghForce,
-            ghForceAgent: installOptions.ghForceAgent,
-            audit: action === 'install' || action === 'preview',
-            nonInteractive: true,
-            captureOutput: action === 'preview',
-            projectTarget: dashboardOptions.target,
-            userTarget: dashboardOptions.userTarget || os.homedir(),
-            onProgress,
-            onMessage: ({ text }: InstallationMessage) => messages.push(text),
-            onAudit: (audit: AuditResult) => {
-              auditLines = formatAuditLines(audit);
-              messages.push(...auditLines);
-            },
-          },
-          catalogs.sourceResources,
-        );
-        code = result.status;
-        if (result.preview !== undefined)
-          messages.push(`${formatSourceResource(result.resource!)}\n\n${result.preview}`);
-      }
-    } catch (error) {
-      if (!(error instanceof CatalogError)) throw error;
-      code = 1;
-      failure = {
-        code: error.code,
-        category: error.category,
-        paths: error.paths,
-        recoverable: error.recoverable,
-        userMessage: error.userMessage || error.message,
-        agent: error.agent,
-        ...(error.code === 'AUDIT_BLOCKED' && auditLines ? { auditLines } : {}),
-      };
-    } finally {
-      release?.();
-    }
-    const currentCatalogs = loadCatalogs({ allowUnavailable: true });
-    const result = collectInstalledScopes(
-      { project: dashboardOptions.target, user: dashboardOptions.userTarget || os.homedir() },
-      currentCatalogs.sourceResources,
-    );
-    result.errors.push(...(catalogs.warnings || []).map((warning) => ({ ...warning, scope: 'catalog' })));
-    return {
-      code,
-      messages,
-      ...(failure ? { failure } : {}),
-      ...(previewFiles ? { previewFiles, previewTree, previewAuditLines } : {}),
-      resources: enrichInstalledResources(result.resources, catalogEntries(currentCatalogs.sourceResources)),
-      errors: result.errors,
-    };
+export function presentResourceAction(result: ResourceActionResult): DashboardActionResult {
+  const { code, messages, resources, errors, failure, inspection } = result;
+  const output: DashboardActionResult = {
+    code,
+    messages: messages.flatMap((message) => (typeof message === 'string' ? [message] : formatAuditLines(message))),
+    resources,
+    errors,
   };
+  if (failure) {
+    const { audit, ...details } = failure;
+    output.failure = audit ? { ...details, auditLines: formatAuditLines(audit) } : details;
+  }
+  if (inspection) {
+    const { files, root, treeEntries, audit, origin } = inspection;
+    output.previewFiles = files;
+    output.previewTree =
+      origin === 'local'
+        ? [`${root}/`, ...treeEntries.map(({ path }, i) => `${i === treeEntries.length - 1 ? '└──' : '├──'} ${path}`)]
+        : formatPreviewTree(root, treeEntries);
+    if (audit) output.previewAuditLines = formatAuditLines(audit);
+  }
+  return output;
 }
 
-export { createDashboardActionHandler };
+export function createDashboardActionHandler(onProgress?: (message: string) => void) {
+  return async (
+    action: ResourceAction,
+    resource: CatalogResource,
+    targets: InstallationTargets,
+    options?: ResourceActionOptions,
+  ) => presentResourceAction(await runResourceAction(action, resource, targets, options, onProgress));
+}
+async function copyTextToClipboard(text: string): Promise<void> {
+  const commands: [string, string[]][] =
+    process.platform === 'darwin'
+      ? [['pbcopy', []]]
+      : process.platform === 'win32'
+        ? [['clip', []]]
+        : [
+            ['wl-copy', []],
+            ['xclip', ['-selection', 'clipboard']],
+          ];
+  for (const [program, args] of commands) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile(program, args, (error) => (error ? reject(error) : resolve()));
+        child.stdin?.on('error', reject);
+        child.stdin?.end(text);
+      });
+      return;
+    } catch (error) {
+      if (process.platform === 'darwin' || process.platform === 'win32') throw error;
+    }
+  }
+  throw new Error('Clipboard access requires wl-copy or xclip on Linux.');
+}
+
+export { copyTextToClipboard };

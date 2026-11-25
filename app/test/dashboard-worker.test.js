@@ -7,11 +7,36 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { createSourceIndex } = require('../dist/core/catalogs/discovery.js');
 const { recordSourceInstallation } = require('../dist/core/inventory/inventory.js');
-const { runDashboardWorker } = require('../dist/cli/commands.js');
+const { runOperation } = require('../dist/application/worker-client.js');
+const { presentResourceAction } = require('../dist/tui/native-actions.js');
 const { setupTemporaryDirectory, writeJson, createSource } = require('./fixtures/source-catalog-fixtures.js');
 const { waitForOutput } = require('../src/tui/__tests__/dashboard-frames.js');
 
 const makeTemporaryDirectory = setupTemporaryDirectory();
+
+test('catalog export returns the registered mappings even when the index is unavailable', async () => {
+  const config = makeTemporaryDirectory('kitia-worker-export-');
+  const previous = process.env.KITIA_CONFIG_DIR;
+  const document = {
+    catalog_version: 1,
+    sources: [
+      {
+        name: 'Exported',
+        repository: 'https://github.com/example/catalog',
+        mode: 'custom',
+        entries: [{ kind: 'instruction', path: 'rules/engineering.md', id: 'engineering-policy' }],
+      },
+    ],
+  };
+  writeJson(path.join(config, 'catalogSources.json'), document);
+  process.env.KITIA_CONFIG_DIR = config;
+  try {
+    assert.deepEqual(await runOperation({ task: 'catalog-export' }), document);
+  } finally {
+    if (previous === undefined) delete process.env.KITIA_CONFIG_DIR;
+    else process.env.KITIA_CONFIG_DIR = previous;
+  }
+});
 
 test('removing an unmanaged skill deletes its entire detected folder', async () => {
   const temporary = makeTemporaryDirectory('kitia-dashboard-unmanaged-remove-');
@@ -29,7 +54,7 @@ test('removing an unmanaged skill deletes its entire detected folder', async () 
   fs.writeFileSync(extraFile, 'User-owned supporting file.');
   process.env.KITIA_CONFIG_DIR = configDirectory;
   try {
-    const result = await runDashboardWorker({
+    const result = await runOperation({
       task: 'resource-action',
       action: 'remove-unmanaged',
       resource: {
@@ -39,9 +64,7 @@ test('removing an unmanaged skill deletes its entire detected folder', async () 
         scope: 'project',
         managed: false,
       },
-      dashboardOptions: { target, userTarget },
-      catalogs: { sourceResources: [] },
-      installOptions: {},
+      targets: { project: target, user: userTarget },
     });
     assert.equal(result.code, 0);
     assert.equal(fs.existsSync(skillDirectory), false);
@@ -193,21 +216,14 @@ test('real GH update progress and sanitized output reach the TUI through its wor
         subject: 'Selected update',
       },
     ],
-    execute: (action, resource, options) => {
-      const { onProgress, ...installOptions } = options;
-      return runDashboardWorker(
-        {
-          task: 'resource-action',
-          action,
-          resource,
-          dashboardOptions: { target, userTarget },
-          catalogs: { sourceResources: [newResource] },
-          installOptions,
-        },
-        onProgress,
-        { execArgv: ['--require', ghPreload] },
-      );
-    },
+    execute: async (action, resource, { onProgress, ...options }) =>
+      presentResourceAction(
+        await runOperation(
+          { task: 'resource-action', action, resource, targets: { project: target, user: userTarget }, options },
+          onProgress,
+          { execArgv: ['--require', ghPreload] },
+        ),
+      ),
   });
   const visibleFrame = () => {
     const start = rendered.lastIndexOf('\u001b[?2026h');

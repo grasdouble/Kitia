@@ -1505,8 +1505,8 @@ test(
             '---\nname: local-guide\ndescription: Local instruction preview.\n---\nLocal instruction body.\n',
           );
         },
-        actionHandlerOverride: (operation, resource, installOptions, { fixture, loaded, dashboardOptions }) =>
-          handler(operation, resource, dashboardOptions, { sourceResources: loaded.sourceResources }, installOptions),
+        actionHandlerOverride: (operation, resource, installOptions, targets) =>
+          handler(operation, resource, targets, installOptions),
       });
       session.output.columns = 68;
       session.output.rows = 32;

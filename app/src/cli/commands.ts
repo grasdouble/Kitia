@@ -1,26 +1,25 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Worker } from 'node:worker_threads';
 
+import { listResourceRevisions, readCatalogSnapshot, readInventory } from '../application/snapshot.js';
+import { runOperation } from '../application/worker-client.js';
 import { loadUserSourceConfiguration, userCatalogDirectory } from '../core/catalogs/config.js';
 import type { CatalogLoadWarning } from '../core/catalogs/indexes.js';
 import { checkCatalogFreshness } from '../core/catalogs/manage.js';
-import type { SourceConfiguration, UserCatalog } from '../core/catalogs/model.js';
 import { importCollectionText } from '../core/collections/import.js';
 import { collectionData } from '../core/collections/manifest.js';
 import { signCollectionManifest } from '../core/collections/signatures.js';
 import { diagnose } from '../core/diagnostics/doctor.js';
 import type { AuditResult } from '../core/inspection/audit.js';
 import { executeInstallationOperation, type InstallationMessage } from '../core/installations/lifecycle.js';
-import { checkInstalledResources, collectInstalledScopes } from '../core/inventory/checks.js';
-import { listSourceVersions, listSourceVersionsAsync, uniqueSourceVersionPrefixes } from '../core/resources/history.js';
+import { checkInstalledResources } from '../core/inventory/checks.js';
+import { listSourceVersions, uniqueSourceVersionPrefixes } from '../core/resources/history.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
-import { catalogEntries, enrichInstalledResources, listCatalogResources } from '../core/resources/queries.js';
+import { catalogEntries, listCatalogResources } from '../core/resources/queries.js';
 import { resolveCatalogResource } from '../core/resources/selection.js';
-import type { DashboardActionResult } from '../tui/action-result.js';
-import type { CatalogActionResult, CatalogMutationResult, DashboardActions } from '../tui/contracts.js';
+import type { DashboardActions } from '../tui/contracts.js';
+import { copyTextToClipboard, presentResourceAction } from '../tui/native-actions.js';
 import {
   browseInstalledResources,
   formatCatalogTable,
@@ -37,85 +36,6 @@ import { formatSourceResource } from './resource-format.js';
 import { prepareSelfUpdate, runSelfUpdate } from './self-update.js';
 
 type LoadedCatalogs = { sourceResources: CatalogResource[]; unavailable: string[] };
-type DashboardWorkerMessage<Result> =
-  | { progress: string; ok?: never }
-  | { progress?: string; ok: true; result: Result }
-  | {
-      progress?: string;
-      ok: false;
-      error: {
-        name: string;
-        message: string;
-        code?: string;
-        category?: string;
-        paths?: string[];
-        recoverable?: boolean;
-        userMessage?: string;
-        agent?: string;
-      };
-    };
-
-function runDashboardWorker<Result>(
-  data: Record<string, unknown>,
-  onProgress: (message: string) => void = () => {},
-  { execArgv }: { execArgv?: string[] } = {},
-): Promise<Result> {
-  return new Promise<Result>((resolve, reject) => {
-    const worker = new Worker(path.join(__dirname, 'dashboard-worker.js'), {
-      workerData: data,
-      execArgv,
-    });
-    let settled = false;
-    worker.on('message', (message: DashboardWorkerMessage<Result>) => {
-      if (typeof message.progress === 'string') {
-        onProgress(message.progress);
-        return;
-      }
-      if (settled || !('ok' in message)) return;
-      settled = true;
-      if (message.ok) {
-        resolve(message.result);
-        return;
-      }
-      if ('error' in message) {
-        const error = Object.assign(new Error(message.error.message), message.error);
-        error.name = message.error.name;
-        reject(error);
-      }
-    });
-    worker.once('error', (error: Error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-    worker.once('exit', (code: number) => {
-      if (settled) return;
-      settled = true;
-      reject(new Error(`Dashboard worker exited before returning a result (exit ${code}).`));
-    });
-  });
-}
-
-function copyTextToClipboard(text: string): void {
-  if (process.platform === 'darwin') {
-    execFileSync('pbcopy', [], { input: text });
-    return;
-  }
-  if (process.platform === 'win32') {
-    execFileSync('clip', [], { input: text });
-    return;
-  }
-  for (const [program, args] of [
-    ['wl-copy', []],
-    ['xclip', ['-selection', 'clipboard']],
-  ] satisfies [string, string[]][]) {
-    try {
-      execFileSync(program, args, { input: text });
-      return;
-    } catch {}
-  }
-  throw new Error('Clipboard access requires wl-copy or xclip on Linux.');
-}
 function selectedSourceResource(
   resources: CatalogResource[],
   options: Pick<ParsedCliOptions, 'id' | 'kind' | 'nonInteractive'>,
@@ -235,12 +155,62 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
     return result.attention ? (report ? 2 : 1) : 0;
   }
 
-  const catalogWarnings: CatalogLoadWarning[] = [];
+  if (options.command === 'dashboard') {
+    const targets = { project: options.target!, user: os.homedir() };
+    const catalog = readCatalogSnapshot(options.sourceResources);
+    const { resources: rows, errors } = readInventory(targets, catalog);
+    if (
+      !options.nonInteractive &&
+      process.stdin.isTTY &&
+      process.stdout.isTTY &&
+      typeof process.stdin.setRawMode === 'function'
+    ) {
+      let applySelfUpdate: (() => Promise<void>) | undefined;
+      const dashboardActions: DashboardActions = {
+        showOnboarding: options.showOnboarding,
+        catalogResources: catalog.resources,
+        userCatalogs: catalog.catalogs,
+        prepareSelfUpdate: async () => {
+          const update = await prepareSelfUpdate();
+          if (!update) return null;
+          return {
+            manager: update.manager,
+            request: () => {
+              applySelfUpdate = update.apply;
+            },
+          };
+        },
+        addCatalog: (request) => runOperation({ task: 'catalog-add', request }),
+        updateCatalog: (originalName, request) => runOperation({ task: 'catalog-update', originalName, request }),
+        checkCatalogFreshness: (names) => checkCatalogFreshness(undefined, names),
+        removeCatalog: (name) => runOperation({ task: 'catalog-remove', name }),
+        refreshCatalog: (name) => runOperation({ task: 'catalog-refresh', name }),
+        transferCatalogs: async (action, content) => {
+          if (action === 'import') return runOperation({ task: 'catalog-import', content });
+          const document = await runOperation({ task: 'catalog-export' });
+          await copyTextToClipboard(JSON.stringify(document, null, 2));
+          return { catalogs: document.sources };
+        },
+        execute: async (action, resource, { onProgress, ...options }) =>
+          presentResourceAction(
+            await runOperation({ task: 'resource-action', action, resource, targets, options }, onProgress),
+          ),
+        listSourceVersions: listResourceRevisions,
+      };
+      const completed = await browseInstalledResources(rows, process.stdin, process.stdout, errors, dashboardActions);
+      if (completed && applySelfUpdate) {
+        await applySelfUpdate();
+        return 0;
+      }
+      return catalog.unavailable.length || errors.length || !completed ? 1 : 0;
+    }
+    console.log(renderInstalledResources(rows, process.stdout, errors));
+    return catalog.unavailable.length || errors.length ? 1 : 0;
+  }
+
   const { sourceResources, unavailable }: LoadedCatalogs = loadCommandCatalogs(
     options,
     (warning: CatalogLoadWarning) => {
-      catalogWarnings.push(warning);
-      if (options.command === 'dashboard') return;
       if (report) report.warnings.push(warning);
       else if (options.json) console.error(JSON.stringify(warning));
       else output.error(`Warning: ${warning.message}`);
@@ -279,82 +249,6 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
     if (result.updateAvailable) console.log('Updates or installation issues require attention.');
     return result.updateAvailable || unavailable.length ? 1 : 0;
   }
-  if (options.command === 'dashboard') {
-    const result = collectInstalledScopes({ project: options.target!, user: os.homedir() }, sourceResources);
-    result.errors.push(...catalogWarnings.map((warning) => ({ ...warning, scope: 'catalog' })));
-    const rows = enrichInstalledResources(result.resources, allResources);
-    if (
-      !options.nonInteractive &&
-      process.stdin.isTTY &&
-      process.stdout.isTTY &&
-      typeof process.stdin.setRawMode === 'function'
-    ) {
-      const userCatalogState: () => UserCatalog[] = () => {
-        const catalogs: SourceConfiguration[] = loadUserSourceConfiguration();
-        return catalogs.map(({ name, repository, mode, entries }) => ({ name, repository, mode, entries }));
-      };
-      let applySelfUpdate: (() => Promise<void>) | undefined;
-      const dashboardActions: DashboardActions = {
-        showOnboarding: options.showOnboarding,
-        catalogResources: sourceResources,
-        prepareSelfUpdate: async () => {
-          const update = await prepareSelfUpdate();
-          if (!update) return null;
-          return {
-            manager: update.manager,
-            request: () => {
-              applySelfUpdate = update.apply;
-            },
-          };
-        },
-        addCatalog: (request) => runDashboardWorker<CatalogMutationResult>({ task: 'catalog-add', request }),
-        updateCatalog: (originalName, request) =>
-          runDashboardWorker<CatalogMutationResult>({ task: 'catalog-update', originalName, request }),
-        userCatalogs: userCatalogState(),
-        checkCatalogFreshness: (names) => checkCatalogFreshness(undefined, names),
-        removeCatalog: (name) => runDashboardWorker<CatalogActionResult>({ task: 'catalog-remove', name }),
-        refreshCatalog: (name) => runDashboardWorker<CatalogActionResult>({ task: 'catalog-refresh', name }),
-        transferCatalogs: (action, content) =>
-          runDashboardWorker<CatalogActionResult>({ task: 'catalog-transfer', action, content }),
-        execute: (operation, resource, installOptions) => {
-          const { onProgress, ...workerOptions } = installOptions;
-          return runDashboardWorker<DashboardActionResult>(
-            {
-              task: 'resource-action',
-              action: operation,
-              resource,
-              dashboardOptions: {
-                target: options.target,
-                userTarget: os.homedir(),
-              },
-              catalogs: { sourceResources, warnings: catalogWarnings },
-              installOptions: workerOptions,
-            },
-            onProgress,
-          );
-        },
-        listSourceVersions: async (resource) => {
-          const versions = await listSourceVersionsAsync(resource);
-          const prefixes = uniqueSourceVersionPrefixes(versions);
-          return versions.map((version, index) => ({ ...version, prefix: prefixes[index] }));
-        },
-      };
-      const completed = await browseInstalledResources(
-        rows,
-        process.stdin,
-        process.stdout,
-        result.errors,
-        dashboardActions,
-      );
-      if (completed && applySelfUpdate) {
-        await applySelfUpdate();
-        return 0;
-      }
-      return unavailable.length || result.errors.length || !completed ? 1 : 0;
-    }
-    console.log(renderInstalledResources(rows, process.stdout, result.errors));
-    return unavailable.length || result.errors.length ? 1 : 0;
-  }
   if (options.command === 'show') {
     const resource = await selectedSourceResource(allResources, options);
     if (resource) output.log(formatSourceResource(resource));
@@ -382,12 +276,4 @@ async function executeCommand(options: ParsedCliOptions, report?: CliReport): Pr
   throw new CatalogError(`Unsupported command: ${options.command}`);
 }
 
-export {
-  parseArguments,
-  printHelp,
-  catalogEntries,
-  listCatalogResources,
-  executeCommand,
-  runDashboardWorker,
-  copyTextToClipboard,
-};
+export { parseArguments, printHelp, catalogEntries, listCatalogResources, executeCommand };

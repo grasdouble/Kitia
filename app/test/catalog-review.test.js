@@ -13,7 +13,7 @@ const { catalogIndexFileName } = require('../dist/core/catalogs/config.js');
 
 const executable = path.join(__dirname, '../dist/kitia.js');
 const ghPreload = path.join(__dirname, 'gh-process-preload.cjs');
-const dashboardWorker = path.join(__dirname, '../dist/cli/dashboard-worker.js');
+const dashboardWorker = path.join(__dirname, '../dist/application/worker.js');
 const fixtureAgent = {
   id: 'demo-agent',
   kind: 'agent',

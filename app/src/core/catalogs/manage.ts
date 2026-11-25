@@ -28,11 +28,16 @@ type SourceIndex = {
   source_ref: string;
   resources: CatalogResource[];
 };
-type CatalogImportResult = {
+export type CatalogImportResult = {
   added: string[];
   ignored: { name: string; reason: string }[];
   refreshed: { name: string; count: number }[];
   refreshFailures: { name: string; message: string }[];
+};
+export type CatalogConfigurationDocument = { catalog_version: 1; sources: UserCatalog[] };
+export type CatalogRefreshResult = {
+  refreshed: { name: string; count: number }[];
+  failures: { name: string; message: string }[];
 };
 function readUserSources(): SourceConfiguration[] {
   return loadUserSourceConfiguration();
@@ -216,10 +221,7 @@ function updateCatalog(
   return index;
 }
 
-function refreshCatalogs(names?: string[]): {
-  refreshed: { name: string; count: number }[];
-  failures: { name: string; message: string }[];
-} {
+function refreshCatalogs(names?: string[]): CatalogRefreshResult {
   const userSources = readUserSources();
   const selected =
     names === undefined
@@ -309,7 +311,7 @@ function removeCatalog(name: string): void {
   }
 }
 
-function exportCatalogConfigurationData(): { catalog_version: 1; sources: UserCatalog[] } {
+function exportCatalogConfigurationData(): CatalogConfigurationDocument {
   const sources = readUserSources().map(({ name, repository, mode, entries }) => ({
     name,
     repository,

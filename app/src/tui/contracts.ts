@@ -1,5 +1,5 @@
+import type { ResourceAction, ResourceActionOptions } from '../application/resource-actions.js';
 import type { AddCatalogRequest, UserCatalog } from '../core/catalogs/model.js';
-import type { InstallationDestination } from '../core/installations/destinations.js';
 import type { CatalogResource } from '../core/resources/model.js';
 import type { DashboardActionResult } from './action-result.js';
 import type { CatalogFreshnessStatus } from './catalog-freshness.mjs';
@@ -30,17 +30,9 @@ export type DashboardSelfUpdate = { manager: 'npm' | 'pnpm'; request: () => void
 export interface DashboardActions {
   catalogResources?: CatalogResource[];
   execute?: (
-    operation: string,
+    operation: ResourceAction,
     resource: CatalogResource,
-    options: {
-      scope?: string;
-      destinations?: readonly InstallationDestination[];
-      force?: boolean;
-      ref?: string;
-      ghForce?: boolean;
-      ghForceAgent?: string;
-      onProgress?: (message: string) => void;
-    },
+    options: ResourceActionOptions & { onProgress?: (message: string) => void },
   ) => Promise<DashboardActionResult>;
   listSourceVersions?: (resource: CatalogResource) => SourceVersionOption[] | Promise<SourceVersionOption[]>;
   addCatalog?: (request: AddCatalogRequest) => Promise<CatalogMutationResult>;

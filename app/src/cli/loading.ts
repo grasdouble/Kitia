@@ -61,7 +61,7 @@ function loadCommandCatalogs(
     names: command === 'validate' ? sourceNames : names,
     sources,
     sourceResources: options.sourceResources,
-    allowUnavailable: ['list', 'search', 'dashboard'].includes(command),
+    allowUnavailable: ['list', 'search'].includes(command),
     strictAggregate: command === 'validate',
   };
   const loaded = loadCatalogs(request, warn);

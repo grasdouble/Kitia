@@ -3,6 +3,7 @@
 import { Box, Text } from 'ink';
 import React, { useMemo } from 'react';
 
+import { decodeSourcePreview } from '../../core/inspection/source-preview.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { DASHBOARD_THEME } from '../colors.js';
 import { PanelHeader } from '../components/panel-header.mjs';
@@ -10,6 +11,7 @@ import { Panel } from '../components/panel.mjs';
 import { categorizedShortcutLines, wrappedShortcutLines } from '../components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel } from '../components/shortcuts/shortcuts-panel.mjs';
 import { fitText, wrapText } from '../helpers.mjs';
+import { formatPreviewTree } from '../preview-tree.js';
 import { DASHBOARD_HEADER_ROWS } from '../sections/header.mjs';
 import { DashboardHeader } from '../sections/header.mjs';
 import { highlightSource, type SyntaxLine } from '../source-highlighting.mjs';
@@ -34,96 +36,6 @@ const inspectionShortcuts = categorizedShortcutLines({
 });
 
 type InspectionPage = { title: string; lines: string[]; syntax?: SyntaxLine[] };
-
-function fallbackPreviewTree(resource: CatalogResource, filePath: string) {
-  const sourceParts = (resource.source_path || '').split('/').filter(Boolean);
-  const root =
-    resource.kind === 'skill'
-      ? sourceParts.at(-1) === 'SKILL.md'
-        ? sourceParts.at(-2)
-        : sourceParts.at(-1)
-      : resource.id;
-  return [`${root || resource.id}/`, `└── ${filePath}`];
-}
-
-function parsePreviewFiles(resource: CatalogResource, content: string) {
-  const lines = content.split(/\r?\n/);
-  const singleFile = () => {
-    const sourcePath = (resource.source_path || '').split('/').filter(Boolean).at(-1);
-    const filePath = resource.kind === 'skill' ? 'SKILL.md' : sourcePath || `${resource.id}.md`;
-    return {
-      treeLines: fallbackPreviewTree(resource, filePath),
-      files: [
-        {
-          path: filePath,
-          lines: content.trim() ? lines : ['Source content unavailable; no preview was returned.'],
-        },
-      ],
-    };
-  };
-  // Agents and instructions are raw Markdown, not gh's framed skill preview.
-  if (resource.kind !== 'skill') return singleFile();
-
-  let cursor = 0;
-  while (cursor < lines.length && !lines[cursor].trim()) cursor += 1;
-  const treeStart = cursor;
-  const treeEntry = /^((?:│   |    )*)(?:├── |└── )(.+)$/u;
-  if (lines[cursor]?.endsWith('/') && treeEntry.test(lines[cursor + 1] || '')) cursor += 1;
-  const directories: string[] = [];
-  const paths = new Set<string>();
-  while (cursor < lines.length) {
-    const entry = lines[cursor].match(treeEntry);
-    if (!entry) break;
-    const depth = entry[1].length / 4;
-    const name = entry[2];
-    directories.length = depth;
-    if (name.endsWith('/')) directories.push(name.slice(0, -1));
-    else paths.add([...directories, name].join('/'));
-    cursor += 1;
-  }
-  const treeLines = lines.slice(treeStart, cursor);
-  while (cursor < lines.length && !lines[cursor].trim()) cursor += 1;
-  // gh emits precisely "── <path> ──", a blank line, then the file body.
-  // Do not infer framing from Markdown rules, table separators, or body prose.
-  if (lines[cursor] !== '── SKILL.md ──' || lines[cursor + 1]?.trim() !== '') return singleFile();
-
-  const files: Array<{ path: string; lines: string[] }> = [];
-  const seen = new Set(['SKILL.md']);
-  let filePath = 'SKILL.md';
-  let fileLines: string[] = [];
-  let fence: { character: string; length: number } | undefined;
-  cursor += 2;
-  for (; cursor < lines.length; cursor += 1) {
-    const line = lines[cursor];
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/u);
-    if (marker) {
-      if (!fence) fence = { character: marker[1][0], length: marker[1].length };
-      else if (marker[1][0] === fence.character && marker[1].length >= fence.length && !marker[2].trim())
-        fence = undefined;
-      fileLines.push(line);
-      continue;
-    }
-    const header = !fence && line.match(/^── (.+) ──$/u);
-    if (header && paths.has(header[1]) && !seen.has(header[1]) && lines[cursor + 1]?.trim() === '') {
-      // Remove just gh's inter-file spacer; retain blank lines from the body.
-      if (fileLines.at(-1) === '') fileLines.pop();
-      files.push({ path: filePath, lines: fileLines.length ? fileLines : ['(empty file)'] });
-      filePath = header[1];
-      seen.add(filePath);
-      fileLines = [];
-      cursor += 1;
-    } else {
-      fileLines.push(line);
-    }
-  }
-  // A final newline terminates the last line; it is not an extra blank row.
-  if (fileLines.at(-1) === '') fileLines.pop();
-  files.push({ path: filePath, lines: fileLines.length ? fileLines : ['(empty file)'] });
-  return {
-    treeLines: treeLines.length ? treeLines : fallbackPreviewTree(resource, 'SKILL.md'),
-    files,
-  };
-}
 
 function chunkInspectionLines(
   title: string,
@@ -177,7 +89,7 @@ function inspectionContent(
       auditLines: localAuditLines?.length ? localAuditLines : ['Audit report unavailable; no result was returned.'],
       treeLines: localTreeLines?.length ? localTreeLines : localFiles.map(({ path }) => path),
       files: localFiles.map(({ path, content: source }) => {
-        const lines = source.split(/\r?\n/);
+        const lines = source ? source.split(/\r?\n/) : ['(empty file)'];
         return {
           path,
           lines,
@@ -199,11 +111,19 @@ function inspectionContent(
     previewContent = [...lines.slice(0, auditStart), ...lines.slice(previewStart)].join('\n');
   }
   if (!auditLines.length) auditLines.push('Audit report unavailable; no result was returned.');
-  const { treeLines, files } = parsePreviewFiles(resource, previewContent);
+  const { root, treeEntries, files } = decodeSourcePreview(resource, previewContent);
+  const hasPreview = previewContent.trim().length > 0;
   return {
     auditLines,
-    treeLines,
-    files: highlight ? files.map((file) => ({ ...file, syntax: highlightSource(file.path, file.lines) })) : files,
+    treeLines: formatPreviewTree(root, treeEntries),
+    files: files.map(({ path, content: source }) => {
+      const lines = !hasPreview
+        ? ['Source content unavailable; no preview was returned.']
+        : source
+          ? source.split(/\r?\n/)
+          : ['(empty file)'];
+      return { path, lines, ...(highlight ? { syntax: highlightSource(path, lines) } : {}) };
+    }),
   };
 }
 
