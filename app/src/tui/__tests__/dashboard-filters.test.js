@@ -2,13 +2,8 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const {
-  filterCatalogResources,
-  filterInventory,
-  cycleFilter,
-  cycleCatalogFilter,
-  cycleInventoryLicense,
-} = require('../helpers.mts');
+const { filterInventory } = require('../../core/inventory/view.ts');
+const { filterCatalogResources, cycleFilter, cycleCatalogFilter, cycleInventoryLicense } = require('../helpers.mts');
 
 test('catalog browser search covers discovery metadata fields', () => {
   const resource = {

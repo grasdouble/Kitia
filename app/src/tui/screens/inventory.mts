@@ -3,8 +3,16 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
-import { availableInstallationDestinations } from '../../core/installations/destinations.js';
 import type { ScanError } from '../../core/inventory/checks.js';
+import {
+  canPreviewInstalledResource,
+  dashboardStatus,
+  filterInventory,
+  installedDestinationLabels,
+  inventoryCatalogLabels,
+  issueLine,
+  type InventoryCatalogConfiguration,
+} from '../../core/inventory/view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { adaptiveColumnWidths } from '../../table-layout.js';
 import { DASHBOARD_THEME, resolveRowColor } from '../colors.js';
@@ -17,31 +25,10 @@ import { categorizedShortcutLines, sectionNavigationHints } from '../components/
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
-import type { InventoryCatalogConfiguration } from '../helpers.mjs';
-import {
-  colorForStatus,
-  dashboardStatus,
-  filterInventory,
-  inventoryCatalogLabels,
-  issueLine,
-  tableLine,
-  fitText,
-  wrapText,
-} from '../helpers.mjs';
+import { colorForStatus, fitText, tableLine, wrapText } from '../helpers.mjs';
 import { JoinedWorkspace } from '../layouts/joined-workspace.mjs';
 import { DashboardHeader } from '../sections/header.mjs';
 const h = React.createElement;
-
-function installedDestinationLabels(resource: CatalogResource): string {
-  if (!resource.paths?.length) return '';
-  const paths = resource.paths.map((path) => (path.startsWith('./') ? path.slice(2) : path));
-  const labels = new Set<string>();
-  for (const { directory, label } of availableInstallationDestinations(resource.kind)) {
-    const prefix = `${directory}/`;
-    if (paths.some((path) => path.startsWith(prefix))) labels.add(label);
-  }
-  return [...labels].join(' · ');
-}
 
 export function InventoryScreen({
   resources,
@@ -104,14 +91,7 @@ export function InventoryScreen({
           ? { Filters: ['TYPE to search', 'BACKSPACE edit', 'ENTER apply', 'ESC clear'], Navigation: ['↑↓ navigate'] }
           : {
               Actions: [
-                ...(canExecute &&
-                selected &&
-                selected.scope &&
-                (selected.managed === false
-                  ? Boolean(selected.paths?.length)
-                  : Boolean(selected.source_repository && selected.source_path))
-                  ? ['P preview']
-                  : []),
+                ...(canExecute && canPreviewInstalledResource(selected) ? ['P preview'] : []),
                 ...(canExecute && selected && selected.managed !== false && dashboardStatus(selected) === 'update'
                   ? ['U update']
                   : []),

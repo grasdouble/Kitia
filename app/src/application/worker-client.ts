@@ -6,13 +6,15 @@ import type {
   CatalogImportResult,
   CatalogRefreshResult,
 } from '../core/catalogs/manage.js';
+import type { ResourceInspection } from '../core/inspection/model.js';
 import type { ResourceActionResult } from './resource-actions.js';
-import type { CatalogSnapshot, InventorySnapshot } from './snapshot.js';
+import type { CatalogSnapshot, InventoryWorkspace } from './snapshot.js';
 import type { OperationTask } from './worker.js';
 
 type CatalogMutation = CatalogSnapshot & { catalog: string; count: number };
 type OperationResults = {
-  'inventory-read': InventorySnapshot;
+  'inventory-read': InventoryWorkspace;
+  'inventory-preview': ResourceInspection | null;
   'resource-action': ResourceActionResult;
   'catalog-add': CatalogMutation;
   'catalog-update': CatalogMutation;

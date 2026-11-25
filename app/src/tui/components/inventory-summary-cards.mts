@@ -3,9 +3,10 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
+import { summarizeInventory } from '../../core/inventory/view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { DASHBOARD_THEME } from '../colors.js';
-import { dashboardStatus, fitText } from '../helpers.mjs';
+import { fitText } from '../helpers.mjs';
 import { Panel } from './panel.mjs';
 
 const h = React.createElement;
@@ -29,10 +30,7 @@ export function InventorySummaryCards({
   ultraCompact?: boolean;
   marginTop?: number;
 }) {
-  const managed = resources.filter((resource) => resource.managed !== false);
-  const current = managed.filter((resource) => dashboardStatus(resource) === 'current').length;
-  const updates = managed.filter((resource) => dashboardStatus(resource) === 'update').length;
-  const warnings = managed.filter((resource) => dashboardStatus(resource) === 'attention').length;
+  const { project, user, current, updates, warnings } = summarizeInventory(resources);
   type SummaryCard =
     | { type: 'scope'; title: string; count: number; managed: number; color: string }
     | { type: 'updates'; title: string; count: number; note: string; color: string };
@@ -40,15 +38,15 @@ export function InventorySummaryCards({
     {
       type: 'scope',
       title: 'PROJECT',
-      count: resources.filter((resource) => resource.scope === 'project').length,
-      managed: managed.filter((resource) => resource.scope === 'project').length,
+      count: project.total,
+      managed: project.managed,
       color: DASHBOARD_THEME.semantic.terminalScope.project,
     },
     {
       type: 'scope',
       title: 'USER',
-      count: resources.filter((resource) => resource.scope === 'user').length,
-      managed: managed.filter((resource) => resource.scope === 'user').length,
+      count: user.total,
+      managed: user.managed,
       color: DASHBOARD_THEME.semantic.terminalScope.user,
     },
     {

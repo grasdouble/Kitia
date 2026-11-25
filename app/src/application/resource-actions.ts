@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 
 import type { AuditResult } from '../core/inspection/audit.js';
-import { localPreviewFiles } from '../core/inspection/local-preview.js';
 import type { PreviewFile, PreviewTreeEntry } from '../core/inspection/model.js';
 import { decodeSourcePreview } from '../core/inspection/source-preview.js';
 import { executeInstallationOperation, type InstallationRequest } from '../core/installations/lifecycle.js';
@@ -9,6 +8,7 @@ import { acquireOperationLock } from '../core/installations/lock.js';
 import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
 import { readInstallState } from '../core/inventory/inventory.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
+import { inspectInstalledFiles } from './inventory-preview.js';
 import { readCatalogSnapshot, readInventory, type InstallationTargets, type InventorySnapshot } from './snapshot.js';
 
 export type ResourceAction = InstallationRequest['operation'] | 'remove-unmanaged';
@@ -64,7 +64,7 @@ export async function runResourceAction(
       if (resource.managed !== false) throw new Error('Only unmanaged dashboard artifacts can be removed this way.');
       messages.push(...removeUnmanagedResource(targetRoot, state, resource));
     } else if (action === 'preview' && resource.scope) {
-      const local = localPreviewFiles(targetRoot, readInstallState(targetRoot), resource);
+      const local = inspectInstalledFiles(targetRoot, resource);
       inspection = { ...local, origin: 'local', root: 'local installations' };
     } else {
       // Keep the inventory format check before invoking any lifecycle operation.

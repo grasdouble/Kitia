@@ -2,6 +2,12 @@ import { render, useInput, useWindowSize } from 'ink';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ScanError } from '../core/inventory/checks.js';
+import {
+  canPreviewInstalledResource,
+  dashboardStatus,
+  filterInventory,
+  inventoryCatalogLabels,
+} from '../core/inventory/view.js';
 import type { CatalogResource } from '../core/resources/model.js';
 import { dashboardControlsLayout } from './components/controls/control-layout-plan.mjs';
 import type {
@@ -21,10 +27,7 @@ import {
   cycleFilter,
   cycleIndex,
   cycleInventoryLicense,
-  dashboardStatus,
   filterCatalogResources,
-  filterInventory,
-  inventoryCatalogLabels,
   inventoryFilterOptions,
 } from './helpers.mjs';
 import {
@@ -261,11 +264,7 @@ export function Dashboard({
           ...(selectedResource && actions.execute
             ? [{ id: 'remove', label: selectedResource.managed === false ? 'Remove' : 'Uninstall' }]
             : []),
-          ...(actions.execute &&
-          selectedResource?.scope &&
-          (selectedResource.managed === false
-            ? Boolean(selectedResource.paths?.length)
-            : Boolean(selectedResource.source_repository && selectedResource.source_path))
+          ...(actions.execute && canPreviewInstalledResource(selectedResource)
             ? [{ id: 'preview', label: 'Preview / audit' }]
             : []),
           ...(selectedResource?.managed !== false &&
@@ -757,14 +756,7 @@ export function Dashboard({
         ),
       );
       setSelectedIndex(0);
-    } else if (
-      character === 'p' &&
-      selectedResource &&
-      selectedResource.scope &&
-      (selectedResource.managed === false
-        ? Boolean(selectedResource.paths?.length)
-        : Boolean(selectedResource.source_repository && selectedResource.source_path))
-    ) {
+    } else if (character === 'p' && canPreviewInstalledResource(selectedResource)) {
       void runConfirmedAction({ action: 'preview', resource: selectedResource });
     } else if (
       character === 'v' &&

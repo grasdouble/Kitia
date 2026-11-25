@@ -10,6 +10,7 @@ import {
 } from '../core/catalogs/manage.js';
 import type { AddCatalogRequest } from '../core/catalogs/model.js';
 import type { CatalogResource } from '../core/resources/model.js';
+import { readInstalledPreview, type InstalledResourceSelector } from './inventory-preview.js';
 import { runResourceAction, type ResourceAction, type ResourceActionOptions } from './resource-actions.js';
 import { readCatalogSnapshot, readInventory, type InstallationTargets } from './snapshot.js';
 
@@ -22,6 +23,7 @@ export type OperationTask =
       options?: ResourceActionOptions;
     }
   | { task: 'inventory-read'; targets: InstallationTargets }
+  | { task: 'inventory-preview'; targets: InstallationTargets; selector: InstalledResourceSelector }
   | { task: 'catalog-add'; request: AddCatalogRequest }
   | { task: 'catalog-update'; originalName: string; request: AddCatalogRequest }
   | { task: 'catalog-remove'; name: string }
@@ -31,8 +33,12 @@ export type OperationTask =
 
 async function execute(data: OperationTask) {
   switch (data.task) {
-    case 'inventory-read':
-      return readInventory(data.targets, readCatalogSnapshot());
+    case 'inventory-read': {
+      const catalog = readCatalogSnapshot();
+      return { inventory: readInventory(data.targets, catalog), catalogs: catalog.catalogs };
+    }
+    case 'inventory-preview':
+      return readInstalledPreview(data.targets, data.selector);
     case 'resource-action':
       return runResourceAction(data.action, data.resource, data.targets, data.options, (progress) =>
         parentPort?.postMessage({ progress }),

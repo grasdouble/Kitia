@@ -3,6 +3,7 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
+import { inventoryCatalogLabels, type InventoryCatalogConfiguration } from '../../core/inventory/view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { adaptiveColumnWidths } from '../../table-layout.js';
 import { DASHBOARD_THEME, resolveRowColor } from '../colors.js';
@@ -15,8 +16,7 @@ import { categorizedShortcutLines, sectionNavigationHints } from '../components/
 import { ShortcutsPanel, shortcutsPanelRows } from '../components/shortcuts/shortcuts-panel.mjs';
 import { resourceTableRows, useResourceTableWindow } from '../components/table/resource-table.mjs';
 import { Controls } from '../controls.mjs';
-import type { InventoryCatalogConfiguration } from '../helpers.mjs';
-import { filterCatalogResources, fitText, inventoryCatalogLabels, tableLine } from '../helpers.mjs';
+import { filterCatalogResources, fitText, tableLine } from '../helpers.mjs';
 import { JoinedWorkspace } from '../layouts/joined-workspace.mjs';
 import { DashboardHeader } from '../sections/header.mjs';
 const h = React.createElement;

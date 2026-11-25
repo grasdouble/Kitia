@@ -11,7 +11,7 @@ const { findUnmanagedArtifacts } = require('../discovery.ts');
 const { installedFingerprint } = require('../../installations/files.ts');
 const { collectInstalledScopes, checkInstalledResources } = require('../checks.ts');
 const { enrichInstalledResources } = require('../../resources/queries.ts');
-const { dashboardStatus } = require('../../../tui/helpers.mts');
+const { dashboardStatus } = require('../view.ts');
 const { renderInstalledResources } = require('../../../tui/terminal.ts');
 const {
   setupTemporaryDirectory,

@@ -6,8 +6,9 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { runSourceOperation } = require('../../core/installations/lifecycle.ts');
 const { collectInstalledScopes } = require('../../core/inventory/checks.ts');
+const { filterInventory, inventoryCatalogLabel } = require('../../core/inventory/view.ts');
 const { enrichInstalledResources } = require('../../core/resources/queries.ts');
-const { cycleFilter, filterInventory, inventoryCatalogLabel } = require('../helpers.mts');
+const { cycleFilter } = require('../helpers.mts');
 const { setupTemporaryDirectory } = require('../../../test/fixtures/source-catalog-fixtures.js');
 const {
   waitForOutput,

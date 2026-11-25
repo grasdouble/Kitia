@@ -32,7 +32,7 @@ For one-off runs, use `npx --yes @grasdouble/kitia@latest` or `pnpm dlx @grasdou
 
 Run `kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository. Without a global install, run `npx --yes @grasdouble/kitia dashboard` instead.
 
-Run `kitia web` from your project to view the project and user inventories in a browser. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop. The browser view is read-only; use the dashboard or CLI to manage installations and catalogs.
+Run `kitia web` from your project to search and filter the project and user inventories, inspect installation details, and preview and audit installed files. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop. Use the dashboard or CLI to change installations and catalogs.
 
 - **Basic** discovers skills recursively under `skills/**/SKILL.md`.
 - **Custom** maps selected repository-relative paths for skills, agents, and instructions. Multiple paths can be registered in one catalog.

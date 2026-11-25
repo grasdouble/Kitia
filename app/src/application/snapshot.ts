@@ -15,6 +15,7 @@ export type CatalogSnapshot = {
 };
 
 export type InventorySnapshot = { resources: CatalogResource[]; errors: ScanError[] };
+export type InventoryWorkspace = { inventory: InventorySnapshot; catalogs: UserCatalog[] };
 
 export function readCatalogSnapshot(sourceResources?: CatalogResource[]): CatalogSnapshot {
   const sources = loadUserSourceConfiguration();

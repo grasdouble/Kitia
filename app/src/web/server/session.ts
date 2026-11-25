@@ -4,7 +4,8 @@ import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import type { InstallationTargets, InventorySnapshot } from '../../application/snapshot.js';
+import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
+import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
 import { runOperation } from '../../application/worker-client.js';
 
 const host = '127.0.0.1';
@@ -28,6 +29,26 @@ async function resolveDirectory(directory: string) {
   return resolved;
 }
 
+const previewRoute = '/api/inventory/preview?';
+function installedSelector(query: string): InstalledResourceSelector | undefined {
+  const params = new URLSearchParams(query);
+  if (params.size !== 5) return undefined;
+  const scope = params.get('scope');
+  const kind = params.get('kind');
+  const id = params.get('id');
+  const catalog = params.get('catalog');
+  const managed = params.get('managed');
+  if (
+    (scope !== 'project' && scope !== 'user') ||
+    (kind !== 'skill' && kind !== 'agent' && kind !== 'instruction') ||
+    !id ||
+    catalog === null ||
+    (managed !== 'true' && managed !== 'false')
+  )
+    return undefined;
+  return { scope, kind, id, catalog, managed: managed === 'true' };
+}
+
 export async function startWebSession(requestedTargets: InstallationTargets) {
   const targets = {
     project: await resolveDirectory(requestedTargets.project),
@@ -47,7 +68,7 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
   const credentials = Buffer.from(`Bearer ${token}`);
   let origin: string;
   let authority: string;
-  let inventoryRead: Promise<InventorySnapshot> | undefined;
+  let inventoryRead: Promise<InventoryWorkspace> | undefined;
   const server = createServer(async (request, response) => {
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (request.headers.host !== authority) {
@@ -70,7 +91,7 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       response.end(asset.body);
       return;
     }
-    if (route !== '/api/inventory') {
+    if (route !== '/api/inventory' && !route.startsWith(previewRoute)) {
       sendJson(response, 404, { error: 'Not found.' });
       return;
     }
@@ -85,11 +106,21 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       return;
     }
     try {
-      inventoryRead ??= runOperation({ task: 'inventory-read', targets }).finally(() => {
-        inventoryRead = undefined;
-      });
-      const inventory = await inventoryRead;
-      sendJson(response, 200, { targets, inventory });
+      if (route === '/api/inventory') {
+        inventoryRead ??= runOperation({ task: 'inventory-read', targets }).finally(() => {
+          inventoryRead = undefined;
+        });
+        sendJson(response, 200, { targets, ...(await inventoryRead) });
+        return;
+      }
+      const selector = installedSelector(route.slice(previewRoute.length));
+      if (!selector) {
+        sendJson(response, 400, { error: 'Invalid installed resource selector.' });
+        return;
+      }
+      const inspection = await runOperation({ task: 'inventory-preview', targets, selector });
+      if (inspection) sendJson(response, 200, inspection);
+      else sendJson(response, 404, { error: 'This resource is not available for local preview.' });
     } catch (error) {
       sendJson(response, 500, { error: error instanceof Error ? error.message : 'Could not read the inventory.' });
     }
