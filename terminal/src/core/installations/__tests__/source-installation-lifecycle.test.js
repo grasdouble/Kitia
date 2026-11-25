@@ -588,7 +588,7 @@ for (const [scope, destination, directory] of [
     const seen = [];
     const invoke = (args) => {
       const file = path.join(args[args.indexOf('--dir') + 1], 'demo/SKILL.md');
-      seen.push(path.relative(target, file));
+      seen.push(path.relative(target, file).split(path.sep).join('/'));
       write(file, body(args[args.indexOf('--pin') + 1]));
       return 0;
     };
