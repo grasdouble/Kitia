@@ -62,7 +62,7 @@ export function optionsModal({
     .join(', ');
   const extra = selected.length > 2 ? ` +${selected.length - 2}` : '';
   const summary =
-    names && names.length + extra.length <= contentWidth - 8 ? `${names}${extra}` : `${selected.length} selected`;
+    names && names.length + extra.length <= contentWidth - 5 ? `${names}${extra}` : `${selected.length} selected`;
   const frame = modalFrame(
     'INSTALL OPTIONS',
     [
@@ -90,12 +90,15 @@ export function optionsModal({
             },
           ]
         : [
-            { text: 'DESTINATIONS', bold: true },
             {
-              text: `${focus === 'destinations' ? '›' : ' '} [ ${summary} ${menuIndex === null ? '▾' : '▴'} ]`,
-              bold: focus === 'destinations',
-              color: focus === 'destinations' ? semantic.selected : semantic.accents.primary,
-              preserveSpacing: true,
+              text: `${focus === 'destinations' ? '› ' : ''}Destinations`,
+              bold: true,
+              color: focus === 'destinations' ? semantic.accents.primary : semantic.accents.label,
+            },
+            {
+              text: `${summary}${menuIndex === null ? '▾' : '▴'}`,
+              selectInput: { compact: rows < 40 },
+              focused: focus === 'destinations',
               mouseTarget: { type: 'modal-destinations' as const, action: 'toggle' as const },
             },
             ...(!canReview && !scopeError

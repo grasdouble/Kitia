@@ -297,8 +297,9 @@ Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
-In Install Options, open **Destinations** with a click, `Enter`, or
-`Space`. Use the arrows to move through the menu and `Space` to toggle an
+In Install Options, **Destinations** looks like an Inventory filter but
+accepts multiple values. Open it with a click, `Enter`, or `Space`. Use the
+arrows to move through the menu and `Space` to toggle an
 available destination; already installed copies are marked and cannot be
 selected. `Esc` or an outside click closes the menu without clearing choices.
 `Tab` closes it and moves to the next control. Project and user selections

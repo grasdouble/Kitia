@@ -5,6 +5,7 @@ import type { DOMElement } from 'ink';
 import React from 'react';
 
 import { DASHBOARD_THEME } from './colors.js';
+import { SelectInput } from './components/input/select-input.mjs';
 import { Panel } from './components/panel.mjs';
 import { categorizedShortcutLines, wrappedShortcutLines } from './components/shortcuts/shortcut-lines.mjs';
 import { ShortcutsPanel } from './components/shortcuts/shortcuts-panel.mjs';
@@ -22,6 +23,7 @@ type ModalContentLine = {
   selected?: boolean;
   color?: string;
   borderColor?: string;
+  selectInput?: { compact: boolean };
   bold?: boolean;
   dimColor?: boolean;
   preserveSpacing?: boolean;
@@ -170,6 +172,7 @@ export function modalFrame(
       bold: row.bold,
       dimColor: row.dimColor,
       borderColor: accent,
+      selectInput: row.selectInput,
       mouseTarget: row.mouseTarget,
     }));
   });
@@ -341,6 +344,38 @@ function isSelectableOptionLine(line: ModalRenderedLine): line is SelectableOpti
     typeof line.bodyText === 'string'
   );
 }
+
+function modalLineHeight(line: ModalRenderedLine): number {
+  return isChoiceGroupLine(line) || (line.selectInput && !line.selectInput.compact) ? 3 : 1;
+}
+
+function modalSelect(line: ModalRenderedLine, compact: boolean, rowRef?: ModalElementRef) {
+  const sides = compact ? (['middle'] as const) : (['top', 'middle', 'bottom'] as const);
+  const width = line.text.length;
+  const { primary, muted, label } = semantic.accents;
+  return h(
+    Box,
+    { flexDirection: 'column', width, height: sides.length, flexShrink: 0, ref: rowRef },
+    ...sides.map((side) =>
+      h(
+        Text,
+        { key: side, color: line.borderColor, backgroundColor: MODAL_BACKGROUND },
+        '│ ',
+        h(SelectInput, {
+          side,
+          value: line.bodyText ?? '',
+          width: width - 4,
+          focused: Boolean(line.focused),
+          compact,
+          focusedColor: primary,
+          unfocusedColor: muted,
+          labelColor: label,
+        }),
+        ' │',
+      ),
+    ),
+  );
+}
 function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?: ChoiceGroupRefs | null }) {
   const commonProps = {
     color: line.color || MODAL_FOREGROUND,
@@ -354,6 +389,7 @@ function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?:
   if (isSelectableOptionLine(line)) {
     return h(SelectableOption, { line });
   }
+  if (line.selectInput) return modalSelect(line, line.selectInput.compact, choiceRefs?.row);
   const content =
     line.text?.startsWith('│') && line.text.endsWith('│')
       ? h(
@@ -372,12 +408,17 @@ function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?:
 function destinationPopover(modal: ModalFrameResult, left: number, top: number, rows: number) {
   const menu = modal.destinationMenu;
   if (!menu) return;
+  let fieldHeight = 1;
   let below = top;
   for (const line of modal.lines) {
-    below += isChoiceGroupLine(line) ? 3 : 1;
-    if (line.mouseTarget?.type === 'modal-destinations') break;
+    const height = modalLineHeight(line);
+    below += height;
+    if (line.selectInput) {
+      fieldHeight = height;
+      break;
+    }
   }
-  const above = below - 1;
+  const above = below - fieldHeight;
   const width = modal.width - 4;
   const inner = width - 4;
   const needsDetailRow = menu.items.some(({ title, directory }) => title.length + directory.length + 5 > inner);
@@ -461,13 +502,9 @@ export function ModalOverlay({
   mouse?: DashboardMouseRegions;
 }) {
   const shortcutsRows = modal.shortcuts.length ? wrappedShortcutLines(modal.shortcuts, modal.width).length + 4 : 0;
-  const choiceRows = modal.lines.filter(({ component }) => component === 'choice-group').length * 2;
+  const contentRows = modal.lines.reduce((height, line) => height + modalLineHeight(line), 0);
   const modalHeight =
-    modal.lines.length +
-    choiceRows +
-    modal.headerLines.length +
-    (modal.panelTitle ? 4 : 0) +
-    (shortcutsRows ? shortcutsRows + 1 : 0);
+    contentRows + modal.headerLines.length + (modal.panelTitle ? 4 : 0) + (shortcutsRows ? shortcutsRows + 1 : 0);
   const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
   const popover = destinationPopover(modal, left, top, rows);
@@ -495,9 +532,10 @@ export function ModalOverlay({
         if (!row) continue;
         const rowLayout = measureElement(row);
         if (line.mouseTarget) {
+          const inset = line.selectInput ? 2 : 0;
           regions.push({
-            left: rowLayout.x + 1,
-            right: Math.min(columns, rowLayout.x + rowLayout.clientWidth),
+            left: rowLayout.x + inset + 1,
+            right: Math.min(columns, rowLayout.x + rowLayout.clientWidth - inset),
             top: rowLayout.y + 1,
             bottom: Math.min(rows, rowLayout.y + rowLayout.clientHeight),
             target: line.mouseTarget,

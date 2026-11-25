@@ -1381,7 +1381,7 @@ test(
         await assertTableSurface(session, 'b', { selected });
       }
       await press('\r', 'INSTALL OPTIONS');
-      await press('\t', '› [ Standard ▾ ]');
+      await press('\t', '› Destinations');
       await press('\t', '› [ Review install ]');
       await press('\r', 'CONFIRM INSTALL');
       const blocked = await press('y', 'INSTALL FAILED');
