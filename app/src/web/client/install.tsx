@@ -25,6 +25,8 @@ const scopeLabel = { project: 'Project', user: 'User' };
 export function InstallDialog({
   resource,
   selector,
+  revision,
+  onReplace,
   inventory,
   targets,
   token,
@@ -33,6 +35,8 @@ export function InstallDialog({
 }: {
   resource: CatalogResource;
   selector: URLSearchParams;
+  revision?: string;
+  onReplace: (scope: InstallationScope, revision: string) => void;
   inventory: InventorySnapshot;
   targets: InstallationTargets;
   token: string;
@@ -67,6 +71,7 @@ export function InstallDialog({
     if (!canInstall || state.step !== 'review') return;
     setState({ step: 'installing' });
     const query = new URLSearchParams(selector);
+    if (revision) query.set('revision', revision);
     query.set('scope', scope);
     for (const { id } of selected) query.append('destination', id);
     try {
@@ -103,34 +108,50 @@ export function InstallDialog({
           <p className="target">
             Target: <code>{targets[scope]}</code>
           </p>
+          {revision ? (
+            <p>
+              Selected revision: <code>{revision}</code>
+            </p>
+          ) : null}
           {scopeError ? <p role="alert">{scopeError.message}</p> : null}
-          <fieldset className="install-options" disabled={Boolean(scopeError)}>
-            <legend>Destinations</legend>
-            {choices.map(({ id, label, path, tracked }) => (
-              <label key={id}>
-                <input
-                  type="checkbox"
-                  disabled={tracked}
-                  checked={tracked || defaults.includes(id)}
-                  onChange={(event) => {
-                    setSelections({
-                      ...selections,
-                      [scope]: event.target.checked ? [...defaults, id] : defaults.filter((value) => value !== id),
-                    });
-                  }}
-                />
-                <span>
-                  {label}
-                  {tracked ? ' · Already installed' : ''}
-                  <br />
-                  <code>{path}</code>
-                </span>
-              </label>
-            ))}
-          </fieldset>
-          <button type="button" disabled={!canInstall} onClick={() => setState({ step: 'review' })}>
-            Review installation
-          </button>
+          {installed && revision ? (
+            <>
+              <p>This scope already has an installation. Changing its revision preserves the tracked destinations.</p>
+              <button type="button" disabled={Boolean(scopeError)} onClick={() => onReplace(scope, revision)}>
+                Review replacement
+              </button>
+            </>
+          ) : (
+            <>
+              <fieldset className="install-options" disabled={Boolean(scopeError)}>
+                <legend>Destinations</legend>
+                {choices.map(({ id, label, path, tracked }) => (
+                  <label key={id}>
+                    <input
+                      type="checkbox"
+                      disabled={tracked}
+                      checked={tracked || defaults.includes(id)}
+                      onChange={(event) => {
+                        setSelections({
+                          ...selections,
+                          [scope]: event.target.checked ? [...defaults, id] : defaults.filter((value) => value !== id),
+                        });
+                      }}
+                    />
+                    <span>
+                      {label}
+                      {tracked ? ' · Already installed' : ''}
+                      <br />
+                      <code>{path}</code>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              <button type="button" disabled={!canInstall} onClick={() => setState({ step: 'review' })}>
+                Review installation
+              </button>
+            </>
+          )}
         </>
       ) : state.step === 'result' ? (
         <MutationResult result={state.result} operation="Installation" />
@@ -139,7 +160,7 @@ export function InstallDialog({
       ) : (
         <>
           <p>
-            Revision: <code>{selector.get('ref')}</code>
+            Revision: <code>{revision ?? selector.get('ref')}</code>
           </p>
           <p>
             Files will be installed in <strong>{scopeLabel[scope]}</strong> at <code>{targets[scope]}</code>:

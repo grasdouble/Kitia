@@ -161,18 +161,21 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         const action = inventoryActions.find((value) => value === params.get('action'));
         const stamp = params.get('stamp') ?? '';
         const retry = params.get('retry');
+        const revision = params.get('revision')?.toLowerCase();
         if (
           !selector ||
           !action ||
           (action === 'remove-unmanaged') === selector.managed ||
-          params.size !== (mutation ? 7 + Number(retry !== null) : 6) ||
+          (revision !== undefined && (action !== 'update' || !/^[a-f0-9]{40}$/.test(revision))) ||
+          params.size !== (mutation ? 7 + Number(retry !== null) : 6) + Number(revision !== undefined) ||
           (mutation ? !/^[a-f0-9]{64}$/.test(stamp) : stamp !== '' || retry !== null)
         ) {
           sendJson(response, 400, { error: 'Invalid inventory action selector.' });
           return;
         }
+        const reviewTask = { task: 'inventory-review', targets, action, selector, revision } as const;
         if (!mutation) {
-          sendJson(response, 200, await runOperation({ task: 'inventory-review', targets, action, selector }));
+          sendJson(response, 200, await runOperation(reviewTask));
           return;
         }
         const key = JSON.stringify(selector);
@@ -192,9 +195,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         const destination = retry === null ? undefined : previous?.destination;
         const attempted = new Set(retry === null ? undefined : previous?.attempted);
         if (destination) attempted.add(destination);
-        const selection = { selector, stamp };
-        const initial =
-          action === 'update' ? await runOperation({ task: 'inventory-review', targets, action, selector }) : undefined;
+        const selection = { selector, stamp, revision };
+        const initial = action === 'update' ? await runOperation(reviewTask) : undefined;
         const result = await runOperation({
           task: 'inventory-mutate',
           targets,
@@ -211,10 +213,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
           isInstallationDestination(failure.agent) &&
           !attempted.has(failure.agent)
         ) {
-          const review = await runOperation({ task: 'inventory-review', targets, action, selector }).catch(
-            () => undefined,
-          );
-          if (review && review.ref === initial?.ref) {
+          const review = await runOperation(reviewTask).catch(() => undefined);
+          if (review && review.catalogPin === initial?.catalogPin) {
             const ticket = randomBytes(24).toString('base64url');
             retries.set(selector.scope, { ticket, key, stamp: review.stamp, destination: failure.agent, attempted });
             const retry: InventoryMutationRetry = { ticket, review };
@@ -230,10 +230,12 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         const scope = params.get('scope');
         const destinations = params.getAll('destination').filter(isInstallationDestination);
         const selector = catalogSelector(params);
+        const revision = params.get('revision')?.toLowerCase();
         if (
           !selector ||
           (scope !== 'project' && scope !== 'user') ||
-          params.size !== 5 + destinations.length ||
+          (revision !== undefined && !/^[a-f0-9]{40}$/.test(revision)) ||
+          params.size !== 5 + destinations.length + Number(revision !== undefined) ||
           !destinations.length ||
           destinations.length > installationDestinationIds.length ||
           new Set(destinations).size !== destinations.length
@@ -251,7 +253,13 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         sendJson(
           response,
           200,
-          await runOperation({ task: 'catalog-install', selector, targets, options: { scope, destinations } }),
+          await runOperation({
+            task: 'catalog-install',
+            selector,
+            revision,
+            targets,
+            options: { scope, destinations },
+          }),
         );
         return;
       }

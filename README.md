@@ -34,7 +34,7 @@ Run `kitia dashboard` to browse project and user inventories, inspect resources,
 
 Run `kitia web` from your project to search and filter the project and user inventories, inspect installation details, and preview and audit installed files. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop.
 
-In **Browse resources**, search your configured catalogs, preview pinned sources, and inspect revision history. Choose **Install**, select the scope and destinations, then review the pinned revision and paths before confirming. In **Inventory**, update or uninstall tracked resources, or explicitly remove unmanaged files. Use the dashboard or CLI to select another revision, override local conflicts, or manage catalogs.
+In **Browse resources**, search configured catalogs, preview pinned sources, and install the catalog pin or a commit from **Revisions**. In **Inventory**, update to the catalog pin or select a different commit, uninstall tracked resources, or explicitly remove unmanaged files. Review the scope and affected paths before confirming. Use the dashboard or CLI to override local conflicts or manage catalogs.
 
 - **Basic** discovers skills recursively under `skills/**/SKILL.md`.
 - **Custom** maps selected repository-relative paths for skills, agents, and instructions. Multiple paths can be registered in one catalog.

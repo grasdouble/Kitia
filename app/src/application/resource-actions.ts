@@ -7,6 +7,7 @@ import { executeInstallationOperation, type InstallationRequest } from '../core/
 import { acquireOperationLock } from '../core/installations/lock.js';
 import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
 import { readInstallState, sourceCatalogName } from '../core/inventory/inventory.js';
+import { listSourceVersionsAsync } from '../core/resources/history.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
 import {
   inspectPinnedSource,
@@ -47,7 +48,7 @@ export type ResourceActionResult = InventorySnapshot & {
 
 export async function runResourceAction(
   action: ResourceAction,
-  selection: CatalogResource | CatalogResourceSelector | ConfirmedInventoryMutation,
+  selection: CatalogResource | (CatalogResourceSelector & { revision?: string }) | ConfirmedInventoryMutation,
   targets: InstallationTargets,
   options: ResourceActionOptions = {},
   onProgress?: (message: string) => void,
@@ -68,6 +69,7 @@ export async function runResourceAction(
   let release: (() => void) | undefined;
   let code = 0;
   let failure: ActionFailure | undefined;
+  const revision = pinnedInstall || reviewed ? selection.revision : undefined;
   try {
     if (reviewed && fs.realpathSync(target) !== target) {
       throw new CatalogError('The inventory target has moved. Restart Kitia web.', 'STALE_SOURCE');
@@ -75,11 +77,18 @@ export async function runResourceAction(
     if (action !== 'preview') release = acquireOperationLock(target);
     const targetRoot = fs.realpathSync(target);
     if (reviewed) {
+      if (revision && targets.project === targets.user) {
+        throw new CatalogError(
+          'Project and user scopes share the same directory. Launch Kitia web from a separate project to replace a revision.',
+          'STALE_SOURCE',
+        );
+      }
       const current = reviewInventoryMutation(
         action as InventoryMutation,
         selection.selector,
         target,
         catalog.resources,
+        revision,
       );
       if (current.stamp !== selection.stamp) {
         throw new CatalogError(
@@ -88,7 +97,17 @@ export async function runResourceAction(
         );
       }
     }
-    const resource: CatalogResource = candidate;
+    if (revision) {
+      const source = pinnedInstall
+        ? candidate
+        : catalog.resources.find(
+            ({ catalog, kind, id }) => catalog === candidate.catalog && kind === candidate.kind && id === candidate.id,
+          );
+      if (!source || !(await listSourceVersionsAsync(source)).some(({ sha }) => sha === revision)) {
+        throw new CatalogError('The selected commit is not in this resource’s source history.', 'REVISION_NOT_LISTED');
+      }
+    }
+    const resource: CatalogResource = pinnedInstall && revision ? { ...candidate, source_ref: revision } : candidate;
     if (action === 'remove-unmanaged') {
       const state = readInstallState(targetRoot);
       if (resource.managed !== false) throw new Error('Only unmanaged dashboard artifacts can be removed this way.');
@@ -133,6 +152,7 @@ export async function runResourceAction(
       const result = await executeInstallationOperation(
         {
           ...options,
+          ...(reviewed && revision ? { ref: revision } : {}),
           operation: action,
           resource,
           id: resource.id,

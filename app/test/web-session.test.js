@@ -255,8 +255,9 @@ test(
       assert.deepEqual(await fs.readdir(project), []);
       assert.equal(await fs.readFile(index, 'utf8'), initialIndex);
 
-      const install = (item, scope, destinations, pin = ref) => {
+      const install = (item, scope, destinations, pin = ref, revision) => {
         const params = new URLSearchParams({ catalog: 'Fixture', kind: item.kind, id: item.id, ref: pin, scope });
+        if (revision) params.set('revision', revision);
         for (const destination of destinations) params.append('destination', destination);
         return `${api}/install?${params}`;
       };
@@ -274,13 +275,16 @@ test(
       assert.deepEqual(await fs.readdir(project), []);
       assert.deepEqual(await fs.readdir(user), []);
 
-      await fs.writeFile(index, JSON.stringify({ ...JSON.parse(initialIndex), source_ref: head }));
-      const rejectedAudit = await request(install(agent, 'project', ['copilot'], head), post, 'POST');
+      const unknownRevision = '0'.repeat(40);
+      const unlisted = await request(install(agent, 'project', ['copilot'], ref, unknownRevision), post, 'POST');
+      assert.equal(JSON.parse(unlisted.body).failure.code, 'REVISION_NOT_LISTED');
+      const rejectedAudit = await request(install(agent, 'project', ['copilot'], ref, head), post, 'POST');
       const { failure } = JSON.parse(rejectedAudit.body);
       assert.equal(failure.code, 'AUDIT_BLOCKED');
       assert.equal(failure.audit.findings[0].code, 'instruction-override');
       assert.deepEqual(await fs.readdir(project), []);
-      await fs.writeFile(index, initialIndex);
+      const revisedIndex = JSON.stringify({ ...JSON.parse(initialIndex), source_ref: next });
+      await fs.writeFile(index, revisedIndex);
 
       const matrices = [
         [
@@ -322,7 +326,7 @@ test(
           const conflict = path.join(target, paths[1]);
           await fs.mkdir(path.dirname(conflict), { recursive: true });
           await fs.writeFile(conflict, 'Unmanaged content\n');
-          const partial = await request(install(item, scope, ['standard', 'copilot']), post, 'POST');
+          const partial = await request(install(item, scope, ['standard', 'copilot'], next, ref), post, 'POST');
           const action = JSON.parse(partial.body);
           assert.equal(action.failure.code, 'GH_INSTALL_FAILED', partial.body);
           assert.ok(
@@ -335,12 +339,12 @@ test(
           await fs.writeFile(index, JSON.stringify({ ...JSON.parse(initialIndex), source_ref: head }));
           const differentPin = await request(install(item, scope, ['copilot'], head), post, 'POST');
           assert.equal(JSON.parse(differentPin.body).failure.code, 'SHARED_SOURCE_PIN');
-          await fs.writeFile(index, initialIndex);
+          await fs.writeFile(index, revisedIndex);
         }
         const requested = Object.keys(destinations).filter(
           (id) => !(item === skill && scope === 'project' && id === 'standard'),
         );
-        const response = await request(install(item, scope, requested), post, 'POST');
+        const response = await request(install(item, scope, requested, next, ref), post, 'POST');
         assert.equal(response.status, 200, response.body);
         const result = JSON.parse(response.body);
         assert.equal(result.code, 0, response.body);
@@ -355,6 +359,7 @@ test(
           assert.ok((await fs.readFile(path.join(target, file), 'utf8')).includes(item.content.trim()));
         }
       }
+      await fs.writeFile(index, initialIndex);
       const duplicate = await request(installAgent, post, 'POST');
       assert.equal(JSON.parse(duplicate.body).failure.code, 'ALREADY_INSTALLED');
       const inventory = await request(`${url.origin}/api/inventory`, headers);
@@ -394,9 +399,20 @@ test(
       assert.equal(blocked.retry, undefined);
       assert.equal(await fs.readFile(localEdit, 'utf8'), 'Local edits\n');
       await fs.writeFile(localEdit, agent.content);
+      await fs.writeFile(index, initialIndex);
+      const unlistedUpdate = `${agentUpdate}&revision=${unknownRevision}`;
+      assert.equal(
+        (await commitAction(unlistedUpdate, await review(unlistedUpdate))).failure.code,
+        'REVISION_NOT_LISTED',
+      );
+      const explicitUpdate = `${agentUpdate}&revision=${next}`;
+      const chosenReview = await review(explicitUpdate);
+      assert.equal(chosenReview.ref, next);
+      assert.equal(chosenReview.catalogPin, ref);
+      assert.equal((await request(`${agentUpdate}&stamp=${chosenReview.stamp}`, post, 'POST')).status, 409);
 
       for (const [item, scope, target, destinations] of matrices) {
-        const update = inventoryAction('update', item, scope);
+        const update = `${inventoryAction('update', item, scope)}&revision=${next}`;
         let result = await commitAction(update, await review(update));
         const visited = new Set();
         while (result.retry) {
@@ -417,6 +433,8 @@ test(
           assert.equal((await request(`${update}&stamp=${reviewed.stamp}&retry=${ticket}`, post, 'POST')).status, 409);
         }
         assert.equal(result.code, 0, JSON.stringify(result));
+        const lock = JSON.parse(await fs.readFile(path.join(target, '.agents/kitia-lock.json'), 'utf8'));
+        assert.equal(lock.sources.Fixture[`${item.kind}s`][item.id].source_ref, next);
         assert.equal(visited.size, item.kind === 'skill' ? 4 : 0);
         for (const dirOrFile of Object.values(destinations)) {
           const file = item.kind === 'skill' ? `${dirOrFile}/${item.id}/SKILL.md` : dirOrFile;

@@ -57,16 +57,17 @@ audit of installed skills, agents, and instructions. **Browse resources**
 searches the configured catalog indexes and opens the pinned source files,
 their entry-file audit, and the GitHub commit history. Catalog previews require
 access to the configured source; skill previews and revision history use the
-GitHub CLI. Browser installation uses the catalog pin and the same destination
-rules and entry-file audit as the dashboard. Review the scope and paths before
-confirming; skills and agents default to user scope, and instructions only
-support project scope. The inventory refreshes after the operation, including
-after partial operations. **Inventory** also supports updating to the catalog
-pin, uninstalling tracked files, and removing unmanaged artifacts after
-reviewing the scope and paths. A GitHub CLI overwrite retry requires separate
-confirmation for the reported destination. Use the CLI or TUI to select another
-revision, override local file conflicts, or manage catalogs. The local HTTP API
-is internal and not part of the public CLI compatibility contract.
+GitHub CLI. Browser installation uses the catalog pin by default; choose a
+commit from **Revisions** to install another revision. Skills and agents default
+to user scope; instructions only support project scope. **Inventory** also
+supports updating to the catalog pin or to a listed commit, uninstalling
+tracked files, and removing unmanaged artifacts. Changing a tracked revision
+preserves that scope's destinations. Review the scope, paths, and revision
+before confirming. The inventory refreshes after partial operations, and a
+GitHub CLI overwrite retry requires separate confirmation for the reported
+destination. Use the CLI or TUI to override local file conflicts or manage
+catalogs. The local HTTP API is internal and not part of the public CLI
+compatibility contract.
 
 `kitia self-update` leaves local dependencies, one-off caches, linked
 checkouts, and installations of unknown or ambiguous origin untouched.

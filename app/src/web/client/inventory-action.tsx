@@ -9,6 +9,7 @@ import type { InstalledResourceSelector } from '../../application/inventory-prev
 import type { ResourceActionResult } from '../../application/resource-actions.js';
 import type { InventorySnapshot } from '../../application/snapshot.js';
 import { MutationResult } from './mutation-result.js';
+import { RevisionHistory } from './revision-history.js';
 import { postSessionJson, readSessionJson } from './session-api.js';
 import { SessionDialog } from './session-dialog.js';
 
@@ -32,6 +33,7 @@ type State =
 export function InventoryActionDialog({
   action,
   selector,
+  initialRevision,
   target,
   token,
   onChanged,
@@ -39,13 +41,32 @@ export function InventoryActionDialog({
 }: {
   action: InventoryMutation;
   selector: InstalledResourceSelector;
+  initialRevision?: string;
   target: string;
   token: string;
   onChanged: (inventory: InventorySnapshot) => void;
   onClose: () => void;
 }) {
   const [state, setState] = useState<State>({ step: 'loading' });
-  const endpoint = `/api/inventory/action?${new URLSearchParams({ ...selector, managed: String(selector.managed), action })}`;
+  const [revision, setRevision] = useState(initialRevision);
+  const [choosing, setChoosing] = useState(false);
+  const selectorParams = { catalog: selector.catalog, kind: selector.kind, id: selector.id };
+  const query = new URLSearchParams({
+    ...selectorParams,
+    scope: selector.scope,
+    managed: String(selector.managed),
+    action,
+  });
+  if (revision) query.set('revision', revision);
+  const endpoint = `/api/inventory/action?${query}`;
+
+  function chooseRevision(next?: string) {
+    setChoosing(false);
+    if (next !== revision) {
+      setState({ step: 'loading' });
+      setRevision(next);
+    }
+  }
   useEffect(() => {
     const controller = new AbortController();
     void readSessionJson<InventoryMutationReview>(endpoint, token, controller.signal).then(
@@ -95,8 +116,29 @@ export function InventoryActionDialog({
           </p>
           {state.review.ref ? (
             <p>
-              Catalog revision: <code>{state.review.ref}</code>
+              {revision ? 'Selected revision: ' : 'Catalog revision: '}
+              <code>{state.review.ref}</code>
             </p>
+          ) : null}
+          {state.review.catalogPin ? (
+            <div className="resource-actions">
+              <button type="button" aria-expanded={choosing} onClick={() => setChoosing(!choosing)}>
+                Choose revision
+              </button>
+              {revision ? (
+                <button type="button" onClick={() => chooseRevision()}>
+                  Use catalog pin
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {choosing && state.review.catalogPin ? (
+            <RevisionHistory
+              endpoint={`/api/catalog/revisions?${new URLSearchParams({ ...selectorParams, ref: state.review.catalogPin })}`}
+              catalogPin={state.review.catalogPin}
+              token={token}
+              onSelect={chooseRevision}
+            />
           ) : null}
           <ul>
             {state.review.paths.map((file) => (
@@ -108,7 +150,7 @@ export function InventoryActionDialog({
           {action === 'remove-unmanaged' && selector.kind === 'skill' ? (
             <p>Each listed skill folder and all of its contents will be deleted.</p>
           ) : null}
-          <button type="button" onClick={() => void confirm(state.review.stamp)}>
+          <button type="button" disabled={choosing} onClick={() => void confirm(state.review.stamp)}>
             Confirm {message.label.toLowerCase()}
           </button>
         </>

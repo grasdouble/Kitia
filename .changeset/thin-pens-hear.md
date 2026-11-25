@@ -9,4 +9,5 @@ Browse and manage resources in a local browser session
     - Browse catalog resources, inspect pinned source files with audit results, and read their GitHub commit histories.
     - Install pinned skills, agents, and instructions after reviewing the scope and destinations, then see the updated inventory.
     - Update and uninstall tracked resources or remove unmanaged files after reviewing the affected scope and paths.
+    - Choose a listed commit for a new installation or replace the revision of an installed resource without changing its destinations.
     - Open the printed URL manually with `--no-open`, or stop the session with `Ctrl+C`.

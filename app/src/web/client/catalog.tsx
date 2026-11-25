@@ -1,94 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type {
-  CatalogSnapshot,
-  InstallationTargets,
-  InventorySnapshot,
-  ResourceRevision,
-} from '../../application/snapshot.js';
+import type { CatalogSnapshot, InstallationTargets, InventorySnapshot } from '../../application/snapshot.js';
+import type { InstallationScope } from '../../core/installations/model.js';
 import { inventoryCatalogLabels } from '../../core/inventory/view.js';
 import { catalogCandidateLabel, filterCatalogResources } from '../../core/resources/catalog-view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { InspectionDialog } from './inspection.js';
 import { InstallDialog } from './install.js';
+import { InventoryActionDialog } from './inventory-action.js';
 import { ResourceFilters, resourceFilterOptions, useResourceFilters } from './resource-filters.js';
+import { RevisionHistory } from './revision-history.js';
 import { readSessionJson } from './session-api.js';
 import { SessionDialog } from './session-dialog.js';
-
-function RevisionsDialog({
-  resource,
-  endpoint,
-  token,
-  onClose,
-}: {
-  resource: CatalogResource;
-  endpoint: string;
-  token: string;
-  onClose: () => void;
-}) {
-  const [history, setHistory] = useState<ResourceRevision[]>();
-  const [error, setError] = useState<string>();
-  useEffect(() => {
-    const controller = new AbortController();
-    void readSessionJson<ResourceRevision[]>(endpoint, token, controller.signal).then(
-      setHistory,
-      (failure: unknown) => {
-        if (!controller.signal.aborted)
-          setError(failure instanceof Error ? failure.message : 'Could not load revisions.');
-      },
-    );
-    return () => controller.abort();
-  }, [endpoint, token]);
-  return (
-    <SessionDialog title={resource.id} subtitle="Source revisions" closeLabel="Close revisions" onClose={onClose}>
-      <p>
-        Catalog pin: <code>{resource.source_ref}</code>
-      </p>
-      <p>
-        GitHub history for{' '}
-        <code>{resource.kind === 'skill' ? `${resource.source_path}/SKILL.md` : resource.source_path}</code>.
-      </p>
-      {error ? (
-        <p role="alert">{error}</p>
-      ) : !history ? (
-        <p role="status">Loading commit history…</p>
-      ) : history.length ? (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Commit</th>
-                <th scope="col">Date</th>
-                <th scope="col">Subject</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map(({ sha, prefix, date, subject }) => (
-                <tr key={sha}>
-                  <th scope="row">
-                    <details>
-                      <summary>
-                        <code>{prefix}</code>
-                        {sha === resource.source_ref ? ' · Catalog pin' : ''}
-                      </summary>
-                      <code>{sha}</code>
-                    </details>
-                  </th>
-                  <td>
-                    <time dateTime={date}>{date.slice(0, 10)}</time>
-                  </td>
-                  <td>{subject}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p>No commits found for this resource path.</p>
-      )}
-    </SessionDialog>
-  );
-}
 
 type CatalogSession = {
   inventory: InventorySnapshot;
@@ -126,7 +49,11 @@ function CatalogResources({
   onInstalled,
 }: CatalogSession & { snapshot: CatalogSnapshot }) {
   const [selection, setSelection] = useState<CatalogResource>();
-  const [dialog, setDialog] = useState<'preview' | 'revisions' | 'install'>();
+  const [dialog, setDialog] = useState<
+    | { kind: 'preview' | 'revisions' }
+    | { kind: 'install'; revision?: string }
+    | { kind: 'replace'; revision: string; scope: InstallationScope }
+  >();
   const { filters, set } = useResourceFilters();
   const { resources, catalogs, warnings } = snapshot;
   const labels = useMemo(() => {
@@ -235,13 +162,13 @@ function CatalogResources({
             <p>{selected.description || 'No description available.'}</p>
             {query ? (
               <div className="resource-actions">
-                <button type="button" onClick={() => setDialog('install')}>
+                <button type="button" onClick={() => setDialog({ kind: 'install' })}>
                   Install…
                 </button>
-                <button type="button" onClick={() => setDialog('preview')}>
+                <button type="button" onClick={() => setDialog({ kind: 'preview' })}>
                   Preview / audit
                 </button>
-                <button type="button" onClick={() => setDialog('revisions')}>
+                <button type="button" onClick={() => setDialog({ kind: 'revisions' })}>
                   Revisions
                 </button>
               </div>
@@ -289,7 +216,7 @@ function CatalogResources({
           </aside>
         ) : null}
       </div>
-      {query && selected && dialog === 'preview' ? (
+      {query && selected && dialog?.kind === 'preview' ? (
         <InspectionDialog
           title={selected.id}
           subtitle={`Pinned catalog source · ${selected.source_ref}`}
@@ -298,22 +225,55 @@ function CatalogResources({
           onClose={() => setDialog(undefined)}
         />
       ) : null}
-      {query && selected && dialog === 'revisions' ? (
-        <RevisionsDialog
-          resource={selected}
-          endpoint={`/api/catalog/revisions?${query}`}
-          token={token}
+      {query && selected && dialog?.kind === 'revisions' ? (
+        <SessionDialog
+          title={selected.id}
+          subtitle="Source revisions"
+          closeLabel="Close revisions"
           onClose={() => setDialog(undefined)}
-        />
+        >
+          <p>
+            Catalog pin: <code>{query.get('ref')}</code>
+          </p>
+          <p>
+            GitHub history for{' '}
+            <code>{selected.kind === 'skill' ? `${selected.source_path}/SKILL.md` : selected.source_path}</code>.
+          </p>
+          <RevisionHistory
+            endpoint={`/api/catalog/revisions?${query}`}
+            catalogPin={query.get('ref')!}
+            token={token}
+            onSelect={(revision) => setDialog({ kind: 'install', revision })}
+          />
+        </SessionDialog>
       ) : null}
-      {query && selected && dialog === 'install' ? (
+      {query && selected && dialog?.kind === 'install' ? (
         <InstallDialog
           resource={selected}
           selector={query}
+          revision={dialog.revision}
+          onReplace={(scope, revision) => setDialog({ kind: 'replace', scope, revision })}
           inventory={inventory}
           targets={targets}
           token={token}
           onInstalled={onInstalled}
+          onClose={() => setDialog(undefined)}
+        />
+      ) : null}
+      {query && selected && dialog?.kind === 'replace' ? (
+        <InventoryActionDialog
+          action="update"
+          selector={{
+            scope: dialog.scope,
+            catalog: query.get('catalog')!,
+            kind: selected.kind,
+            id: selected.id,
+            managed: true,
+          }}
+          initialRevision={dialog.revision}
+          target={targets[dialog.scope]}
+          token={token}
+          onChanged={onInstalled}
           onClose={() => setDialog(undefined)}
         />
       ) : null}

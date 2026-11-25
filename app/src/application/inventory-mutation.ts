@@ -9,8 +9,8 @@ import { CatalogError, type CatalogResource } from '../core/resources/model.js';
 import type { InstalledResourceSelector } from './inventory-preview.js';
 
 export type InventoryMutation = 'update' | 'uninstall' | 'remove-unmanaged';
-export type InventoryMutationReview = { paths: string[]; ref?: string; stamp: string };
-export type ConfirmedInventoryMutation = { selector: InstalledResourceSelector; stamp: string };
+export type InventoryMutationReview = { paths: string[]; ref?: string; catalogPin?: string; stamp: string };
+export type ConfirmedInventoryMutation = { selector: InstalledResourceSelector; stamp: string; revision?: string };
 export type InventoryMutationRetry = { ticket: string; review: InventoryMutationReview };
 
 export function reviewInventoryMutation(
@@ -18,6 +18,7 @@ export function reviewInventoryMutation(
   selector: InstalledResourceSelector,
   target: string,
   resources: CatalogResource[],
+  revision?: string,
 ): InventoryMutationReview {
   if (fs.realpathSync(target) !== target)
     throw new CatalogError('The inventory target has moved. Restart Kitia web.', 'STALE_SOURCE');
@@ -75,8 +76,10 @@ export function reviewInventoryMutation(
         source?.source_repository,
         source?.source_path,
         source?.source_ref,
+        revision,
       ]),
     )
     .digest('hex');
-  return { paths, ref: source?.source_ref ?? undefined, stamp };
+  const catalogPin = source?.source_ref ?? undefined;
+  return { paths, ref: revision ?? catalogPin, catalogPin, stamp };
 }

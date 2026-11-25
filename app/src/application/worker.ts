@@ -35,6 +35,7 @@ export type OperationTask =
       targets: InstallationTargets;
       action: InventoryMutation;
       selector: InstalledResourceSelector;
+      revision?: string;
     }
   | {
       task: 'inventory-mutate';
@@ -49,6 +50,7 @@ export type OperationTask =
   | {
       task: 'catalog-install';
       selector: CatalogResourceSelector;
+      revision?: string;
       targets: InstallationTargets;
       options: Pick<ResourceActionOptions, 'scope' | 'destinations'>;
     }
@@ -73,6 +75,7 @@ async function execute(data: OperationTask) {
         data.selector,
         data.targets[data.selector.scope],
         readCatalogSnapshot().resources,
+        data.revision,
       );
     case 'inventory-mutate':
       return runResourceAction(data.action, data.selection, data.targets, data.options);
@@ -88,7 +91,7 @@ async function execute(data: OperationTask) {
     case 'catalog-revisions':
       return listResourceRevisions(resolvePinnedCatalogResource(data.selector));
     case 'catalog-install':
-      return runResourceAction('install', data.selector, data.targets, data.options);
+      return runResourceAction('install', { ...data.selector, revision: data.revision }, data.targets, data.options);
     case 'resource-action':
       return runResourceAction(data.action, data.resource, data.targets, data.options, (progress) =>
         parentPort?.postMessage({ progress }),
