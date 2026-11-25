@@ -3686,6 +3686,23 @@ test('local conflicts and GH force-required updates require explicit retry conse
     managed: true,
   };
 
+  function modalText(frame, title) {
+    const lines = frame.split(/\r?\n/);
+    const heading = `┌─ ${title} `;
+    const top = lines.findIndex((line) => line.includes(heading));
+    if (top < 0) return '';
+    const left = lines[top].indexOf(heading);
+    const right = lines[top].indexOf('┐', left + heading.length);
+    const bottom = lines.findIndex((line, index) => index > top && line[left] === '└' && line[right] === '┘');
+    if (bottom < 0) return '';
+    return lines
+      .slice(top + 1, bottom)
+      .map((line) => line.slice(left + 1, right))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   for (const category of [
     'tracked-modification',
     'untracked-skill-content',
@@ -3780,10 +3797,10 @@ test('local conflicts and GH force-required updates require explicit retry conse
         input.write('\r');
         const promptTitle = ghForceRequired ? 'GH REQUESTS OVERWRITE' : 'LOCAL CONFLICT';
         const conflict = await waitForFrame((frame) => frame.includes(promptTitle), 'force confirmation');
-        const promptText = conflict.replace(/[│─]/g, ' ').replace(/\s+/g, ' ');
-        assert.ok(conflict.includes('conflicted-skill'));
-        assert.ok(conflict.includes('catalog Test'));
-        assert.ok(conflict.includes('scope project'));
+        const promptText = modalText(conflict, promptTitle);
+        assert.ok(promptText.includes('conflicted-skill'));
+        assert.ok(promptText.includes('catalog Test'));
+        assert.ok(promptText.includes('scope project'));
         if (ghForceRequired) {
           assert.ok(promptText.includes('already installed'), `missing installation reason: ${promptText}`);
           assert.ok(promptText.includes('requires'), `missing GH force requirement: ${promptText}`);
@@ -3811,11 +3828,11 @@ test('local conflicts and GH force-required updates require explicit retry conse
           await new Promise((resolve) => setImmediate(resolve));
           input.write('\r');
           if (category === 'github-next-destination') {
-            const nextPrompt = await waitForFrame((frame) => {
-              const text = frame.replace(/[│]/g, ' ').replace(/\s+/g, ' ');
-              return text.includes('GH REQUESTS OVERWRITE') && text.includes('for claude');
-            }, 'second destination force confirmation');
-            const nextPromptText = nextPrompt.replace(/[│]/g, ' ').replace(/\s+/g, ' ');
+            const nextPrompt = await waitForFrame(
+              (frame) => modalText(frame, promptTitle).includes('for claude'),
+              'second destination force confirmation',
+            );
+            const nextPromptText = modalText(nextPrompt, promptTitle);
             assert.ok(nextPromptText.includes('already installed'), `missing destination reason: ${nextPromptText}`);
             assert.ok(nextPromptText.includes('requires'), `missing force requirement: ${nextPromptText}`);
             assert.ok(nextPromptText.includes('--force'), `missing force flag: ${nextPromptText}`);

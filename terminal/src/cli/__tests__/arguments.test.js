@@ -81,7 +81,15 @@ test('install parses repeatable destinations without setting a default before re
   const defaults = parseArguments(base);
   assert.equal(defaults.target, '.');
   assert.equal(defaults.destinations, undefined);
-  const options = parseArguments([...base, '--destination', 'claude', '--target', 'project', '--destination', 'standard']);
+  const options = parseArguments([
+    ...base,
+    '--destination',
+    'claude',
+    '--target',
+    'project',
+    '--destination',
+    'standard',
+  ]);
   assert.equal(options.target, 'project');
   assert.deepEqual(options.destinations, ['claude', 'standard']);
   assert.throws(() => parseArguments([...base, '--destination']), /--destination requires a value/);
