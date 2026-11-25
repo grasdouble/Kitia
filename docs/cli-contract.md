@@ -297,11 +297,14 @@ Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
-Installation options allow multiple supported destinations and show their
-paths. For an already installed resource, select an additional destination
-to add a copy without replacing the existing ones. Update and uninstall
-confirmations show the tracked destination paths. Instructions remain
-project-scoped. In the catalog browser, `F` enters
+In Install Options, open **Destinations** with a click, `Enter`, or
+`Space`. Use the arrows to move through the menu and `Space` to toggle an
+available destination; already installed copies are marked and cannot be
+selected. `Esc` or an outside click closes the menu without clearing choices.
+`Tab` closes it and moves to the next control. Project and user selections
+are independent. **Review install** opens the confirmation with the full
+paths. Update and uninstall confirmations show the tracked destination paths.
+Instructions remain project-scoped. In the catalog browser, `F` enters
 search mode; while searching, all typed characters—including `T`, `S`, and `L`—
 are query text, and `Enter` applies the query. Outside search mode, `F` starts
 search, `C`/`K` cycle catalog/kind, and `L` cycles license within the active

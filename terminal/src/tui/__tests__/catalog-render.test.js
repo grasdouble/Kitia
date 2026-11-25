@@ -2096,22 +2096,30 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     );
     await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'install options modal');
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-option' && target.group === 'scope', '│ USER │');
-    await dashboard.wait((frame) => frame.includes('.copilot/skills/candidate-two/SKILL.md'), 'user destinations');
+    await dashboard.wait((frame) => frame.includes('[ Standard ▾ ]'), 'closed destination field');
+    assert.ok(!dashboard.frame().includes('~/.copilot/skills/'));
+    clickRenderedTarget(dashboard, ({ type, action }) => type === 'modal-destinations' && action === 'toggle', '▾');
+    const opened = await dashboard.wait((frame) => frame.includes('~/.copilot/skills/'), 'user destination menu');
+    assert.ok(renderedTextCell(opened, '✓ Standard').y > renderedTextCell(opened, '▴').y);
+    assert.ok(!opened.includes('candidate-two/SKILL.md'));
     clickRenderedTarget(
       dashboard,
       (target) => target.type === 'modal-option' && target.group === 'destination',
-      '[ ] Claude Code',
+      '□ Claude Code',
     );
-    await dashboard.wait(
-      (frame) => frame.includes('[x] Claude Code'),
-      'Claude selected alongside the Standard default',
-    );
+    await dashboard.wait((frame) => frame.includes('✓ Claude Code'), 'Claude selected without closing the menu');
     clickRenderedTarget(
       dashboard,
       (target) => target.type === 'modal-option' && target.group === 'destination',
-      '[ ] Mistral Vibe',
+      '□ Mistral Vibe',
     );
-    await dashboard.wait((frame) => frame.includes('[x] Mistral Vibe'), 'Mistral Vibe selected');
+    await dashboard.wait((frame) => frame.includes('✓ Mistral Vibe'), 'Mistral Vibe selected');
+    clickAt(dashboard.input, browseTab);
+    const closed = await dashboard.wait(
+      (frame) => frame.includes('[ Standard, Claude Code +1 ▾ ]') && !frame.includes('~/.vibe/skills/'),
+      'outside click closes the menu and retains selections',
+    );
+    assert.ok(closed.includes('INSTALL OPTIONS') && !closed.includes('CONFIRM INSTALL'));
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-review', '[ Review install ]');
     const confirmation = await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
     assert.ok(confirmation.includes('Selected paths (user):'));
@@ -2159,23 +2167,30 @@ test('install options keep scope selections independent and only add newly selec
   try {
     await press('b', 'CATALOG RESOURCES');
     const options = await press('\r', 'INSTALL OPTIONS');
-    assert.ok(options.includes('Standard (installed)'));
-    assert.ok(options.includes(standardPath));
+    assert.ok(options.includes('[ 0 selected ▾ ]') && !options.includes('Standard [Installed]'));
     assert.ok(options.includes('Select at least one new destination.'));
     dashboard.input.write('\r');
     await dashboard.flush();
     assert.ok(!dashboard.frame().includes('CONFIRM INSTALL'));
-    await press('\t', '› [−] Standard');
-    await press('\x1b[B', '› [ ] GitHub Copilot');
-    await press(' ', '› [x] GitHub Copilot');
-    await press('\x1b[A', '› [−] Standard');
-    dashboard.input.write('\x1b[A');
-    await dashboard.wait((frame) => !frame.includes('› [−] Standard'), 'scope focused');
-    const userOptions = await press('\x1b[C', '.copilot/skills/review/SKILL.md');
-    assert.ok(userOptions.includes('[x] Standard'));
-    assert.ok(userOptions.includes('[ ] GitHub Copilot'));
-    const projectOptions = await press('\x1b[D', copilotPath);
-    assert.ok(projectOptions.includes('[x] GitHub Copilot'));
+    await press('\t', '› [ 0 selected ▾ ]');
+    const opened = await press('\r', '› □ GitHub Copilot');
+    assert.ok(opened.includes('Standard [Installed]') && opened.includes('.agents/skills/'));
+    await press('\x1b[A', '› Standard [Installed]');
+    dashboard.input.write(' ');
+    await dashboard.flush();
+    assert.ok(dashboard.frame().includes('[ 0 selected ▴ ]'));
+    await press('\x1b[B', '› □ GitHub Copilot');
+    await press(' ', '› ✓ GitHub Copilot');
+    await press('\x1b', '[ GitHub Copilot ▾ ]');
+    dashboard.input.write('\x1b[Z');
+    await dashboard.wait((frame) => !frame.includes('› [ GitHub Copilot ▾ ]'), 'focus returns to scope');
+    const userOptions = await press('\x1b[C', '[ Standard ▾ ]');
+    assert.ok(!userOptions.includes('□ GitHub Copilot'));
+    await press('\x1b[D', '[ GitHub Copilot ▾ ]');
+    await press('\t', '› [ GitHub Copilot ▾ ]');
+    await press(' ', '› ✓ GitHub Copilot');
+    await press('\t', '› [ Review install ]');
+    assert.ok(!dashboard.frame().includes('✓ GitHub Copilot'));
     const confirmation = await press('\r', 'CONFIRM INSTALL');
     assert.ok(confirmation.includes(`• ${copilotPath}`));
     assert.ok(!confirmation.includes(`• ${standardPath}`));
@@ -2199,25 +2214,56 @@ test('install options use kind defaults and block a scope with an inventory scan
   const candidate = { catalog: 'sample', kind: 'instruction', id: 'review' };
   const actions = { catalogResources: [candidate] };
   const dimensions = { columns: 80, rows: 40 };
-  const project = await captureDashboardFrame([], actions, ['b', '\r'], dimensions);
+  const project = await captureDashboardFrame([], actions, ['b', '\r', '\r'], dimensions);
   assert.ok(project.includes('SCOPE: PROJECT (instructions are project-scoped)'));
-  assert.ok(project.includes('[x] GitHub Copilot'));
-  assert.ok(project.includes('.github/instructions/review.instructions.md'));
-  assert.ok(project.includes('.claude/rules/review.md'));
-  assert.ok(!project.includes('[ ] Standard'));
+  assert.ok(project.includes('✓ GitHub Copilot'));
+  assert.ok(project.includes('.github/instructions/'));
+  assert.ok(project.includes('.claude/rules/'));
+  assert.ok(!project.includes('□ Standard'));
   assert.ok(!project.includes('Mistral Vibe'));
   assert.ok(!project.includes('│ USER │'));
   const user = await captureDashboardFrame(
     [],
     { catalogResources: [{ ...candidate, kind: 'agent' }] },
-    ['b', '\r', '\x1b[C'],
+    ['b', '\r', '\x1b[C', '\t', '\r'],
     dimensions,
     [{ scope: 'user', code: 'CATALOG_ERROR', message: 'Cannot read user inventory.' }],
   );
   assert.ok(user.includes('USER unavailable: CATALOG_ERROR'));
-  assert.ok(user.includes('.copilot/agents/review.agent.md'));
+  assert.ok(user.includes('~/.copilot/agents/'));
   assert.ok(!user.includes('Mistral Vibe'));
   assert.ok(!user.includes('[ Review install ]'));
+});
+
+test('destination menu opens above the field and scrolls at short terminal heights', async () => {
+  const source = { catalog: 'sample', kind: 'skill', id: 'review' };
+  const dashboard = await startInteractiveDashboard([], { catalogResources: [source] });
+  const press = (key, marker) => {
+    dashboard.input.write(key);
+    return dashboard.wait((frame) => frame.includes(marker), marker);
+  };
+  try {
+    await press('b', 'CATALOG RESOURCES');
+    await press('\r', '[ Standard ▾ ]');
+    await press('\t', '› [ Standard ▾ ]');
+    Object.assign(dashboard.output, { columns: 38, rows: 11 });
+    dashboard.output.emit('resize');
+    await dashboard.wait((frame) => frame.includes('Pinned source audit required.'), 'compact install options');
+    const open = await press('\r', '› ✓ Standard');
+    assert.ok(renderedTextCell(open, '› ✓ Standard').y < renderedTextCell(open, '▴').y);
+    assert.ok(!open.includes('Mistral Vibe'));
+    await press('\x1b[B', '› □ GitHub Copilot');
+    const copilot = await press(' ', '› ✓ GitHub Copilot');
+    const { x, y } = renderedTextCell(copilot, '› ✓ GitHub Copilot');
+    dashboard.input.write(`\u001b[<65;${x};${y}M`);
+    await dashboard.wait((frame) => frame.includes('› □ Claude Code'), 'wheel moves through the destination menu');
+    await press('\x1b[B', '› □ Mistral Vibe');
+    await press(' ', '› ✓ Mistral Vibe');
+    const closed = await press('\x1b', '[ 3 selected ▾ ]');
+    assert.ok(!closed.includes('✓ Mistral Vibe'));
+  } finally {
+    await dashboard.stop();
+  }
 });
 
 test('Inventory Remove button accepts the production xterm cell click', async () => {
@@ -4004,16 +4050,10 @@ test('all dashboard modes show visible shortcuts for active controls', async () 
   assert.doesNotMatch(catalog, /A install|1\/2\/3 sections/);
 
   const installOptions = await captureDashboardFrame([], actions, ['b', '\r'], compactDimensions);
-  const installShortcuts = separatedPanelFrame(installOptions, 'SHORTCUTS');
-  assert.equal(
-    installShortcuts.body.length,
-    4,
-    'modal shortcut body includes the Actions and Navigation headings and their rows',
-  );
+  assert.ok(installOptions.includes('[ Standard ▾ ]'));
   assert.match(installOptions, /┌─ INSTALL OPTIONS /, 'non-table modal title bars stay unchanged');
-  assert.ok(installOptions.includes('SHORTCUTS'));
-  assert.ok(installOptions.includes('SPACE TOGGLE'));
-  assert.ok(installOptions.includes('ENTER REVIEW'));
+  assert.ok(installOptions.includes('TAB MOVE'));
+  assert.ok(installOptions.includes('ENTER / SPACE ACTIVATE'));
   assert.ok(installOptions.includes('ESC BACK'));
   assert.ok(!installOptions.includes('ENTER select'));
   assert.ok(!installOptions.includes('C catalog'));

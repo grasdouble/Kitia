@@ -442,10 +442,12 @@ export function Dashboard({
       else if (confirmation) chooseConfirmation(target.index);
       return;
     }
-    if (target.type === 'modal-option' || target.type === 'modal-review') {
+    if (target.type === 'modal-option' || target.type === 'modal-review' || target.type === 'modal-destinations') {
       if (screenMode === 'install-options' && !confirmation && !actionPending) {
         if (target.type === 'modal-review') operations.reviewOptions();
-        else operations.chooseOption(target.group, target.index);
+        else if (target.type === 'modal-option') operations.chooseOption(target.group, target.index);
+        else if (target.action === 'toggle') operations.toggleDestinationMenu();
+        else if (target.action === 'dismiss') operations.closeDestinationMenu();
       }
       return;
     }

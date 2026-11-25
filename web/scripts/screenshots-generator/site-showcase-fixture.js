@@ -134,7 +134,7 @@ async function seedShowcase(directory) {
         source_ref: sourceRef,
       },
       target,
-      'github-copilot',
+      `.agents/skills/${resource.id}/SKILL.md`,
     );
   }
 

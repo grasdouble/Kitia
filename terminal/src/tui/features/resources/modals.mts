@@ -17,50 +17,62 @@ export function optionsModal({
   scopeChoices,
   destinations,
   focus,
+  menuIndex,
+  moveMenu,
   replacing,
   scopeError,
   canReview,
   columns,
   ref,
+  rows,
 }: {
   resource: CatalogResource;
   scope: InstallationScope;
   scopeChoices: InstallationScope[];
-  destinations: { label: string; path: string; tracked: boolean; selected: boolean }[];
-  focus: number;
+  destinations: { label: string; directory: string; tracked: boolean; selected: boolean }[];
+  focus: 'scope' | 'destinations' | 'review';
+  menuIndex: number | null;
+  moveMenu: (direction: -1 | 1) => void;
   replacing: boolean;
   scopeError?: ScanError;
   canReview: boolean;
   columns: number;
+  rows: number;
   ref?: string | null;
 }) {
   const source = (resource.catalog || '-').toUpperCase();
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
-  const contentWidth = Math.max(1, modalWidth - 8);
+  const contentWidth = modalWidth - 4;
+  const compact = rows < 19;
   const scopeIndex = scopeChoices.indexOf(scope);
   const allInstalled = destinations.length > 0 && destinations.every(({ tracked }) => tracked);
   const scopeControl =
     scopeChoices.length === 1
       ? [{ text: 'SCOPE: PROJECT (instructions are project-scoped)', dimColor: true }]
       : modalWidth >= 34
-        ? [choiceGroup('SCOPE', scopeChoices, scopeIndex, focus < 0)]
+        ? [choiceGroup('SCOPE', scopeChoices, scopeIndex, focus === 'scope')]
         : scopeChoices.map((choice, index) => ({
-            text: `${focus < 0 && index === scopeIndex ? '› ' : '  '}[${index === scopeIndex ? 'x' : ' '}] ${choice}`,
+            text: `${focus === 'scope' && index === scopeIndex ? '› ' : '  '}[${index === scopeIndex ? 'x' : ' '}] ${choice}`,
             mouseTarget: { type: 'modal-option' as const, group: 'scope' as const, index },
           }));
-  const shortcuts = [
-    ...(scopeChoices.length > 1 ? ['←→ SCOPE'] : []),
-    ...(!replacing && !allInstalled ? ['↑↓/TAB MOVE', 'SPACE TOGGLE'] : []),
-    ...(canReview ? [replacing ? 'ENTER REPLACE' : 'ENTER REVIEW'] : []),
-    'ESC BACK',
-  ].join(' · ');
-
-  return modalFrame(
+  const selected = destinations.filter(({ selected }) => selected);
+  const names = selected
+    .slice(0, 2)
+    .map(({ label }) => label)
+    .join(', ');
+  const extra = selected.length > 2 ? ` +${selected.length - 2}` : '';
+  const summary =
+    names && names.length + extra.length <= contentWidth - 8 ? `${names}${extra}` : `${selected.length} selected`;
+  const frame = modalFrame(
     'INSTALL OPTIONS',
     [
-      `${source} / ${resource.kind}:${resource.id}`,
-      ...wrapText(resource.description || 'No description available.', contentWidth, 2),
-      { text: `License: ${resource.license_status || 'not declared'}`, dimColor: true },
+      { text: fitText(`${source} / ${resource.kind}:${resource.id}`, contentWidth) },
+      ...(!compact
+        ? [
+            ...wrapText(resource.description || 'No description available.', contentWidth, 2),
+            { text: `License: ${resource.license_status || 'not declared'}`, dimColor: true },
+          ]
+        : []),
       ...(scopeError
         ? [
             {
@@ -79,20 +91,17 @@ export function optionsModal({
           ]
         : [
             { text: 'DESTINATIONS', bold: true },
-            ...destinations.map(({ label, path, tracked, selected }, index) => ({
-              text: `${focus === index ? '› ' : '  '}[${tracked ? '−' : selected ? 'x' : ' '}] ${label}${tracked ? ' (installed)' : ''} · ${path}`,
-              color: focus === index ? semantic.selected : tracked ? semantic.inventoryStatus.attention : undefined,
-              bold: focus === index,
-              mouseTarget: tracked
-                ? undefined
-                : { type: 'modal-option' as const, group: 'destination' as const, index },
-            })),
+            {
+              text: `${focus === 'destinations' ? '›' : ' '} [ ${summary} ${menuIndex === null ? '▾' : '▴'} ]`,
+              bold: focus === 'destinations',
+              color: focus === 'destinations' ? semantic.selected : semantic.accents.primary,
+              preserveSpacing: true,
+              mouseTarget: { type: 'modal-destinations' as const, action: 'toggle' as const },
+            },
             ...(!canReview && !scopeError
               ? [
                   {
-                    text: allInstalled
-                      ? `All destinations are already installed in ${scope} scope.`
-                      : 'Select at least one new destination.',
+                    text: allInstalled ? 'All destinations already installed.' : 'Select at least one new destination.',
                     color: semantic.inventoryStatus.attention,
                   },
                 ]
@@ -107,24 +116,49 @@ export function optionsModal({
           ]
         : []),
       {
-        text: 'Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.',
+        text: compact
+          ? 'Pinned source audit required.'
+          : 'Kitia audits the pinned source before every dashboard install; findings or incomplete coverage block it.',
         color: semantic.accents.warning,
       },
       ...(canReview
         ? [
             {
-              text: replacing ? '[ Review replacement ]' : '[ Review install ]',
+              text: `${focus === 'review' ? '› ' : ''}[ ${replacing ? 'Review replacement' : 'Review install'} ]`,
               bold: true,
-              color: semantic.accents.primary,
+              color: focus === 'review' ? semantic.selected : semantic.accents.primary,
               mouseTarget: { type: 'modal-review' as const },
             },
           ]
         : []),
-      shortcuts,
+      ...(!compact
+        ? [
+            {
+              text:
+                menuIndex === null
+                  ? 'TAB MOVE · ENTER / SPACE ACTIVATE · ESC BACK'
+                  : '↑↓ MOVE · SPACE TOGGLE · TAB / ESC CLOSE',
+              dimColor: true,
+            },
+          ]
+        : []),
     ],
     columns,
     semantic.selected,
   );
+  if (menuIndex === null) return frame;
+  return {
+    ...frame,
+    destinationMenu: {
+      index: menuIndex,
+      move: moveMenu,
+      items: destinations.map(({ label, directory, selected, tracked }) => ({
+        title: tracked ? `${label} [Installed]` : `${selected ? '✓' : '□'} ${label}`,
+        directory: `${scope === 'user' ? '~/' : ''}${directory}/`,
+        tracked,
+      })),
+    },
+  };
 }
 
 export function confirmationModal({

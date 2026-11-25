@@ -57,6 +57,11 @@ type ModalFrameResult = {
   headerLines: Array<{ text: string }>;
   lines: ModalRenderedLine[];
   shortcuts: string[];
+  destinationMenu?: {
+    items: { title: string; directory: string; tracked: boolean }[];
+    index: number;
+    move: NonNullable<DashboardMouseRegion['scroll']>;
+  };
 };
 type ModalElementRef = React.RefObject<DOMElement | null>;
 type ChoiceGroupRefs = { row: ModalElementRef; options: ModalElementRef[] };
@@ -151,7 +156,9 @@ export function modalFrame(
     const row: ModalContentLine = typeof entry === 'string' ? { text: entry } : entry;
     const wrapped = row.preserveSpacing ? [row.text] : wrapText(row.text, innerWidth);
     return wrapped.map((line) => ({
-      text: separateHeader ? line : `│ ${fitColumn(line, innerWidth)} │`,
+      text: separateHeader
+        ? line
+        : `│ ${row.preserveSpacing ? line.padEnd(innerWidth) : fitColumn(line, innerWidth)} │`,
       bodyText: line,
       component: wrapped.length === 1 && row.text.length <= innerWidth ? row.type : undefined,
       label: row.label,
@@ -362,6 +369,86 @@ function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?:
     : content;
 }
 
+function destinationPopover(modal: ModalFrameResult, left: number, top: number, rows: number) {
+  const menu = modal.destinationMenu;
+  if (!menu) return;
+  let below = top;
+  for (const line of modal.lines) {
+    below += isChoiceGroupLine(line) ? 3 : 1;
+    if (line.mouseTarget?.type === 'modal-destinations') break;
+  }
+  const above = below - 1;
+  const width = modal.width - 4;
+  const inner = width - 4;
+  const needsDetailRow = menu.items.some(({ title, directory }) => title.length + directory.length + 5 > inner);
+  const fullHeight = menu.items.length * (needsDetailRow ? 2 : 1) + 2;
+  const useAbove = rows - below < fullHeight && above > rows - below;
+  const room = useAbove ? above : rows - below;
+  const bordered = room >= 3;
+  const bodyRows = Math.max(1, room - (bordered ? 2 : 0));
+  const itemHeight = needsDetailRow && bodyRows >= 2 ? 2 : 1;
+  const count = Math.min(menu.items.length, Math.floor(bodyRows / itemHeight));
+  const first = Math.max(0, Math.min(menu.index - count + 1, menu.items.length - count));
+  const height = count * itemHeight + (bordered ? 2 : 0);
+  const x = left + 2;
+  const y = useAbove ? above - height : below;
+  const regions: DashboardMouseRegion[] = [];
+  const parts = [];
+  const frame = (start: string, end: string, more: string) =>
+    h(
+      Text,
+      { key: start, backgroundColor: MODAL_BACKGROUND, color: semantic.accents.primary },
+      `${start}${'─'.repeat(width - 2 - more.length)}${more}${end}`,
+    );
+  if (bordered) parts.push(frame('╭', '╮', first ? ' ↑ ' : ''));
+  for (let index = first; index < first + count; index += 1) {
+    const { title, directory, tracked } = menu.items[index];
+    const active = menu.index === index;
+    const color = active ? semantic.selected : tracked ? semantic.inventoryStatus.attention : MODAL_FOREGROUND;
+    const marker = active ? '› ' : '  ';
+    const line = (text: string) => `│ ${text.padEnd(inner)} │`;
+    const label = itemHeight === 1 ? `${title} · ${directory}` : title;
+    parts.push(
+      h(
+        Text,
+        { key: index, backgroundColor: MODAL_BACKGROUND, color, bold: active },
+        line(marker + fitText(label, inner - 2)),
+      ),
+    );
+    if (itemHeight === 2) {
+      parts.push(
+        h(
+          Text,
+          { key: `directory-${index}`, backgroundColor: MODAL_BACKGROUND, color, dimColor: !active },
+          line(`  ${fitText(directory, inner - 2)}`),
+        ),
+      );
+    }
+    const start = y + Number(bordered) + (index - first) * itemHeight;
+    regions.push({
+      left: x + 1,
+      right: x + width,
+      top: start + 1,
+      bottom: start + itemHeight,
+      target: { type: 'modal-option', group: 'destination', index },
+      scroll: menu.move,
+    });
+  }
+  if (bordered) parts.push(frame('╰', '╯', first + count < menu.items.length ? ' ↓ ' : ''));
+  regions.push({
+    left: x + 1,
+    right: x + width,
+    top: y + 1,
+    bottom: y + height,
+    target: { type: 'modal-destinations', action: 'surface' },
+    scroll: menu.move,
+  });
+  return {
+    regions,
+    element: h(Box, { position: 'absolute', top: y, left: x, width, flexDirection: 'column' }, ...parts),
+  };
+}
+
 export function ModalOverlay({
   modal,
   columns,
@@ -383,6 +470,7 @@ export function ModalOverlay({
     (shortcutsRows ? shortcutsRows + 1 : 0);
   const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
+  const popover = destinationPopover(modal, left, top, rows);
   const choiceRefs = React.useRef<Array<ChoiceGroupRefs | null>>([]);
   choiceRefs.current.length = modal.lines.length;
   for (const [lineIndex, line] of modal.lines.entries()) {
@@ -466,10 +554,25 @@ export function ModalOverlay({
         }
       }
     }
-    mouse?.replace('modal', regions);
+    mouse?.replace(
+      'modal',
+      popover
+        ? [
+            ...popover.regions,
+            ...regions.filter(({ target }) => target.type === 'modal-destinations'),
+            {
+              left: 1,
+              right: columns,
+              top: 1,
+              bottom: rows,
+              target: { type: 'modal-destinations', action: 'dismiss' },
+            },
+          ]
+        : regions,
+    );
     return () => mouse?.replace('modal', []);
   });
-  return h(
+  const frame = h(
     Box,
     {
       position: 'absolute',
@@ -517,4 +620,5 @@ export function ModalOverlay({
         ]
       : []),
   );
+  return popover ? h(React.Fragment, null, frame, popover.element) : frame;
 }

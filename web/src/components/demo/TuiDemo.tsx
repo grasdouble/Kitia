@@ -162,9 +162,10 @@ export function TuiDemo() {
           Click tabs, filters, rows, actions, and confirmation choices in the terminal. Use the mouse wheel over lists
           or details, or to page through the active preview pane. Click inside the terminal to use your keyboard. Press{' '}
           <kbd>I</kbd> for Inventory, <kbd>B</kbd> to browse resources, or <kbd>M</kbd> to manage catalogs.{' '}
-          <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> moves between controls. In Install Options, click a destination or focus
-          it with the arrows and press <kbd>Space</kbd> to toggle it; press <kbd>Enter</kbd> to review. Press{' '}
-          <kbd>?</kbd> for the guide. When search is focused, type normally. The buttons below send the same keys.
+          <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> moves between controls. In Install Options, open Destinations with a
+          click, <kbd>Enter</kbd>, or <kbd>Space</kbd>. Use arrows and <kbd>Space</kbd> to select, then <kbd>Tab</kbd>{' '}
+          to reach Review install. <kbd>Esc</kbd> closes the menu without changing selections. Press <kbd>?</kbd> for
+          the guide. When search is focused, type normally. The buttons below send the same keys.
         </p>
         <div className={styles.screen}>
           <div

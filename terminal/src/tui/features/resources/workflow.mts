@@ -36,7 +36,8 @@ export function useResourceWorkflow(
   const [destinationSelections, setDestinationSelections] = useState<
     Partial<Record<InstallationScope, readonly InstallationDestination[]>>
   >({});
-  const [installFocus, setInstallFocus] = useState(-1);
+  const [installFocus, setInstallFocus] = useState<'scope' | 'destinations' | 'review'>('scope');
+  const [destinationMenuIndex, setDestinationMenuIndex] = useState<number | null>(null);
   const [confirmation, setConfirmation] = useState<PendingDashboardAction | null>(null);
   const [confirmationChoice, setConfirmationChoice] = useState(0);
   const [confirmationStage, setConfirmationStage] = useState(1);
@@ -76,7 +77,7 @@ export function useResourceWorkflow(
           return {
             id: layout.id,
             label: layout.label,
-            path,
+            directory: layout.directory,
             tracked,
             selected: !tracked && selection.includes(layout.id),
           };
@@ -212,7 +213,9 @@ export function useResourceWorkflow(
     setInstallRef(ref);
     setInstallScope('project');
     setDestinationSelections({});
-    setInstallFocus(availableInstallationDestinations(resource.kind, 'user').length ? -1 : 0);
+    const scoped = availableInstallationDestinations(resource.kind, 'user').length > 0;
+    setInstallFocus(scoped ? 'scope' : 'destinations');
+    setDestinationMenuIndex(null);
     setScreenMode('install-options');
     setActionMessage('');
   };
@@ -280,7 +283,8 @@ export function useResourceWorkflow(
     else if (key.return) chooseConfirmation(confirmationChoice);
   };
   const reviewOptions = () => {
-    if (!installResource || !canReview) return;
+    if (!installResource || !canReview || destinationMenuIndex !== null) return;
+    setInstallFocus('review');
     if (installed && installRef) {
       requestConfirmation({ action: 'update', resource: installed, scope: installScope, ref: installRef }, 1);
     } else {
@@ -298,12 +302,15 @@ export function useResourceWorkflow(
       const scope = scopeChoices[index];
       if (!scope) return;
       setInstallScope(scope);
-      setInstallFocus(-1);
+      setInstallFocus('scope');
+      setDestinationMenuIndex(null);
       return;
     }
+    if (destinationMenuIndex === null) return;
     const choice = destinationChoices[index];
-    if (!choice || choice.tracked) return;
-    setInstallFocus(index);
+    if (!choice) return;
+    setDestinationMenuIndex(index);
+    if (choice.tracked) return;
     setDestinationSelections((current) => {
       const selected = current[installScope] ?? selection;
       return {
@@ -314,20 +321,50 @@ export function useResourceWorkflow(
       };
     });
   };
+  const toggleDestinationMenu = () => {
+    if (!destinationChoices.length) return;
+    setInstallFocus('destinations');
+    setDestinationMenuIndex((current) => {
+      if (current !== null) return null;
+      const selected = destinationChoices.findIndex((choice) => choice.selected);
+      const available = destinationChoices.findIndex((choice) => !choice.tracked);
+      return selected >= 0 ? selected : Math.max(0, available);
+    });
+  };
+  const closeDestinationMenu = () => setDestinationMenuIndex(null);
+  const moveDestinationMenu = (direction: -1 | 1) => {
+    setDestinationMenuIndex((current) =>
+      current === null ? null : Math.max(0, Math.min(destinationChoices.length - 1, current + direction)),
+    );
+  };
   const handleOptionsInput = (input: string, key: Key) => {
     if (!installResource) return;
+    const tab = key.tab || input === '\t';
+    if (tab) {
+      closeDestinationMenu();
+      const controls: (typeof installFocus)[] = [];
+      if (scopeChoices.length > 1) controls.push('scope');
+      if (!replacing) controls.push('destinations');
+      if (canReview) controls.push('review');
+      const index = controls.indexOf(installFocus);
+      if (controls.length) setInstallFocus(controls[cycleIndex(controls.length, index, key.shift ? -1 : 1)]);
+      return;
+    }
+    if (destinationMenuIndex !== null) {
+      if (key.escape) closeDestinationMenu();
+      else if (key.upArrow || key.downArrow) moveDestinationMenu(key.upArrow ? -1 : 1);
+      else if (input === ' ') chooseOption('destination', destinationMenuIndex);
+      return;
+    }
     if (key.escape) {
       setScreenMode('catalog');
       setInstallResource(null);
-    } else if (key.return) reviewOptions();
-    else if (input === ' ' && installFocus >= 0) chooseOption('destination', installFocus);
-    else if ((key.leftArrow || key.rightArrow) && installFocus < 0) {
+    } else if (key.return || input === ' ') {
+      if (installFocus === 'destinations') toggleDestinationMenu();
+      else if (installFocus === 'review') reviewOptions();
+    } else if ((key.leftArrow || key.rightArrow) && installFocus === 'scope') {
       const offset = key.rightArrow ? 1 : -1;
       chooseOption('scope', cycleIndex(scopeChoices.length, scopeChoices.indexOf(installScope), offset));
-    } else if (key.tab || input === '\t' || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
-      const first = scopeChoices.length > 1 ? -1 : 0;
-      const offset = key.shift || key.upArrow || key.leftArrow ? -1 : 1;
-      setInstallFocus(first + cycleIndex(destinationChoices.length - first, installFocus - first, offset));
     }
   };
   const modal = (columns: number, rows: number, optionsVisible: boolean) => {
@@ -348,10 +385,13 @@ export function useResourceWorkflow(
         destinations: destinationChoices,
         ref: installRef,
         focus: installFocus,
+        menuIndex: destinationMenuIndex,
+        moveMenu: moveDestinationMenu,
         replacing,
         scopeError,
         canReview,
         columns,
+        rows,
       });
     return null;
   };
@@ -368,6 +408,8 @@ export function useResourceWorkflow(
     requestConfirmation,
     chooseConfirmation,
     chooseOption,
+    toggleDestinationMenu,
+    closeDestinationMenu,
     reviewOptions,
     handleVersionInput,
     handleConfirmationInput,
