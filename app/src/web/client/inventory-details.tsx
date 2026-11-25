@@ -1,3 +1,4 @@
+import type { InventoryMutation } from '../../application/inventory-mutation.js';
 import {
   canPreviewInstalledResource,
   dashboardStatus,
@@ -18,10 +19,12 @@ export function InventoryDetails({
   resource,
   catalog,
   onPreview,
+  onAction,
 }: {
   resource: CatalogResource;
   catalog: string;
   onPreview: (resource: CatalogResource) => void;
+  onAction: (action: InventoryMutation) => void;
 }) {
   const fields: [string, string | string[] | undefined | null][] = [
     ['Catalog', catalog],
@@ -58,11 +61,29 @@ export function InventoryDetails({
       <h2 id="selection-heading">{resource.id}</h2>
       <p>{resource.description || 'No description available.'}</p>
       {resource.managed === false ? <p>Not managed by Kitia.</p> : null}
-      {canPreviewInstalledResource(resource) ? (
-        <button type="button" onClick={() => onPreview(resource)}>
-          Preview / audit
-        </button>
-      ) : null}
+      <div className="resource-actions">
+        {canPreviewInstalledResource(resource) ? (
+          <button type="button" onClick={() => onPreview(resource)}>
+            Preview / audit
+          </button>
+        ) : null}
+        {resource.managed === false ? (
+          <button type="button" onClick={() => onAction('remove-unmanaged')}>
+            Remove unmanaged files…
+          </button>
+        ) : (
+          <>
+            {resource.source_repository && !resource.issues?.some(({ code }) => code === 'REMOVED_FROM_CATALOG') ? (
+              <button type="button" onClick={() => onAction('update')}>
+                Update…
+              </button>
+            ) : null}
+            <button type="button" onClick={() => onAction('uninstall')}>
+              Uninstall…
+            </button>
+          </>
+        )}
+      </div>
       <dl className="detail-fields">
         {fields
           .filter(([, value]) => value && value.length > 0)

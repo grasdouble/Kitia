@@ -11,6 +11,11 @@ import {
 import type { AddCatalogRequest } from '../core/catalogs/model.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
 import { inspectPinnedSource, resolvePinnedCatalogResource, type CatalogResourceSelector } from './catalog-preview.js';
+import {
+  reviewInventoryMutation,
+  type InventoryMutation,
+  type ConfirmedInventoryMutation,
+} from './inventory-mutation.js';
 import { readInstalledPreview, type InstalledResourceSelector } from './inventory-preview.js';
 import { runResourceAction, type ResourceAction, type ResourceActionOptions } from './resource-actions.js';
 import { listResourceRevisions, readCatalogSnapshot, readInventory, type InstallationTargets } from './snapshot.js';
@@ -25,6 +30,19 @@ export type OperationTask =
     }
   | { task: 'inventory-read'; targets: InstallationTargets }
   | { task: 'inventory-preview'; targets: InstallationTargets; selector: InstalledResourceSelector }
+  | {
+      task: 'inventory-review';
+      targets: InstallationTargets;
+      action: InventoryMutation;
+      selector: InstalledResourceSelector;
+    }
+  | {
+      task: 'inventory-mutate';
+      targets: InstallationTargets;
+      action: InventoryMutation;
+      selection: ConfirmedInventoryMutation;
+      options?: ResourceActionOptions;
+    }
   | { task: 'catalog-read' }
   | { task: 'catalog-preview'; selector: CatalogResourceSelector; project: string }
   | { task: 'catalog-revisions'; selector: CatalogResourceSelector }
@@ -49,6 +67,15 @@ async function execute(data: OperationTask) {
     }
     case 'inventory-preview':
       return readInstalledPreview(data.targets, data.selector);
+    case 'inventory-review':
+      return reviewInventoryMutation(
+        data.action,
+        data.selector,
+        data.targets[data.selector.scope],
+        readCatalogSnapshot().resources,
+      );
+    case 'inventory-mutate':
+      return runResourceAction(data.action, data.selection, data.targets, data.options);
     case 'catalog-read':
       return readCatalogSnapshot();
     case 'catalog-preview': {

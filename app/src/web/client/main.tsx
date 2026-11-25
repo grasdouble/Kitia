@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
+import type { InstallationTargets, InventorySnapshot, InventoryWorkspace } from '../../application/snapshot.js';
 import type { InstallationScope } from '../../core/installations/model.js';
 import { BrowseCatalog } from './catalog.js';
 import { Inventory, InventorySummary } from './inventory.js';
@@ -39,6 +39,10 @@ function App() {
     return () => controller.abort();
   }, []);
 
+  function refreshInventory(inventory: InventorySnapshot) {
+    setData((current) => current && { ...current, snapshot: { ...current.snapshot, inventory } });
+  }
+
   return (
     <main>
       <header>
@@ -62,7 +66,7 @@ function App() {
           inventory={data.snapshot.inventory}
           targets={data.snapshot.targets}
           token={data.token}
-          onInstalled={(inventory) => setData({ ...data, snapshot: { ...data.snapshot, inventory } })}
+          onInstalled={refreshInventory}
         />
       ) : (
         <>
@@ -81,6 +85,7 @@ function App() {
             scope={scope}
             target={data.snapshot.targets[scope]}
             token={data.token}
+            onChanged={refreshInventory}
           />
         </>
       )}

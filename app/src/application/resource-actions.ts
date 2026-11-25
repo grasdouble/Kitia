@@ -14,6 +14,11 @@ import {
   type CatalogResourceSelector,
   type SourceInspection,
 } from './catalog-preview.js';
+import {
+  reviewInventoryMutation,
+  type ConfirmedInventoryMutation,
+  type InventoryMutation,
+} from './inventory-mutation.js';
 import { inspectInstalledFiles } from './inventory-preview.js';
 import { readCatalogSnapshot, readInventory, type InstallationTargets, type InventorySnapshot } from './snapshot.js';
 
@@ -42,15 +47,20 @@ export type ResourceActionResult = InventorySnapshot & {
 
 export async function runResourceAction(
   action: ResourceAction,
-  selection: CatalogResource | CatalogResourceSelector,
+  selection: CatalogResource | CatalogResourceSelector | ConfirmedInventoryMutation,
   targets: InstallationTargets,
   options: ResourceActionOptions = {},
   onProgress?: (message: string) => void,
 ): Promise<ResourceActionResult> {
   const catalog = readCatalogSnapshot();
   const pinnedInstall = 'ref' in selection;
-  const resource = pinnedInstall ? resolvePinnedCatalogResource(selection, catalog.resources) : selection;
-  const scope = action === 'install' ? options.scope || 'project' : (resource.scope as ResourceActionOptions['scope']);
+  const reviewed = 'stamp' in selection;
+  const candidate = pinnedInstall
+    ? resolvePinnedCatalogResource(selection, catalog.resources)
+    : reviewed
+      ? selection.selector
+      : selection;
+  const scope = action === 'install' ? options.scope || 'project' : (candidate.scope as ResourceActionOptions['scope']);
   const target = scope === 'user' ? targets.user : targets.project;
   const messages: ResourceActionResult['messages'] = [];
   let audit: AuditResult | undefined;
@@ -59,8 +69,26 @@ export async function runResourceAction(
   let code = 0;
   let failure: ActionFailure | undefined;
   try {
+    if (reviewed && fs.realpathSync(target) !== target) {
+      throw new CatalogError('The inventory target has moved. Restart Kitia web.', 'STALE_SOURCE');
+    }
     if (action !== 'preview') release = acquireOperationLock(target);
     const targetRoot = fs.realpathSync(target);
+    if (reviewed) {
+      const current = reviewInventoryMutation(
+        action as InventoryMutation,
+        selection.selector,
+        target,
+        catalog.resources,
+      );
+      if (current.stamp !== selection.stamp) {
+        throw new CatalogError(
+          'The installation or catalog has changed. Close this dialog and review the action again.',
+          'STALE_SOURCE',
+        );
+      }
+    }
+    const resource: CatalogResource = candidate;
     if (action === 'remove-unmanaged') {
       const state = readInstallState(targetRoot);
       if (resource.managed !== false) throw new Error('Only unmanaged dashboard artifacts can be removed this way.');
@@ -129,6 +157,7 @@ export async function runResourceAction(
     }
   } catch (error) {
     if (!(error instanceof CatalogError)) throw error;
+    if (reviewed && (error.code === 'STALE_SOURCE' || error.code === 'RESOURCE_NOT_FOUND')) throw error;
     code = 1;
     failure = {
       code: error.code,

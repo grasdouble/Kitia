@@ -70,6 +70,8 @@ function seedWebCatalog(root) {
     );
   }
   const head = commit('Advance source files');
+  for (const { file, kind } of items) fs.writeFileSync(path.join(repo, file), `# Revised ${kind}\n`);
+  const next = commit('Publish revised resources');
   const repository = 'example/web-catalog';
   const source = { name: 'Fixture', repository: `https://github.com/${repository}` };
   const registry = {
@@ -95,6 +97,7 @@ function seedWebCatalog(root) {
     repo,
     ref,
     head,
+    next,
     items,
     env: {
       HOME: user,

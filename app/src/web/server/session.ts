@@ -5,10 +5,15 @@ import { createServer, type ServerResponse } from 'node:http';
 import path from 'node:path';
 
 import type { CatalogResourceSelector } from '../../application/catalog-preview.js';
+import type { InventoryMutation, InventoryMutationRetry } from '../../application/inventory-mutation.js';
 import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
 import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
 import { runOperation } from '../../application/worker-client.js';
-import { installationDestinationIds, isInstallationDestination } from '../../core/installations/destinations.js';
+import {
+  installationDestinationIds,
+  isInstallationDestination,
+  type InstallationDestination,
+} from '../../core/installations/destinations.js';
 
 const host = '127.0.0.1';
 const headers = {
@@ -35,6 +40,8 @@ const localPreviewRoute = '/api/inventory/preview?';
 const catalogPreviewRoute = '/api/catalog/preview?';
 const catalogRevisionsRoute = '/api/catalog/revisions?';
 const catalogInstallRoute = '/api/catalog/install?';
+const inventoryActionRoute = '/api/inventory/action?';
+const inventoryActions: readonly InventoryMutation[] = ['update', 'uninstall', 'remove-unmanaged'];
 
 function resourceIdentity(params: URLSearchParams) {
   const catalog = params.get('catalog');
@@ -44,9 +51,7 @@ function resourceIdentity(params: URLSearchParams) {
   return { catalog, kind, id } as const;
 }
 
-function installedSelector(query: string): InstalledResourceSelector | undefined {
-  const params = new URLSearchParams(query);
-  if (params.size !== 5) return undefined;
+function installedSelector(params: URLSearchParams): InstalledResourceSelector | undefined {
   const identity = resourceIdentity(params);
   const scope = params.get('scope');
   const managed = params.get('managed');
@@ -82,6 +87,16 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
   let origin: string;
   let authority: string;
   let inventoryRead: Promise<InventoryWorkspace> | undefined;
+  const retries = new Map<
+    string,
+    {
+      ticket: string;
+      key: string;
+      stamp: string;
+      destination: InstallationDestination;
+      attempted: ReadonlySet<InstallationDestination>;
+    }
+  >();
   const server = createServer(async (request, response) => {
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (request.headers.host !== authority) {
@@ -94,14 +109,16 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
     }
     const route = request.url || '/';
     const isCatalogInstall = route === '/api/catalog/install' || route.startsWith(catalogInstallRoute);
-    const method = isCatalogInstall ? 'POST' : 'GET';
+    const isInventoryAction = route.startsWith(inventoryActionRoute);
+    const mutation = isCatalogInstall || (isInventoryAction && request.method === 'POST');
+    const method = mutation ? 'POST' : 'GET';
     if (request.method !== method) {
-      response.setHeader('Allow', method);
+      response.setHeader('Allow', isInventoryAction ? 'GET, POST' : method);
       sendJson(response, 405, { error: 'Method not allowed.' });
       return;
     }
-    if (isCatalogInstall && request.headers.origin !== origin) {
-      sendJson(response, 403, { error: 'Installation requests must come from this session.' });
+    if (mutation && request.headers.origin !== origin) {
+      sendJson(response, 403, { error: 'Write requests must come from this session.' });
       return;
     }
     const asset = assets.get(route);
@@ -120,6 +137,7 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         isLocalPreview ||
         isCatalogPreview ||
         isCatalogRevisions ||
+        isInventoryAction ||
         isCatalogInstall
       )
     ) {
@@ -137,6 +155,76 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       return;
     }
     try {
+      if (isInventoryAction) {
+        const params = new URLSearchParams(route.slice(inventoryActionRoute.length));
+        const selector = installedSelector(params);
+        const action = inventoryActions.find((value) => value === params.get('action'));
+        const stamp = params.get('stamp') ?? '';
+        const retry = params.get('retry');
+        if (
+          !selector ||
+          !action ||
+          (action === 'remove-unmanaged') === selector.managed ||
+          params.size !== (mutation ? 7 + Number(retry !== null) : 6) ||
+          (mutation ? !/^[a-f0-9]{64}$/.test(stamp) : stamp !== '' || retry !== null)
+        ) {
+          sendJson(response, 400, { error: 'Invalid inventory action selector.' });
+          return;
+        }
+        if (!mutation) {
+          sendJson(response, 200, await runOperation({ task: 'inventory-review', targets, action, selector }));
+          return;
+        }
+        const key = JSON.stringify(selector);
+        const previous = retries.get(selector.scope);
+        if (
+          retry !== null &&
+          (action !== 'update' ||
+            !previous ||
+            previous.ticket !== retry ||
+            previous.key !== key ||
+            previous.stamp !== stamp)
+        ) {
+          sendJson(response, 409, { error: 'This retry is no longer available. Review the update again.' });
+          return;
+        }
+        retries.delete(selector.scope);
+        const destination = retry === null ? undefined : previous?.destination;
+        const attempted = new Set(retry === null ? undefined : previous?.attempted);
+        if (destination) attempted.add(destination);
+        const selection = { selector, stamp };
+        const initial =
+          action === 'update' ? await runOperation({ task: 'inventory-review', targets, action, selector }) : undefined;
+        const result = await runOperation({
+          task: 'inventory-mutate',
+          targets,
+          action,
+          selection,
+          options: destination ? { ghForce: true, ghForceAgent: destination } : undefined,
+        });
+        const failure = result.failure;
+        if (
+          action === 'update' &&
+          failure?.code === 'GH_FORCE_REQUIRED' &&
+          failure.recoverable &&
+          failure.agent &&
+          isInstallationDestination(failure.agent) &&
+          !attempted.has(failure.agent)
+        ) {
+          const review = await runOperation({ task: 'inventory-review', targets, action, selector }).catch(
+            () => undefined,
+          );
+          if (review && review.ref === initial?.ref) {
+            const ticket = randomBytes(24).toString('base64url');
+            retries.set(selector.scope, { ticket, key, stamp: review.stamp, destination: failure.agent, attempted });
+            const retry: InventoryMutationRetry = { ticket, review };
+            sendJson(response, 200, { ...result, retry });
+            return;
+          }
+        }
+        sendJson(response, 200, result);
+        return;
+      }
       if (isCatalogInstall) {
         const params = new URLSearchParams(route.slice(catalogInstallRoute.length));
         const scope = params.get('scope');
@@ -179,7 +267,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         return;
       }
       if (isLocalPreview) {
-        const selector = installedSelector(route.slice(localPreviewRoute.length));
+        const params = new URLSearchParams(route.slice(localPreviewRoute.length));
+        const selector = params.size === 5 ? installedSelector(params) : undefined;
         if (!selector) {
           sendJson(response, 400, { error: 'Invalid installed resource selector.' });
           return;

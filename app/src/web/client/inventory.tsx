@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
 
+import type { InventoryMutation } from '../../application/inventory-mutation.js';
+import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
 import type { InventorySnapshot, InventoryWorkspace } from '../../application/snapshot.js';
 import type { InstallationScope } from '../../core/installations/model.js';
 import { filterInventory, inventoryCatalogLabels, summarizeInventory } from '../../core/inventory/view.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { InspectionDialog } from './inspection.js';
+import { InventoryActionDialog } from './inventory-action.js';
 import { InventoryDetails, installationStatus } from './inventory-details.js';
 import { ResourceFilters, resourceFilterOptions, useResourceFilters } from './resource-filters.js';
 
@@ -49,20 +52,36 @@ export function InventorySummary({ inventory }: { inventory: InventorySnapshot }
   );
 }
 
+const resourceKey = ({ catalog, kind, id, managed }: CatalogResource) =>
+  JSON.stringify([catalog, kind, id, managed !== false]);
+
+function selectorFor(resource: CatalogResource, scope: InstallationScope): InstalledResourceSelector {
+  return {
+    scope,
+    kind: resource.kind,
+    id: resource.id,
+    catalog: resource.catalog || '',
+    managed: resource.managed !== false,
+  };
+}
+
 export function Inventory({
   data,
   scope,
   target,
   token,
+  onChanged,
 }: {
   data: InventoryWorkspace;
   scope: InstallationScope;
   target: string;
   token: string;
+  onChanged: (inventory: InventorySnapshot) => void;
 }) {
   const { filters, set } = useResourceFilters();
-  const [selection, setSelection] = useState<CatalogResource>();
+  const [selection, setSelection] = useState<string>();
   const [preview, setPreview] = useState<CatalogResource>();
+  const [mutation, setMutation] = useState<{ action: InventoryMutation; selector: InstalledResourceSelector }>();
   const { inventory, catalogs } = data;
   const labels = useMemo(() => inventoryCatalogLabels(inventory.resources, catalogs), [inventory.resources, catalogs]);
   const resources = useMemo(
@@ -80,7 +99,7 @@ export function Inventory({
     labels,
     filters.license,
   );
-  const selected = selection && visible.includes(selection) ? selection : visible[0];
+  const selected = visible.find((resource) => resourceKey(resource) === selection) ?? visible[0];
   return (
     <section aria-label={`${scope === 'project' ? 'Project' : 'User'} inventory`}>
       <p className="target">
@@ -118,22 +137,13 @@ export function Inventory({
                 </thead>
                 <tbody>
                   {visible.map((resource) => (
-                    <tr
-                      key={JSON.stringify([
-                        resource.catalog,
-                        resource.kind,
-                        resource.id,
-                        resource.managed,
-                        resource.paths,
-                      ])}
-                      data-selected={selected === resource}
-                    >
+                    <tr key={resourceKey(resource)} data-selected={selected === resource}>
                       <th scope="row">
                         <button
                           className="row-button"
                           type="button"
                           aria-pressed={selected === resource}
-                          onClick={() => setSelection(resource)}
+                          onClick={() => setSelection(resourceKey(resource))}
                         >
                           {resource.id}
                         </button>
@@ -155,7 +165,12 @@ export function Inventory({
           )}
         </section>
         {selected ? (
-          <InventoryDetails resource={selected} catalog={labels.get(selected) || '—'} onPreview={setPreview} />
+          <InventoryDetails
+            resource={selected}
+            catalog={labels.get(selected) || '—'}
+            onPreview={setPreview}
+            onAction={(action) => setMutation({ action, selector: selectorFor(selected, scope) })}
+          />
         ) : null}
       </div>
       {preview ? (
@@ -163,14 +178,20 @@ export function Inventory({
           title={preview.id}
           subtitle={`Installed source · ${scope}`}
           endpoint={`/api/inventory/preview?${new URLSearchParams({
-            scope,
-            kind: preview.kind,
-            id: preview.id,
-            catalog: preview.catalog || '',
+            ...selectorFor(preview, scope),
             managed: String(preview.managed !== false),
           })}`}
           token={token}
           onClose={() => setPreview(undefined)}
+        />
+      ) : null}
+      {mutation ? (
+        <InventoryActionDialog
+          {...mutation}
+          target={target}
+          token={token}
+          onChanged={onChanged}
+          onClose={() => setMutation(undefined)}
         />
       ) : null}
     </section>

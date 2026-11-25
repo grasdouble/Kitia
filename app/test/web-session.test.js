@@ -185,11 +185,11 @@ test(
 );
 
 test(
-  'browse reads pinned files and history without writes, then installs only on an authenticated confirmation',
-  { timeout: 10_000 },
+  'the browser session installs, updates, and removes only reviewed resources in their selected scopes',
+  { timeout: 25_000 },
   async () => {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-web-catalog-'));
-    const { project, user, config, env, ref, head, items } = seedWebCatalog(temporary);
+    const { project, user, config, env, ref, head, next, items } = seedWebCatalog(temporary);
     const preload = path.join(__dirname, 'gh-process-preload.cjs');
     const child = spawn(process.execPath, ['--require', preload, executable, 'web', '--no-open'], {
       cwd: project,
@@ -242,6 +242,7 @@ test(
         assert.deepEqual(
           JSON.parse(history.body).map(({ sha, subject }) => [sha, subject]),
           [
+            [next, 'Publish revised resources'],
             [head, 'Advance source files'],
             [ref, 'Publish pinned resources'],
           ],
@@ -359,6 +360,99 @@ test(
       const inventory = await request(`${url.origin}/api/inventory`, headers);
       assert.equal(JSON.parse(inventory.body).inventory.resources.filter(({ managed }) => managed !== false).length, 5);
       assert.equal(await fs.readFile(index, 'utf8'), initialIndex);
+
+      const inventoryAction = (action, { kind, id }, scope, catalog = 'Fixture') =>
+        `${url.origin}/api/inventory/action?${new URLSearchParams({ action, kind, id, scope, catalog, managed: String(catalog !== '-') })}`;
+      const review = async (endpoint) => {
+        const response = await request(endpoint, headers);
+        assert.equal(response.status, 200, response.body);
+        return JSON.parse(response.body);
+      };
+      const commitAction = async (endpoint, { stamp }, ticket) => {
+        const query = new URLSearchParams({ stamp });
+        if (ticket) query.set('retry', ticket);
+        const response = await request(`${endpoint}&${query}`, post, 'POST');
+        assert.equal(response.status, 200, response.body);
+        return JSON.parse(response.body);
+      };
+      const agentUpdate = inventoryAction('update', agent, 'project');
+      const outdated = await review(agentUpdate);
+      assert.equal(outdated.ref, ref);
+      await fs.writeFile(index, JSON.stringify({ ...JSON.parse(initialIndex), source_ref: next }));
+      assert.equal((await request(`${agentUpdate}&stamp=${outdated.stamp}`, post, 'POST')).status, 409);
+      const updatedReview = await review(agentUpdate);
+      assert.equal(updatedReview.ref, next);
+      assert.equal(
+        (await request(`${agentUpdate}&stamp=${updatedReview.stamp}`, { authorization }, 'POST')).status,
+        403,
+      );
+      assert.equal((await request(`${agentUpdate}&stamp=${updatedReview.stamp}&retry=fake`, post, 'POST')).status, 409);
+      const localEdit = path.join(project, '.github/agents/catalog-agent.agent.md');
+      await fs.writeFile(localEdit, 'Local edits\n');
+      const blocked = await commitAction(agentUpdate, updatedReview);
+      assert.equal(blocked.failure.code, 'LOCAL_CONFLICT');
+      assert.equal(blocked.retry, undefined);
+      assert.equal(await fs.readFile(localEdit, 'utf8'), 'Local edits\n');
+      await fs.writeFile(localEdit, agent.content);
+
+      for (const [item, scope, target, destinations] of matrices) {
+        const update = inventoryAction('update', item, scope);
+        let result = await commitAction(update, await review(update));
+        const visited = new Set();
+        while (result.retry) {
+          assert.equal(item.kind, 'skill');
+          assert.equal(result.failure.code, 'GH_FORCE_REQUIRED');
+          assert.ok(!result.errors.some((error) => error.scope === scope), JSON.stringify(result.errors));
+          assert.ok(
+            result.resources.some(
+              (resource) => resource.kind === 'skill' && resource.id === item.id && resource.scope === scope,
+            ),
+          );
+          const destination = result.failure.agent;
+          assert.ok(Object.hasOwn(destinations, destination) && !visited.has(destination));
+          visited.add(destination);
+          const { review: reviewed, ticket } = result.retry;
+          assert.equal(reviewed.ref, next);
+          result = await commitAction(update, reviewed, ticket);
+          assert.equal((await request(`${update}&stamp=${reviewed.stamp}&retry=${ticket}`, post, 'POST')).status, 409);
+        }
+        assert.equal(result.code, 0, JSON.stringify(result));
+        assert.equal(visited.size, item.kind === 'skill' ? 4 : 0);
+        for (const dirOrFile of Object.values(destinations)) {
+          const file = item.kind === 'skill' ? `${dirOrFile}/${item.id}/SKILL.md` : dirOrFile;
+          assert.ok((await fs.readFile(path.join(target, file), 'utf8')).includes(`# Revised ${item.kind}`));
+        }
+      }
+
+      for (const [item, scope, target, destinations] of matrices) {
+        const uninstall = inventoryAction('uninstall', item, scope);
+        const reviewed = await review(uninstall);
+        if (item.kind === 'skill') assert.equal(reviewed.paths.length, Object.keys(destinations).length * 2);
+        const result = await commitAction(uninstall, reviewed);
+        assert.equal(result.code, 0, JSON.stringify(result));
+        assert.ok(!result.resources.some((resource) => resource.id === item.id && resource.scope === scope));
+        if (scope === 'project' && item.kind !== 'instruction') {
+          assert.ok(result.resources.some((resource) => resource.id === item.id && resource.scope === 'user'));
+        }
+        for (const file of reviewed.paths) await assert.rejects(fs.access(path.join(target, file)), { code: 'ENOENT' });
+      }
+
+      for (const [kind, id, file] of [
+        ['agent', 'unmanaged-agent', '.github/agents/unmanaged-agent.agent.md'],
+        ['instruction', 'unmanaged-rules', '.github/instructions/unmanaged-rules.instructions.md'],
+        ['skill', 'unmanaged-skill', '.agents/skills/unmanaged-skill/SKILL.md'],
+      ]) {
+        const absolute = path.join(project, file);
+        await fs.mkdir(path.dirname(absolute), { recursive: true });
+        await fs.writeFile(absolute, 'Unmanaged resource\n');
+        const remove = inventoryAction('remove-unmanaged', { kind, id }, 'project', '-');
+        const reviewed = await review(remove);
+        assert.deepEqual(reviewed.paths, [kind === 'skill' ? path.posix.dirname(file) : file]);
+        await fs.access(absolute);
+        const result = await commitAction(remove, reviewed);
+        assert.equal(result.code, 0, JSON.stringify(result));
+        await assert.rejects(fs.access(absolute), { code: 'ENOENT' });
+      }
     } finally {
       stdout.close();
       child.kill();
