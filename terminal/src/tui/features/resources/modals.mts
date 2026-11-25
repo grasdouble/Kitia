@@ -10,6 +10,7 @@ import { fitColumn, fitText, wrapText } from '../../helpers.mjs';
 import { modalFrame, choiceGroup, categorizeShortcutHint } from '../../modals.mjs';
 import type { PendingDashboardAction } from './types.js';
 const { semantic } = DASHBOARD_THEME;
+const scopeLabel = (scope: InstallationScope) => (scope === 'user' ? 'User' : 'Project');
 
 export function optionsModal({
   resource,
@@ -17,7 +18,7 @@ export function optionsModal({
   scopeChoices,
   destinations,
   focus,
-  menuIndex,
+  menu,
   moveMenu,
   replacing,
   scopeError,
@@ -31,7 +32,7 @@ export function optionsModal({
   scopeChoices: InstallationScope[];
   destinations: { label: string; directory: string; tracked: boolean; selected: boolean }[];
   focus: 'scope' | 'destinations' | 'review';
-  menuIndex: number | null;
+  menu: { group: 'scope' | 'destination'; index: number } | null;
   moveMenu: (direction: -1 | 1) => void;
   replacing: boolean;
   scopeError?: ScanError;
@@ -44,17 +45,24 @@ export function optionsModal({
   const modalWidth = Math.max(20, Math.min(64, columns - 4));
   const contentWidth = modalWidth - 4;
   const compact = rows < 19;
-  const scopeIndex = scopeChoices.indexOf(scope);
+  const fixedScope = scopeChoices.length === 1;
   const allInstalled = destinations.length > 0 && destinations.every(({ tracked }) => tracked);
-  const scopeControl =
-    scopeChoices.length === 1
-      ? [{ text: 'SCOPE: PROJECT (instructions are project-scoped)', dimColor: true }]
-      : modalWidth >= 34
-        ? [choiceGroup('SCOPE', scopeChoices, scopeIndex, focus === 'scope')]
-        : scopeChoices.map((choice, index) => ({
-            text: `${focus === 'scope' && index === scopeIndex ? '› ' : '  '}[${index === scopeIndex ? 'x' : ' '}] ${choice}`,
-            mouseTarget: { type: 'modal-option' as const, group: 'scope' as const, index },
-          }));
+  const selectField = (label: string, value: string, group: 'scope' | 'destination', enabled = true) => {
+    const focused = focus === (group === 'scope' ? 'scope' : 'destinations');
+    return [
+      {
+        text: `${focused ? '› ' : ''}${label}`,
+        bold: true,
+        color: focused ? semantic.accents.primary : semantic.accents.label,
+      },
+      {
+        text: `${value}${enabled ? (menu?.group === group ? '▴' : '▾') : ''}`,
+        selectInput: { compact: rows < 40 },
+        focused,
+        mouseTarget: enabled ? { type: 'modal-select' as const, action: 'toggle' as const, group } : undefined,
+      },
+    ];
+  };
   const selected = destinations.filter(({ selected }) => selected);
   const names = selected
     .slice(0, 2)
@@ -81,7 +89,8 @@ export function optionsModal({
             },
           ]
         : []),
-      ...scopeControl,
+      ...selectField('Scope', scopeLabel(scope), 'scope', !fixedScope),
+      ...(fixedScope ? [{ text: 'Instructions are project-scoped.', dimColor: true }] : []),
       ...(replacing
         ? [
             {
@@ -90,17 +99,7 @@ export function optionsModal({
             },
           ]
         : [
-            {
-              text: `${focus === 'destinations' ? '› ' : ''}Destinations`,
-              bold: true,
-              color: focus === 'destinations' ? semantic.accents.primary : semantic.accents.label,
-            },
-            {
-              text: `${summary}${menuIndex === null ? '▾' : '▴'}`,
-              selectInput: { compact: rows < 40 },
-              focused: focus === 'destinations',
-              mouseTarget: { type: 'modal-destinations' as const, action: 'toggle' as const },
-            },
+            ...selectField('Destinations', summary, 'destination'),
             ...(!canReview && !scopeError
               ? [
                   {
@@ -137,9 +136,10 @@ export function optionsModal({
       ...(!compact
         ? [
             {
-              text:
-                menuIndex === null
-                  ? 'TAB MOVE · ENTER / SPACE ACTIVATE · ESC BACK'
+              text: !menu
+                ? 'TAB MOVE · ENTER / SPACE ACTIVATE · ESC BACK'
+                : menu.group === 'scope'
+                  ? '↑↓ MOVE · ENTER SELECT · TAB / ESC CLOSE'
                   : '↑↓ MOVE · SPACE TOGGLE · TAB / ESC CLOSE',
               dimColor: true,
             },
@@ -149,17 +149,20 @@ export function optionsModal({
     columns,
     semantic.selected,
   );
-  if (menuIndex === null) return frame;
+  if (!menu) return frame;
   return {
     ...frame,
-    destinationMenu: {
-      index: menuIndex,
+    selectMenu: {
+      ...menu,
       move: moveMenu,
-      items: destinations.map(({ label, directory, selected, tracked }) => ({
-        title: tracked ? `${label} [Installed]` : `${selected ? '✓' : '□'} ${label}`,
-        directory: `${scope === 'user' ? '~/' : ''}${directory}/`,
-        tracked,
-      })),
+      items:
+        menu.group === 'scope'
+          ? scopeChoices.map((choice) => ({ title: `${choice === scope ? '✓ ' : ''}${scopeLabel(choice)}` }))
+          : destinations.map(({ label, directory, selected, tracked }) => ({
+              title: tracked ? `${label} [Installed]` : `${selected ? '✓' : '□'} ${label}`,
+              detail: `${scope === 'user' ? '~/' : ''}${directory}/`,
+              color: tracked ? semantic.inventoryStatus.attention : undefined,
+            })),
     },
   };
 }

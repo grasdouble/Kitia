@@ -59,8 +59,9 @@ type ModalFrameResult = {
   headerLines: Array<{ text: string }>;
   lines: ModalRenderedLine[];
   shortcuts: string[];
-  destinationMenu?: {
-    items: { title: string; directory: string; tracked: boolean }[];
+  selectMenu?: {
+    group: 'scope' | 'destination';
+    items: { title: string; detail?: string; color?: string }[];
     index: number;
     move: NonNullable<DashboardMouseRegion['scroll']>;
   };
@@ -405,15 +406,16 @@ function ModalLine({ line, choiceRefs }: { line: ModalRenderedLine; choiceRefs?:
     : content;
 }
 
-function destinationPopover(modal: ModalFrameResult, left: number, top: number, rows: number) {
-  const menu = modal.destinationMenu;
+function selectPopover(modal: ModalFrameResult, left: number, top: number, rows: number) {
+  const menu = modal.selectMenu;
   if (!menu) return;
   let fieldHeight = 1;
   let below = top;
   for (const line of modal.lines) {
     const height = modalLineHeight(line);
     below += height;
-    if (line.selectInput) {
+    const target = line.mouseTarget;
+    if (target?.type === 'modal-select' && target.action === 'toggle' && target.group === menu.group) {
       fieldHeight = height;
       break;
     }
@@ -421,7 +423,7 @@ function destinationPopover(modal: ModalFrameResult, left: number, top: number, 
   const above = below - fieldHeight;
   const width = modal.width - 4;
   const inner = width - 4;
-  const needsDetailRow = menu.items.some(({ title, directory }) => title.length + directory.length + 5 > inner);
+  const needsDetailRow = menu.items.some(({ title, detail }) => detail && title.length + detail.length + 5 > inner);
   const fullHeight = menu.items.length * (needsDetailRow ? 2 : 1) + 2;
   const useAbove = rows - below < fullHeight && above > rows - below;
   const room = useAbove ? above : rows - below;
@@ -443,12 +445,12 @@ function destinationPopover(modal: ModalFrameResult, left: number, top: number, 
     );
   if (bordered) parts.push(frame('╭', '╮', first ? ' ↑ ' : ''));
   for (let index = first; index < first + count; index += 1) {
-    const { title, directory, tracked } = menu.items[index];
+    const { title, detail, color: itemColor } = menu.items[index];
     const active = menu.index === index;
-    const color = active ? semantic.selected : tracked ? semantic.inventoryStatus.attention : MODAL_FOREGROUND;
+    const color = active ? semantic.selected : (itemColor ?? MODAL_FOREGROUND);
     const marker = active ? '› ' : '  ';
     const line = (text: string) => `│ ${text.padEnd(inner)} │`;
-    const label = itemHeight === 1 ? `${title} · ${directory}` : title;
+    const label = itemHeight === 1 && detail ? `${title} · ${detail}` : title;
     parts.push(
       h(
         Text,
@@ -461,7 +463,7 @@ function destinationPopover(modal: ModalFrameResult, left: number, top: number, 
         h(
           Text,
           { key: `directory-${index}`, backgroundColor: MODAL_BACKGROUND, color, dimColor: !active },
-          line(`  ${fitText(directory, inner - 2)}`),
+          line(`  ${fitText(detail, inner - 2)}`),
         ),
       );
     }
@@ -471,7 +473,7 @@ function destinationPopover(modal: ModalFrameResult, left: number, top: number, 
       right: x + width,
       top: start + 1,
       bottom: start + itemHeight,
-      target: { type: 'modal-option', group: 'destination', index },
+      target: { type: 'modal-option', group: menu.group, index },
       scroll: menu.move,
     });
   }
@@ -481,7 +483,7 @@ function destinationPopover(modal: ModalFrameResult, left: number, top: number, 
     right: x + width,
     top: y + 1,
     bottom: y + height,
-    target: { type: 'modal-destinations', action: 'surface' },
+    target: { type: 'modal-select', action: 'surface' },
     scroll: menu.move,
   });
   return {
@@ -507,7 +509,7 @@ export function ModalOverlay({
     contentRows + modal.headerLines.length + (modal.panelTitle ? 4 : 0) + (shortcutsRows ? shortcutsRows + 1 : 0);
   const top = Math.max(0, Math.floor((rows - modalHeight) / 2));
   const left = Math.max(0, Math.floor((columns - modal.width) / 2));
-  const popover = destinationPopover(modal, left, top, rows);
+  const popover = selectPopover(modal, left, top, rows);
   const choiceRefs = React.useRef<Array<ChoiceGroupRefs | null>>([]);
   choiceRefs.current.length = modal.lines.length;
   for (const [lineIndex, line] of modal.lines.entries()) {
@@ -543,15 +545,10 @@ export function ModalOverlay({
           continue;
         }
         if (!line.options?.length || typeof line.bodyText !== 'string') continue;
-        const group = String(line.label || '')
-          .trim()
-          .toLowerCase();
-        if (group && group !== 'scope') continue;
         const bodyOffset = typeof line.text === 'string' ? line.text.indexOf(line.bodyText) : -1;
         for (const [index, option] of line.options.entries()) {
           const label = option.label;
-          const target: DashboardMouseTarget =
-            group === 'scope' ? { type: 'modal-option', group, index } : { type: 'modal-choice', index };
+          const target: DashboardMouseTarget = { type: 'modal-choice', index };
           const node = refs?.options[index]?.current;
           if (node) {
             const optionLayout = measureElement(node);
@@ -597,13 +594,18 @@ export function ModalOverlay({
       popover
         ? [
             ...popover.regions,
-            ...regions.filter(({ target }) => target.type === 'modal-destinations'),
+            ...regions.filter(
+              ({ target }) =>
+                target.type === 'modal-select' &&
+                target.action === 'toggle' &&
+                target.group === modal.selectMenu?.group,
+            ),
             {
               left: 1,
               right: columns,
               top: 1,
               bottom: rows,
-              target: { type: 'modal-destinations', action: 'dismiss' },
+              target: { type: 'modal-select', action: 'dismiss' },
             },
           ]
         : regions,

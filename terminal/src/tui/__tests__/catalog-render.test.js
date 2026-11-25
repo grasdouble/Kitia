@@ -2094,8 +2094,35 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       (target) => target.type === 'action' && target.action === 'install',
       'Install resource',
     );
-    await dashboard.wait((frame) => frame.includes('INSTALL OPTIONS'), 'install options modal');
-    clickRenderedTarget(dashboard, (target) => target.type === 'modal-option' && target.group === 'scope', '│ USER │');
+    const defaults = await dashboard.wait(
+      (frame) => frame.includes('INSTALL OPTIONS') && frame.includes('│ User▾'),
+      'default User scope',
+    );
+    const scopeField = renderedTextCell(defaults, '│ User▾');
+    const destinationField = renderedTextCell(defaults, '│ Standard▾');
+    const border = (field) => defaults.split(/\r?\n/)[field.row - 1].slice(field.start).match(/^╭─+╮/)?.[0];
+    assert.ok(border(scopeField));
+    assert.equal(border(scopeField), border(destinationField));
+    for (const [current, next] of [
+      ['User', 'Project'],
+      ['Project', 'User'],
+    ]) {
+      clickRenderedTarget(
+        dashboard,
+        (target) => target.type === 'modal-select' && target.action === 'toggle' && target.group === 'scope',
+        `${current}▾`,
+      );
+      await dashboard.wait((frame) => frame.includes(`✓ ${current}`), 'scope menu shows the current choice');
+      clickRenderedTarget(
+        dashboard,
+        (target) => target.type === 'modal-option' && target.group === 'scope',
+        `│   ${next} `,
+      );
+      await dashboard.wait(
+        (frame) => frame.includes(`│ ${next}▾`) && !frame.includes(`✓ ${current}`),
+        'selecting a scope closes the menu',
+      );
+    }
     const field = await dashboard.wait((frame) => frame.includes('│ Standard▾'), 'closed destination field');
     assert.ok(!field.includes('~/.copilot/skills/'));
     const { row, start } = renderedTextCell(field, '│ Standard▾');
@@ -2103,11 +2130,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
     const topBorder = lines[row - 1].slice(start).match(/^╭─+╮/)?.[0];
     assert.ok(topBorder, 'the destination select has the Inventory-style rounded top border');
     assert.equal(lines[row + 1].slice(start, start + topBorder.length), `╰${topBorder.slice(1, -1)}╯`);
-    clickRenderedTarget(
-      dashboard,
-      ({ type, action }) => type === 'modal-destinations' && action === 'toggle',
-      topBorder,
-    );
+    clickAt(dashboard.input, { x: start + Math.floor(topBorder.length / 2) + 1, y: row });
     const opened = await dashboard.wait((frame) => frame.includes('~/.copilot/skills/'), 'user destination menu');
     const anchor = renderedTextCell(opened, '│ Standard▴');
     assert.equal(opened.split(/\r?\n/)[anchor.row + 2].slice(anchor.start, anchor.start + topBorder.length), topBorder);
@@ -2176,12 +2199,18 @@ test('install options keep scope selections independent and only add newly selec
   };
   try {
     await press('b', 'CATALOG RESOURCES');
-    const options = await press('\r', 'INSTALL OPTIONS');
+    await press('\r', '│ User▾');
+    await press('\r', '› ✓ User');
+    await press('\x1b[A', '› Project');
+    await press('\x1b', '│ User▾');
+    const changeScope = async (key, choice) => {
+      await press('\r', choice === 'Project' ? '› ✓ User' : '› ✓ Project');
+      await press(key, `› ${choice}`);
+      return press('\r', `│ ${choice}▾`);
+    };
+    const options = await changeScope('\x1b[A', 'Project');
     assert.ok(options.includes('│ 0 selected▾') && !options.includes('Standard [Installed]'));
     assert.ok(options.includes('Select at least one new destination.'));
-    dashboard.input.write('\r');
-    await dashboard.flush();
-    assert.ok(!dashboard.frame().includes('CONFIRM INSTALL'));
     await press('\t', '› Destinations');
     const opened = await press('\r', '› □ GitHub Copilot');
     assert.ok(opened.includes('Standard [Installed]') && opened.includes('.agents/skills/'));
@@ -2194,9 +2223,11 @@ test('install options keep scope selections independent and only add newly selec
     await press('\x1b', '│ GitHub Copilot▾');
     dashboard.input.write('\x1b[Z');
     await dashboard.wait((frame) => !frame.includes('› Destinations'), 'focus returns to scope');
-    const userOptions = await press('\x1b[C', '│ Standard▾');
+    const userOptions = await changeScope('\x1b[B', 'User');
+    assert.ok(userOptions.includes('│ Standard▾'));
     assert.ok(!userOptions.includes('□ GitHub Copilot'));
-    await press('\x1b[D', '│ GitHub Copilot▾');
+    const projectOptions = await changeScope('\x1b[A', 'Project');
+    assert.ok(projectOptions.includes('│ GitHub Copilot▾'));
     await press('\t', '› Destinations');
     await press(' ', '› ✓ GitHub Copilot');
     await press('\t', '› [ Review install ]');
@@ -2225,21 +2256,23 @@ test('install options use kind defaults and block a scope with an inventory scan
   const actions = { catalogResources: [candidate] };
   const dimensions = { columns: 80, rows: 40 };
   const project = await captureDashboardFrame([], actions, ['b', '\r', '\r'], dimensions);
-  assert.ok(project.includes('SCOPE: PROJECT (instructions are project-scoped)'));
+  assert.ok(project.includes('│ Project ') && project.includes('Instructions are project-scoped.'));
+  assert.ok(!project.includes('Project▾') && !project.includes('Project▴'));
   assert.ok(project.includes('✓ GitHub Copilot'));
   assert.ok(project.includes('.github/instructions/'));
   assert.ok(project.includes('.claude/rules/'));
   assert.ok(!project.includes('□ Standard'));
   assert.ok(!project.includes('Mistral Vibe'));
-  assert.ok(!project.includes('│ USER │'));
+  assert.ok(!project.includes('User▾'));
   const user = await captureDashboardFrame(
     [],
     { catalogResources: [{ ...candidate, kind: 'agent' }] },
-    ['b', '\r', '\x1b[C', '\t', '\r'],
+    ['b', '\r', '\t', '\r'],
     dimensions,
     [{ scope: 'user', code: 'CATALOG_ERROR', message: 'Cannot read user inventory.' }],
   );
   assert.ok(user.includes('USER unavailable: CATALOG_ERROR'));
+  assert.ok(user.includes('│ User▾'));
   assert.ok(user.includes('~/.copilot/agents/'));
   assert.ok(!user.includes('Mistral Vibe'));
   assert.ok(!user.includes('[ Review install ]'));
@@ -2256,7 +2289,7 @@ test('destination menu opens above the field and scrolls at short terminal heigh
     await press('b', 'CATALOG RESOURCES');
     await press('\r', '│ Standard▾');
     await press('\t', '› Destinations');
-    Object.assign(dashboard.output, { columns: 38, rows: 11 });
+    Object.assign(dashboard.output, { columns: 38, rows: 10 });
     dashboard.output.emit('resize');
     await dashboard.wait((frame) => frame.includes('Pinned source audit required.'), 'compact install options');
     const open = await press('\r', '› ✓ Standard');

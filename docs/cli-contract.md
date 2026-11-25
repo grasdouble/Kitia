@@ -297,6 +297,11 @@ Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
+
+In the dashboard, new skill and agent installs default to **User**. Open
+**Scope** to choose **Project** instead. Instructions have a read-only Project
+scope. The CLI still defaults to project scope.
+
 In Install Options, **Destinations** looks like an Inventory filter but
 accepts multiple values. Open it with a click, `Enter`, or `Space`. Use the
 arrows to move through the menu and `Space` to toggle an

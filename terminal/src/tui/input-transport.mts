@@ -19,7 +19,8 @@ export type DashboardMouseTarget =
   | { type: 'modal-choice'; index: number }
   | { type: 'modal-option'; group: 'scope' | 'destination'; index: number }
   | { type: 'modal-review' }
-  | { type: 'modal-destinations'; action: 'toggle' | 'dismiss' | 'surface' }
+  | { type: 'modal-select'; action: 'toggle'; group: 'scope' | 'destination' }
+  | { type: 'modal-select'; action: 'dismiss' | 'surface' }
   | { type: 'row'; screen: DashboardSection; index: number }
   | { type: 'action'; action: string };
 
