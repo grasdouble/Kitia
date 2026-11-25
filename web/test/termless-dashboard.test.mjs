@@ -1413,8 +1413,8 @@ test(
       session.input.write('\t');
       await waitForGrid(
         session,
-        (grid) => grid.includes('│ REVIEW INSTALL │') && !grid.includes('› Destinations'),
-        'Tab moves from Destinations to Review install',
+        (grid) => grid.includes('│ VALIDATE │') && !grid.includes('› Destinations'),
+        'Tab moves from Destinations to Validate',
       );
       await press('\r', 'CONFIRM INSTALL');
       resizeDashboard(session, { columns: 72, rows: 18 });
@@ -1440,7 +1440,7 @@ test(
       resizeDashboard(session, terminalSize);
       await assertTableSurface(session, 'b', {
         selected: 'plan-review',
-        dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE'],
+        dismissed: ['INSTALL FAILED', 'ENTER / ESC CLOSE', 'INSTALL OPTIONS'],
       });
       session.input.write('q');
       assert.equal(await dashboardExit(session), false, 'quit retains the audit-blocked install result');

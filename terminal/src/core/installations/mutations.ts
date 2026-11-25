@@ -44,6 +44,7 @@ import {
   buildSourceSkillArgs,
   formatGhDiagnostics,
   describeGhFailure,
+  isGhOverwriteRequired,
   runGhSkillAsync,
 } from './gh-skill.js';
 import type { InstallationScope, PlanAction } from './model.js';
@@ -422,7 +423,7 @@ function* sourceUpdates(
       const status = typeof result === 'number' ? result : result.status;
       if (status !== 0) {
         const diagnostic = typeof result === 'number' ? '' : formatGhDiagnostics(result);
-        const ghForceRequired = /^Skills already installed: [^\r\n]+ \(Use --force to overwrite\)$/im.test(diagnostic);
+        const ghForceRequired = isGhOverwriteRequired(diagnostic);
         const cause = ghForceRequired
           ? 'GitHub CLI says this skill is already installed and requires --force to overwrite it.'
           : describeGhFailure(diagnostic);

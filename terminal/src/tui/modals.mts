@@ -21,6 +21,7 @@ type ModalContentLine = {
   selectedIndex?: number;
   focused?: boolean;
   selected?: boolean;
+  alignRight?: boolean;
   color?: string;
   borderColor?: string;
   selectInput?: { compact: boolean };
@@ -169,6 +170,7 @@ export function modalFrame(
       selectedIndex: row.selectedIndex,
       focused: row.focused,
       selected: row.selected,
+      alignRight: row.alignRight,
       color: row.color,
       bold: row.bold,
       dimColor: row.dimColor,
@@ -230,7 +232,8 @@ function ChoiceGroup({
 }) {
   const width = line.text.length;
   const borderColor = line.borderColor || semantic.accents.muted;
-  const contentWidth = Math.max(0, width - 3);
+  const rightBorder = line.alignRight ? ' │' : '│';
+  const contentWidth = Math.max(0, width - 2 - rightBorder.length);
   const buttonWidths = line.options.map((option) => choiceButtonWidth(option.label));
   const contentLength =
     line.label.length +
@@ -289,6 +292,8 @@ function ChoiceGroup({
       ),
     ];
   });
+  const space = ' '.repeat(padding);
+  const spacer = vertical([space, space, space], { color: MODAL_BACKGROUND }, padding);
   return h(
     Box,
     { ref: rowRef, width, height: 3, flexDirection: 'row' },
@@ -298,9 +303,10 @@ function ChoiceGroup({
       { color: semantic.accents.label },
       line.label.length,
     ),
+    line.alignRight ? spacer : null,
     ...options,
-    vertical([' '.repeat(padding), ' '.repeat(padding), ' '.repeat(padding)], { color: MODAL_BACKGROUND }, padding),
-    vertical(['│', '│', '│'], { color: borderColor }, 1),
+    line.alignRight ? null : spacer,
+    vertical([rightBorder, rightBorder, rightBorder], { color: borderColor }, rightBorder.length),
   );
 }
 

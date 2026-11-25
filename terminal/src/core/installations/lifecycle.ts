@@ -27,6 +27,7 @@ import {
   runGhSkillAsync,
   formatGhDiagnostics,
   describeGhFailure,
+  isGhOverwriteRequired,
 } from './gh-skill.js';
 import type { InstallationScope, PlanAction } from './model.js';
 import {
@@ -451,7 +452,10 @@ function runSourceOperation(
       const status = typeof result === 'number' ? result : result.status;
       if (status !== 0) {
         const diagnostic = typeof result === 'number' ? '' : formatGhDiagnostics(result);
-        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${id}: gh exited with status ${status}. ${describeGhFailure(diagnostic)}${partial}`;
+        const cause = isGhOverwriteRequired(diagnostic)
+          ? 'A skill with this name already has a local destination. Inspect the folder and move it aside to preserve its contents before retrying.'
+          : describeGhFailure(diagnostic);
+        const userMessage = `Could not install ${catalogLabel(resource)} skill ${resource.id} for ${id}: gh exited with status ${status}. ${cause}${partial}`;
         throw new CatalogError(
           `${userMessage}${diagnostic ? ` gh diagnostic: ${diagnostic}` : ''}`,
           'GH_INSTALL_FAILED',
