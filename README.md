@@ -2,7 +2,7 @@
 
 Your AI toolkit, in good hands.
 
-Kitia is a terminal user interface (TUI) for discovering and managing skills, agents, and instructions from external GitHub repositories. Install skills in the shared `.agents/skills/` directory or in dedicated locations for GitHub Copilot and Claude Code. Its interactive dashboard is the primary interface; the CLI supports automation and scripted workflows. Catalog metadata stays on your machine; resource content remains in its upstream repository.
+Kitia is a terminal user interface (TUI) for discovering and managing skills, agents, and instructions from external GitHub repositories. Install skills in the shared `.agents/skills/` directory or in dedicated locations for GitHub Copilot, Claude Code, and Mistral Vibe. Its interactive dashboard is the primary interface; the CLI supports automation and scripted workflows. Catalog metadata stays on your machine; resource content remains in its upstream repository.
 
 **[Project website](https://grasdouble.github.io/Kitia/)** · **[CLI contract](docs/cli-contract.md)**
 

@@ -2106,11 +2106,18 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
       (frame) => frame.includes('[x] Claude Code'),
       'Claude selected alongside the Standard default',
     );
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'modal-option' && target.group === 'destination',
+      '[ ] Mistral Vibe',
+    );
+    await dashboard.wait((frame) => frame.includes('[x] Mistral Vibe'), 'Mistral Vibe selected');
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-review', '[ Review install ]');
     const confirmation = await dashboard.wait((frame) => frame.includes('CONFIRM INSTALL'), 'install confirmation');
     assert.ok(confirmation.includes('Selected paths (user):'));
     assert.ok(confirmation.includes('• .agents/skills/candidate-two/SKILL.md'));
     assert.ok(confirmation.includes('• .claude/skills/candidate-two/SKILL.md'));
+    assert.ok(confirmation.includes('• .vibe/skills/candidate-two/SKILL.md'));
     assert.ok(!confirmation.includes('• .copilot/skills/candidate-two/SKILL.md'));
     clickAt(dashboard.input, browseTab);
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 1, '│ INSTALL │');
@@ -2125,7 +2132,7 @@ test('mouse selects rendered resources, destination checkboxes, and install conf
         scope: options.scope,
         destinations: options.destinations,
       })),
-      [{ operation: 'install', id: 'candidate-two', scope: 'user', destinations: ['standard', 'claude'] }],
+      [{ operation: 'install', id: 'candidate-two', scope: 'user', destinations: ['standard', 'claude', 'mistral'] }],
     );
   } finally {
     await dashboard.stop();
@@ -2198,6 +2205,7 @@ test('install options use kind defaults and block a scope with an inventory scan
   assert.ok(project.includes('.github/instructions/review.instructions.md'));
   assert.ok(project.includes('.claude/rules/review.md'));
   assert.ok(!project.includes('[ ] Standard'));
+  assert.ok(!project.includes('Mistral Vibe'));
   assert.ok(!project.includes('│ USER │'));
   const user = await captureDashboardFrame(
     [],
@@ -2208,6 +2216,7 @@ test('install options use kind defaults and block a scope with an inventory scan
   );
   assert.ok(user.includes('USER unavailable: CATALOG_ERROR'));
   assert.ok(user.includes('.copilot/agents/review.agent.md'));
+  assert.ok(!user.includes('Mistral Vibe'));
   assert.ok(!user.includes('[ Review install ]'));
 });
 

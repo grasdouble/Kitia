@@ -20,6 +20,9 @@ test('finds unmanaged Markdown skills and ignores tracked paths', () => {
     path.join(root, '.agents/skills/demo/SKILL.md'),
     '---\nname: Demo\ndescription: Demo skill\n---\nBody\n',
   );
+  const vibeSkill = '.vibe/skills/vibe-demo/SKILL.md';
+  fs.mkdirSync(path.dirname(path.join(root, vibeSkill)), { recursive: true });
+  fs.writeFileSync(path.join(root, vibeSkill), '---\nname: vibe-demo\ndescription: Vibe skill\n---\nBody\n');
   fs.mkdirSync(path.join(root, '.claude/agents'), { recursive: true });
   fs.writeFileSync(
     path.join(root, '.claude/agents/review.agent.md'),
@@ -28,6 +31,9 @@ test('finds unmanaged Markdown skills and ignores tracked paths', () => {
   const found = findUnmanagedArtifacts(root);
   assert.ok(found.some(({ kind, id }) => kind === 'skill' && id === 'demo'));
   assert.ok(found.some(({ kind, id }) => kind === 'agent' && id === 'review'));
-  const skillFile = '.agents/skills/demo/SKILL.md';
-  assert.ok(!findUnmanagedArtifacts(root, new Set([skillFile])).some(({ kind }) => kind === 'skill'));
+  const remaining = findUnmanagedArtifacts(root, new Set(['.agents/skills/demo/SKILL.md']));
+  assert.deepEqual(
+    remaining.filter(({ kind }) => kind === 'skill').map(({ id, paths }) => [id, paths]),
+    [['vibe-demo', [vibeSkill]]],
+  );
 });

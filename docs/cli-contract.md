@@ -66,11 +66,14 @@ default to `standard`; agents and instructions default to `copilot`.
 | `standard` | `.agents/skills/` / `~/.agents/skills/` | — | — |
 | `copilot` | `.github/skills/` / `~/.copilot/skills/` | `.github/agents/<id>.agent.md` / `~/.copilot/agents/<id>.agent.md` | `.github/instructions/<id>.instructions.md` |
 | `claude` | `.claude/skills/` / `~/.claude/skills/` | `.claude/agents/<id>.md` / `~/.claude/agents/<id>.md` | `.claude/rules/<id>.md` |
+| `mistral` | `.vibe/skills/` / `~/.vibe/skills/` | — | — |
 
 Repeat `--destination` on `install` to request multiple copies, for example
 `--destination standard --destination claude`. Each shared skill copy serves
-clients that discover `.agents/skills/`; Kitia does not add dedicated copies
-unless selected. `--tool` and `both` are no longer accepted. For old skill
+clients that discover `.agents/skills/`, including Mistral Vibe. Choose
+`--destination mistral` only when you want a dedicated Vibe copy. Kitia uses
+the default Vibe directories shown above, independent of `VIBE_HOME`.
+`--tool` and `both` are no longer accepted. For old skill
 commands, replace `--tool copilot` with `--destination standard` and
 `--tool both` with `--destination standard --destination claude`. For agents
 and instructions, use `--destination copilot` or

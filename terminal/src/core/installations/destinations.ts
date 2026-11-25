@@ -32,6 +32,10 @@ const destinations = {
       instruction: { project: '.claude/rules', instructionScope: 'paths' },
     },
   },
+  mistral: {
+    label: 'Mistral Vibe',
+    locations: { skill: { project: '.vibe/skills', user: '.vibe/skills' } },
+  },
 } satisfies Record<string, DestinationDefinition>;
 
 export type InstallationDestination = keyof typeof destinations;

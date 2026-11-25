@@ -186,6 +186,8 @@ test('packaged CLI dry runs plan distinct skill destinations in both scopes', ()
         '--destination',
         'claude',
         '--destination',
+        'mistral',
+        '--destination',
         'copilot',
         '--dry-run',
         '--json',
@@ -194,7 +196,7 @@ test('packaged CLI dry runs plan distinct skill destinations in both scopes', ()
     );
     assert.equal(result.status, 0, result.stdout || result.stderr);
     assertSchema(validateReport, result.json);
-    const directories = ['.agents/skills', copilot, '.claude/skills'];
+    const directories = ['.agents/skills', copilot, '.claude/skills', '.vibe/skills'];
     assert.deepEqual(
       result.json.actions.map((action) => action.path),
       directories.map((dir) => `${dir}/demo/SKILL.md`),
@@ -217,6 +219,14 @@ test('packaged CLI rejects destinations unsupported for the requested kind, scop
     [
       ['install', 'agent', 'demo-agent', '--destination', 'standard', '--dry-run'],
       /Destination 'standard' does not support agents in project scope/,
+    ],
+    [
+      ['install', 'agent', 'demo-agent', '--destination', 'mistral', '--dry-run'],
+      /Destination 'mistral' does not support agents in project scope/,
+    ],
+    [
+      ['install', 'instruction', 'demo-rule', '--destination', 'mistral', '--dry-run'],
+      /Destination 'mistral' does not support instructions in project scope/,
     ],
     [
       ['install', 'instruction', 'demo-rule', '--scope', 'user', '--destination', 'claude', '--dry-run'],
@@ -315,7 +325,7 @@ test('top-level help and doctor network probes use the executable argument contr
   const help = invoke(['--help'], { parseJson: false });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Usage:/);
-  assert.match(help.stdout, /--destination <standard\|copilot\|claude>.*repeat/);
+  assert.match(help.stdout, /--destination <[^>]+\bmistral\b>.*repeat/);
   assert.doesNotMatch(help.stdout, /--tool\b/);
 
   writeCatalog('Fixture', 'example/catalog', [fixtureResource]);

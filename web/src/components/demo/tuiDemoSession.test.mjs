@@ -23,7 +23,14 @@ test('all supported kind, scope, and destination selections retain paths and met
     for (const scope of ['project', 'user']) {
       const selections =
         kind === 'skill'
-          ? [undefined, ['standard'], ['copilot'], ['claude'], ['standard', 'copilot', 'claude']]
+          ? [
+              undefined,
+              ['standard'],
+              ['copilot'],
+              ['claude'],
+              ['mistral'],
+              ['standard', 'copilot', 'claude', 'mistral'],
+            ]
           : [undefined, ['copilot'], ['claude'], ['copilot', 'claude']];
       for (const destinations of selections) {
         const session = createTuiDemoSession();
@@ -50,6 +57,7 @@ test('all supported kind, scope, and destination selections retain paths and met
                 standard: `.agents/skills/${id}/SKILL.md`,
                 copilot: `${copilotDirectory}/skills/${id}/SKILL.md`,
                 claude: `.claude/skills/${id}/SKILL.md`,
+                mistral: `.vibe/skills/${id}/SKILL.md`,
               }
             : kind === 'agent'
               ? { copilot: `${copilotDirectory}/agents/${id}.agent.md`, claude: `.claude/agents/${id}.md` }

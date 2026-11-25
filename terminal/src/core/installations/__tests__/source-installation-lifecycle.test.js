@@ -528,11 +528,13 @@ test('an explicit skill ref is installed and recorded without changing the catal
   );
 });
 
-for (const [scope, copilotDirectory] of [
-  ['project', '.github/skills'],
-  ['user', '.copilot/skills'],
+for (const [scope, destination, directory] of [
+  ['project', 'copilot', '.github/skills'],
+  ['user', 'copilot', '.copilot/skills'],
+  ['project', 'mistral', '.vibe/skills'],
+  ['user', 'mistral', '.vibe/skills'],
 ]) {
-  test(`adds the dedicated Copilot skill in ${scope} without taking ownership of other copies`, () => {
+  test(`adds the dedicated ${destination} skill in ${scope} without taking ownership of other copies`, () => {
     const target = fs.realpathSync(makeTemporaryDirectory('kitia-skill-destinations-'));
     const resource = {
       catalog: 'team-alpha',
@@ -544,7 +546,7 @@ for (const [scope, copilotDirectory] of [
       license_status: 'MIT',
     };
     const standard = '.agents/skills/demo/SKILL.md';
-    const copilot = `${copilotDirectory}/demo/SKILL.md`;
+    const dedicated = `${directory}/demo/SKILL.md`;
     const unmanaged = '.claude/skills/demo/SKILL.md';
     const body = (ref) =>
       `---\nname: demo\ndescription: A fixture skill.\nmetadata:\n  github-repo: ${resource.source_repository}\n  github-path: ${resource.source_path}\n  github-pinned: ${ref}\n---\nSkill body at ${ref}.\n`;
@@ -590,20 +592,20 @@ for (const [scope, copilotDirectory] of [
       write(file, body(args[args.indexOf('--pin') + 1]));
       return 0;
     };
-    runSourceOperation({ action: 'install', target, scope, resource, destinations: ['copilot'] }, invoke);
-    assert.deepEqual(seen, [copilot]);
+    runSourceOperation({ action: 'install', target, scope, resource, destinations: [destination] }, invoke);
+    assert.deepEqual(seen, [dedicated]);
     assert.deepEqual(paths(), [
       ['standard', standard],
-      ['copilot', copilot],
+      [destination, dedicated],
     ]);
     assert.equal(fs.readFileSync(path.join(target, standard), 'utf8'), body(resource.source_ref));
     const next = { ...resource, source_ref: 'b'.repeat(40) };
     updateSourceResources(readInstalledSourceSkills(target, [next]), target, { scope }, invoke);
-    assert.deepEqual(seen, [copilot, standard, copilot]);
+    assert.deepEqual(seen, [dedicated, standard, dedicated]);
     assert.equal(fs.readFileSync(path.join(target, unmanaged), 'utf8'), body(resource.source_ref));
     uninstallSourceResource(next, target);
     assert.equal(fs.existsSync(path.join(target, standard)), false);
-    assert.equal(fs.existsSync(path.join(target, copilot)), false);
+    assert.equal(fs.existsSync(path.join(target, dedicated)), false);
     assert.equal(fs.readFileSync(path.join(target, unmanaged), 'utf8'), body(resource.source_ref));
   });
 }
