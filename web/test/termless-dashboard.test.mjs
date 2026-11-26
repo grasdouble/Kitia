@@ -283,7 +283,8 @@ async function assertShortcutsFrame(session, hints) {
   await assertSeparatedHeader(session, 'SHORTCUTS', hints[0]);
 }
 
-const inventoryIds = ['ask-matt', 'unmanaged', 'grill-me'];
+const inventoryIds = ['ask-matt', 'grill-me'];
+const allInventoryIds = ['ask-matt', 'unmanaged', 'grill-me'];
 const catalogIds = ['ask-matt', 'grill-me', 'plan-review', 'release-helper', 'review-guide'];
 const sectionNavigationHints = ['I Inventory', 'B Browse resources', 'M Manage catalogs'];
 const screenShortcutHints = {
@@ -552,10 +553,9 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
       inventory.entries.map(({ line }) => line.trim().split(/\s{2,}/)),
       [
         ['›', 'ask-matt', 'skill', 'project', 'Current'],
-        ['unmanaged', 'skill', 'user', 'Unmanaged'],
         ['grill-me', 'skill', 'user', 'Current'],
       ],
-      'all three deterministic inventory rows show their resource, kind, scope and status',
+      'the initial Inventory shows only the managed rows with resource, kind, scope and status',
     );
     assert.match(inventory.grid, /│PROJECT\s+1│\s+│USER\s+2│\s+│UPDATES\s+0│/);
     const detail = assertWorkspaceDetail(inventory, 'ask-matt', true);
@@ -661,10 +661,9 @@ test('Termless xterm consumes the real Ink dashboard and its stream-driven state
 });
 
 const layoutSizes = [terminalSize, { columns: 72, rows: 45 }, { columns: 120, rows: 36 }, terminalSize];
-const licensedInventoryIds = ['ask-matt', 'grill-me'];
 
 for (const [name, key, nextId] of [
-  ['Inventory', '', 'unmanaged'],
+  ['Inventory', '', 'grill-me'],
   ['Browse', 'b', 'grill-me'],
 ]) {
   test(
@@ -714,14 +713,7 @@ for (const [name, key, nextId] of [
           assertWorkspaceDetail(await assertTableSurface(session, key, viewport), 'ask-matt', size.columns === 120);
         }
         session.input.write('\x1b[B');
-        const nextHints = key
-          ? screenShortcutHints[key]
-          : screenShortcutHints[key].map((hint) => (hint === 'Delete uninstall' ? 'Delete remove' : hint));
-        assertWorkspaceDetail(
-          await assertTableSurface(session, key, { selected: nextId, hints: nextHints }),
-          nextId,
-          true,
-        );
+        assertWorkspaceDetail(await assertTableSurface(session, key, { selected: nextId }), nextId, true);
         assertSelectedRow(session, nextId);
         session.input.write('\x1b[A');
         const returned = assertWorkspaceDetail(await assertTableSurface(session, key), 'ask-matt', true);
@@ -758,16 +750,15 @@ for (const [name, key, nextId] of [
           session.input.write('\x1b');
           await assertTableSurface(session, key, { dismissed: ['TYPE to search'] });
           session.input.write('l');
-          await assertTableSurface(session, key, { license: 'MIT', ids: licensedInventoryIds });
+          await assertTableSurface(session, key, { license: 'MIT' });
           session.input.write('f');
-          await assertTableSurface(session, key, { license: 'MIT', ids: licensedInventoryIds, editing: true });
+          await assertTableSurface(session, key, { license: 'MIT', editing: true });
           session.input.write('grill-me');
           await assertTableSurface(session, key, { license: 'MIT', query: 'grill-me', editing: true });
           assertSelectedRow(session, 'grill-me');
           session.input.write('\x1b');
           await assertTableSurface(session, key, {
             license: 'MIT',
-            ids: licensedInventoryIds,
             dismissed: ['TYPE to search'],
           });
           session.input.write('l');
@@ -1538,6 +1529,8 @@ test(
         await waitForInkOutput(session, expected, start, 1500);
         return waitForGrid(session, (grid) => grid.includes(expected), `${JSON.stringify(key)} displays ${expected}`);
       };
+      await press('h', 'Shown▾');
+      await waitForInventory('the narrow Inventory shows unmanaged resources');
       const openLocal = async (id, marker, auditMarkers = []) => {
         await press('f', 'TYPE to search');
         session.input.write('\x1b');
@@ -1988,13 +1981,13 @@ test('Termless Catalog Catalog/Kind/License filters match visible candidates', {
     session = await launchShowcaseDashboard(directory, { catalogResourcesOverride: resources });
     await assertTableSurface(session, '');
     session.input.write('l');
-    await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds });
+    await assertTableSurface(session, '', { license: 'MIT' });
     session.input.write('f');
-    await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds, editing: true });
+    await assertTableSurface(session, '', { license: 'MIT', editing: true });
     session.input.write('grill-me');
     await assertTableSurface(session, '', { license: 'MIT', query: 'grill-me', editing: true });
     session.input.write('\x1b');
-    await assertTableSurface(session, '', { license: 'MIT', ids: licensedInventoryIds, dismissed: ['TYPE to search'] });
+    await assertTableSurface(session, '', { license: 'MIT', dismissed: ['TYPE to search'] });
     session.input.write('l');
     await assertTableSurface(session, '');
     session.input.write('b');
@@ -2190,9 +2183,16 @@ test(
         visible: ['ask-matt'],
         dismissed: ['CONFIRM UNINSTALL', 'Y/N SHORTCUTS'],
       });
+      session.input.write('h');
+      await assertTableSurface(session, '', { ids: allInventoryIds, visible: ['ask-matt'] });
       session.input.write('\x1b[B');
       const hints = screenShortcutHints[''].map((hint) => (hint === 'Delete uninstall' ? 'Delete remove' : hint));
-      await assertTableSurface(session, '', { selected: 'unmanaged', visible: ['unmanaged'], hints });
+      await assertTableSurface(session, '', {
+        ids: allInventoryIds,
+        selected: 'unmanaged',
+        visible: ['unmanaged'],
+        hints,
+      });
       assertSelectedRow(session, 'unmanaged');
 
       session.input.write('\x1b[3~');
@@ -2227,13 +2227,14 @@ test(
       resizeDashboard(session, { columns, rows });
       finishAction();
       await assertTableSurface(session, '', {
+        ids: allInventoryIds,
         selected: 'unmanaged',
         visible: ['unmanaged'],
         hints,
         dismissed: ['LOADING', 'CONFIRM PERMANENT REMOVAL'],
       });
       resizeDashboard(session, { columns: 120, rows: 55 });
-      await assertTableSurface(session, '', { selected: 'unmanaged', hints });
+      await assertTableSurface(session, '', { ids: allInventoryIds, selected: 'unmanaged', hints });
       session.input.write('\x1b[6~');
       await waitForGrid(
         session,

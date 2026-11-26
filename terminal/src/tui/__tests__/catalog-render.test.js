@@ -481,7 +481,7 @@ test('dashboard colors rows by kind and selection in ANSI', async () => {
     for (const [component, props] of [
       [CatalogScreen, { candidates: resources, resources: [], catalogs: [],
         licenseFilter: "all", controls: { columns: 120, section: "browse", focus: "list", query: "", searchActive: false, filters: [], actions: [] } }],
-      [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true,
+      [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true, showUnmanaged: true,
         controls: { columns: 120, section: "inventory", focus: "list", query: "", searchActive: false, filters: [], actions: [] } }],
     ]) {
       for (let selectedIndex = 0; selectedIndex < resources.length; selectedIndex++) {
@@ -916,6 +916,60 @@ test('dashboard keyboard focus follows Search, Kind, Catalog, and License contro
   }
 });
 
+test('Inventory can hide and restore unmanaged copies without changing inventory totals or search', async () => {
+  const kindsAndScopes = [
+    ['skill', 'project'],
+    ['skill', 'user'],
+    ['agent', 'project'],
+    ['agent', 'user'],
+    ['instruction', 'project'],
+  ];
+  const resources = kindsAndScopes.flatMap(([kind, scope]) =>
+    [true, false].map((managed) => ({
+      kind,
+      scope,
+      managed,
+      status: managed ? 'current' : 'unmanaged',
+      catalog: managed ? 'toolkit' : '-',
+      id: `${managed ? 'tracked' : 'local'}-${kind.slice(0, 3)}-${scope}`,
+    })),
+  );
+  const dashboard = await startInteractiveDashboard(resources);
+  const hasResults = (count) => (frame) => new RegExp(`\\b${count} results`).test(frame);
+  try {
+    const hidden = await dashboard.wait(
+      (frame) => frame.includes('Hidden▾') && hasResults(5)(frame),
+      'only tracked artifacts are shown by default',
+    );
+    assert.match(hidden, /Inventory 10\b/);
+    for (const { id, managed } of resources) assert.equal(hidden.includes(id), managed, id);
+
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'filter-open' && target.filter === 'unmanaged',
+      'Hidden',
+    );
+    await dashboard.wait((frame) => frame.includes('✓ Hidden'), 'Unmanaged selector opens');
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'filter-option' && target.filter === 'unmanaged' && target.value === 'Shown',
+      'Shown',
+    );
+    const shown = await dashboard.wait(hasResults(10), 'the selector restores all artifacts');
+    for (const { id } of resources) assert.ok(shown.includes(id), id);
+    dashboard.input.write('f');
+    await dashboard.wait((frame) => frame.includes('TYPE to search'), 'Inventory search is active');
+    dashboard.input.write('local-');
+    await dashboard.wait((frame) => frame.includes('local-▏') && hasResults(5)(frame), 'search finds the local copies');
+    dashboard.input.write('\r');
+    await dashboard.wait((frame) => !frame.includes('TYPE to search') && hasResults(5)(frame), 'search is committed');
+    dashboard.input.write('h');
+    await dashboard.wait((frame) => frame.includes('Hidden▾') && hasResults(0)(frame), 'visibility intersects search');
+  } finally {
+    await dashboard.stop();
+  }
+});
+
 test('filter popovers stay anchored, preserve the committed choice, and accept pointer selection', async () => {
   const resources = [
     {
@@ -1193,7 +1247,7 @@ test('narrow inventory preserves direct C/K/L filters and visible control focus'
     await dashboard.stop();
   }
 });
-test('tabs, bordered filters, and menus stay clickable across responsive widths', async () => {
+test('tabs, compact and boxed filters, and menus stay clickable across responsive widths', async () => {
   const resources = [
     {
       catalog: 'alpha',
@@ -1259,7 +1313,7 @@ test('tabs, bordered filters, and menus stay clickable across responsive widths'
       }
       assert.ok(
         ['Search resources…', 'All kinds', 'All catalogs', 'All licenses'].every((value) => frame.includes(value)),
-        `bordered input values remain visible at ${dimensions.columns} columns`,
+        `input values remain visible at ${dimensions.columns} columns`,
       );
       const labels = ['Search', 'Kind', 'Catalog', 'License'].map((label) => {
         const row = frame.split(/\r?\n/).findIndex((line) => new RegExp(`\\b${label}\\b`).test(line));
@@ -1272,27 +1326,30 @@ test('tabs, bordered filters, and menus stay clickable across responsive widths'
         'focus and visual order stays Search, Kind, Catalog, License',
       );
 
-      for (const rowOffset of [-1, 0, 1]) {
+      const { row, column } = renderedTextCell(frame, 'Search resources');
+      const lines = frame.split(/\r?\n/);
+      const filterRows = [-1, 0, 1].filter((offset) => offset === 0 || lines[row + offset]?.[column] === '─');
+      for (const rowOffset of filterRows) {
         clickRenderedButtonRow(
           dashboard,
           (target) => target.type === 'focus' && target.focus === 'search',
           'Search resources',
           rowOffset,
         );
-        await dashboard.wait((next) => next.includes('▏'), `Search border row ${rowOffset} receives focus`);
+        await dashboard.wait((next) => next.includes('▏'), `Search field row ${rowOffset} receives focus`);
         dashboard.input.write('\u001b');
-        await dashboard.wait((next) => !next.includes('▏'), `Search border row ${rowOffset} releases focus`);
+        await dashboard.wait((next) => !next.includes('▏'), `Search field row ${rowOffset} releases focus`);
       }
-      for (const rowOffset of [-1, 0, 1]) {
+      for (const rowOffset of filterRows) {
         clickRenderedButtonRow(
           dashboard,
           (target) => target.type === 'filter-open' && target.filter === 'catalog',
           'All catalogs',
           rowOffset,
         );
-        await dashboard.wait((next) => next.includes('✓ All catalogs'), `Catalog border row ${rowOffset} opens menu`);
+        await dashboard.wait((next) => next.includes('✓ All catalogs'), `Catalog field row ${rowOffset} opens menu`);
         dashboard.input.write('\u001b');
-        await dashboard.wait((next) => !next.includes('✓ All catalogs'), `Catalog border row ${rowOffset} closes menu`);
+        await dashboard.wait((next) => !next.includes('✓ All catalogs'), `Catalog field row ${rowOffset} closes menu`);
       }
       clickRenderedTarget(
         dashboard,
@@ -1557,7 +1614,7 @@ test('Inventory lists the matching destinations for managed and unmanaged artifa
       managed: false,
     },
   ]) {
-    const frame = await captureDashboardFrame([{ id, kind, scope, paths, managed }], {}, [], {
+    const frame = await captureDashboardFrame([{ id, kind, scope, paths, managed }], {}, managed ? [] : ['h'], {
       columns: 120,
       rows: 48,
     });
@@ -1875,13 +1932,13 @@ test('Inventory detail paging reveals every metadata field at narrow and short s
       );
       assert.ok(frame.includes('Pager replacement'));
 
-      for (let index = 0; index < 6; index += 1) {
-        dashboard.input.write('\t');
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-      const actionFocusFrame = dashboard.frame();
+      const actionFocusFrame = detailBodyText(frame);
+      dashboard.input.write('\x1b[Z');
       dashboard.input.write('\u001b[5~');
-      await dashboard.wait((next) => next !== actionFocusFrame, 'PageUp scrolls while contextual actions retain focus');
+      await dashboard.wait(
+        (next) => detailBodyText(next) !== actionFocusFrame,
+        'PageUp scrolls while contextual actions retain focus',
+      );
       dashboard.input.write('\r');
       await dashboard.wait(
         (next) => next.includes('CONFIRM UPDATE'),
@@ -2479,6 +2536,8 @@ test('Inventory Remove button accepts the production xterm cell click', async ()
     { columns: 159, rows: 48 },
   );
   try {
+    dashboard.input.write('h');
+    await dashboard.wait((frame) => frame.includes('Remove') && frame.includes('local-testing'), 'local skill shown');
     const position = clickRenderedTarget(
       dashboard,
       (target) => target.type === 'action' && target.action === 'remove',
@@ -2706,6 +2765,11 @@ test('mouse preserves cancel and two-stage unmanaged removal confirmations', asy
     { columns: 40, rows: 36 },
   );
   try {
+    dashboard.input.write('h');
+    await dashboard.wait(
+      (frame) => frame.includes('Shown▾') && frame.includes('orphan'),
+      'unmanaged skill shown before opening removal',
+    );
     clickRenderedTarget(dashboard, (target) => target.type === 'action' && target.action === 'remove', 'Remove');
     await dashboard.wait((frame) => frame.includes('CONFIRM REMOVE'), 'first unmanaged removal confirmation');
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 0, 'CANCEL');

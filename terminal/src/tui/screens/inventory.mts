@@ -51,6 +51,7 @@ export function InventoryScreen({
   catalogFilter,
   kindFilter,
   licenseFilter = 'all',
+  showUnmanaged,
   selectedIndex,
   versionLabel,
   actionMessage,
@@ -71,6 +72,7 @@ export function InventoryScreen({
   catalogFilter: string;
   kindFilter: string;
   licenseFilter: string;
+  showUnmanaged: boolean;
   selectedIndex: number;
   versionLabel: string;
   actionMessage: string;
@@ -93,6 +95,7 @@ export function InventoryScreen({
     userCatalogs,
     inventoryLabels,
     licenseFilter,
+    showUnmanaged,
   );
   const activeIndex = Math.min(selectedIndex, Math.max(0, visible.length - 1));
   const selected = visible[activeIndex];
@@ -117,7 +120,7 @@ export function InventoryScreen({
                   : []),
                 ...(canExecute && selected ? [selected.managed === false ? 'Delete remove' : 'Delete uninstall'] : []),
               ],
-              Filters: ['F filter', ...(resources.length ? ['C catalog', 'K kind', 'L license'] : [])],
+              Filters: ['F filter', ...(resources.length ? ['C catalog', 'K kind', 'L license'] : []), 'H unmanaged'],
               Display: ['? guide', 'D details'],
               Navigation: [...sectionNavigationHints, '↑↓ navigate', 'Q quit'],
             },
@@ -333,6 +336,7 @@ export function InventoryScreen({
       catalogFilter,
       kindFilter,
       licenseFilter,
+      showUnmanaged,
       columns,
       rows,
       showDetails,

@@ -87,7 +87,7 @@ export function resourceBrowserPlan({
   let toolbarActionRows = 0;
   if (actionRows) {
     workspaceLayout = layoutWorkspace(true, actionRows);
-    if (actionRows > workspaceLayout.detailsRows || workspaceHeight < minimumWorkspaceHeight) {
+    if (workspaceLayout.detailsContentRows < 4 || workspaceHeight < minimumWorkspaceHeight) {
       controlsState = { ...controlsState, compactActions: true };
       actionRows = dashboardActionButtonRows(controlsState, detailsContentWidth);
       workspaceLayout = layoutWorkspace(true, actionRows);

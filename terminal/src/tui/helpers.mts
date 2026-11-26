@@ -348,9 +348,11 @@ export function filterInventory(
   catalogs: InventoryCatalogConfiguration[] = [],
   precomputedLabels?: Map<CatalogResource, string>,
   licenseFilter = 'all',
+  showUnmanaged = true,
 ): CatalogResource[] {
   const labels = precomputedLabels || inventoryCatalogLabels(resources, catalogs);
   return resources.filter((resource) => {
+    if (!showUnmanaged && resource.managed === false) return false;
     const resourceCatalog = labels.get(resource) || catalogLabel(resource);
     if (catalogFilter !== 'all' && resourceCatalog !== catalogFilter) return false;
     if (kindFilter !== 'all' && resource.kind !== kindFilter) return false;

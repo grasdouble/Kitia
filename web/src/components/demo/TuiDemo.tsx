@@ -37,6 +37,7 @@ const actionKeys = [
   ['C', 'Catalog filter'],
   ['K', 'Kind filter'],
   ['L', 'License filter'],
+  ['H', 'Toggle unmanaged artifacts'],
   ['D', 'Toggle details'],
   ['E', 'Edit catalog'],
   ['R', 'Refresh catalogs'],

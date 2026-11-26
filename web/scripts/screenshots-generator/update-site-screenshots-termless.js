@@ -215,7 +215,10 @@ async function main(args) {
     session = await launchShowcaseDashboard(temporaryDirectory, { versionLabel: kitiaVersion });
     const staged = captures.map(({ png }) => path.join(temporaryDirectory, png));
 
-    const inventoryAnsi = await waitForInkOutput(session, 'B Browse resources');
+    await waitForInkOutput(session, 'B Browse resources');
+    const inventoryStart = session.rawBytes().length;
+    session.input.write('h');
+    const inventoryAnsi = await waitForInkOutput(session, '3 results', inventoryStart);
     await session.flushTerminal();
     const inventoryGrid = session.terminal.screen.getText();
     await fs.writeFile(staged[0], await screenshotTermlessTerminal(session.terminal));
