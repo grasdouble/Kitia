@@ -6,6 +6,7 @@ Browse and manage resources in a local browser session
   - **User-Facing**
     - Run `kitia web` to view your project and user inventories in the browser.
     - Search and filter installed resources, review their metadata, and preview and audit the files on disk.
+    - Show or hide unmanaged resources without changing inventory totals. They are hidden by default in both scopes.
     - Browse catalog resources, inspect pinned source files with audit results, and read their GitHub commit histories.
     - Install pinned skills, agents, and instructions after reviewing the scope and destinations, then see the updated inventory.
     - Update and uninstall tracked resources. Removing unmanaged files requires two confirmations.

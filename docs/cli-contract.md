@@ -53,7 +53,10 @@ unless `--no-open` is supplied. Keep the URL private. The project is fixed to
 the working directory at launch, and the user scope is the user's home
 directory. Press `Ctrl+C` to stop. The browser inventory supports search,
 kind/catalog/license filters, installation details, and read-only preview and
-audit of installed skills, agents, and instructions. **Browse resources**
+audit of installed skills, agents, and instructions. Unmanaged resources are
+hidden by default in both scopes. Select **Show unmanaged resources** to include
+them in the list and search results without changing inventory totals.
+**Browse resources**
 searches the configured catalog indexes and opens the pinned source files,
 their entry-file audit, and the GitHub commit history. Catalog previews require
 access to the configured source; skill previews and revision history use the

@@ -17,6 +17,7 @@ type SessionInventory = InventoryWorkspace & { targets: InstallationTargets };
 function App() {
   const [section, setSection] = useState<'inventory' | 'browse' | 'catalogs'>('inventory');
   const [scope, setScope] = useState<InstallationScope>('project');
+  const [showUnmanaged, setShowUnmanaged] = useState(false);
   const [data, setData] = useState<{ snapshot: SessionInventory; token: string; info: SessionInfo }>();
   const [guide, setGuide] = useState<number>();
   const [guideError, setGuideError] = useState<string>();
@@ -152,6 +153,8 @@ function App() {
             scope={scope}
             target={data.snapshot.targets[scope]}
             token={data.token}
+            showUnmanaged={showUnmanaged}
+            onShowUnmanagedChange={setShowUnmanaged}
             onChanged={refreshInventory}
           />
         </>

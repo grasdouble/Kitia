@@ -97,6 +97,14 @@ button[aria-pressed='true'], tr[data-selected='true'] {
   box-sizing: border-box;
 }
 
+.inventory-visibility {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
+  margin-block-end: 1rem;
+}
+
 .workspace, .inspection-layout {
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   align-items: start;

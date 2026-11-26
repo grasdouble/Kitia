@@ -70,12 +70,16 @@ export function Inventory({
   scope,
   target,
   token,
+  showUnmanaged,
+  onShowUnmanagedChange,
   onChanged,
 }: {
   data: InventoryWorkspace;
   scope: InstallationScope;
   target: string;
   token: string;
+  showUnmanaged: boolean;
+  onShowUnmanagedChange: (show: boolean) => void;
   onChanged: (inventory: InventorySnapshot) => void;
 }) {
   const { filters, set } = useResourceFilters();
@@ -98,8 +102,11 @@ export function Inventory({
     catalogs,
     labels,
     filters.license,
+    showUnmanaged,
   );
   const selected = visible.find((resource) => resourceKey(resource) === selection) ?? visible[0];
+  const onlyHiddenResources =
+    !showUnmanaged && resources.length > 0 && resources.every(({ managed }) => managed === false);
   return (
     <section aria-label={`${scope === 'project' ? 'Project' : 'User'} inventory`}>
       <p className="target">
@@ -118,6 +125,14 @@ export function Inventory({
         </ul>
       ) : null}
       <ResourceFilters filters={filters} set={set} options={options} />
+      <label className="inventory-visibility">
+        <input
+          type="checkbox"
+          checked={showUnmanaged}
+          onChange={(event) => onShowUnmanagedChange(event.target.checked)}
+        />
+        Show unmanaged resources
+      </label>
       <div className="workspace">
         <section className="panel resource-list" aria-labelledby="installed-heading">
           <h2 id="installed-heading">Installed resources</h2>
@@ -160,7 +175,11 @@ export function Inventory({
             <p>Inventory unavailable in this scope.</p>
           ) : (
             <p>
-              {resources.length ? 'No resources match the current filters.' : 'No installed resources in this scope.'}
+              {onlyHiddenResources
+                ? 'Only unmanaged resources are installed in this scope. Select “Show unmanaged resources” to see them.'
+                : resources.length
+                  ? 'No resources match the current filters.'
+                  : 'No installed resources in this scope.'}
             </p>
           )}
         </section>
