@@ -5,7 +5,7 @@ import type { Writable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 
 export type DashboardSection = 'inventory' | 'browse' | 'catalogs';
-export type DashboardFilter = 'catalog' | 'kind' | 'license';
+export type DashboardFilter = 'catalog' | 'kind' | 'license' | 'unmanaged';
 export type DashboardControlFocus = 'tabs' | 'search' | DashboardFilter | 'actions' | 'list';
 
 type ScrollDirection = -1 | 1;

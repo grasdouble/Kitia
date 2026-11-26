@@ -339,6 +339,7 @@ for (const [screen, dimensions] of [
                 'C catalog',
                 'K kind',
                 'L license',
+                'H unmanaged',
                 'D details',
                 ...navigation,
                 '↑↓ navigate',

@@ -341,6 +341,10 @@ Dashboard inventory includes known install locations for skills, agents, and
 instructions. Files without a Kitia installation record appear as unmanaged
 artifacts and can be explicitly removed after confirmation; they are not
 updated or uninstalled as managed resources.
+Unmanaged artifacts are hidden by default. Use the **Unmanaged** filter or press
+`H` in Inventory to show or hide them. The filter applies to all kinds and scopes and
+combines with the other Inventory filters. It changes only the result list and
+selection, not inventory totals, installed files, or non-interactive CLI output.
 
 In the dashboard, new skill and agent installs default to **User**. Open
 **Scope** to see **User** first and choose **Project** if needed. If the
@@ -375,7 +379,8 @@ metadata, but do not have Catalog browser filter controls.
 In Inventory, `L` cycles license within the active Catalog/Kind scope; license
 and text filters intersect, while `C`/`K` retain their paired cycling behavior.
 `Esc` from Inventory search clears only the text query; it preserves Catalog,
-Kind, and License filters. While search is active, `L` is query text.
+Kind, License, and Unmanaged filters. While search is active, `L` and `H` are
+query text.
 `V` on a skill opens its pinned commit history.
 Choosing a commit in the catalog browser applies that full SHA to this install
 only; choosing one in inventory applies it to the confirmed update. Neither

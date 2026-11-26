@@ -408,7 +408,7 @@ test('inventory TUI labels a tracked user skill with its custom source folder', 
       start,
     );
   }
-  assert.match(frame, /manual-skill[^\r\n]*Unmanaged/, 'the unmanaged resource remains in the inventory list');
+  assert.doesNotMatch(frame, /manual-skill/, 'the unmanaged resource is hidden by default');
   const compactDetailText = detailBodyText(frame);
   assert.ok(
     compactDetailText.startsWith('skillgrill-meArelentlessinterviewtosharpenaplanordesign.'),
@@ -483,6 +483,13 @@ test('inventory TUI renders multiple configured custom folders and preserves oth
     return inventoryFrameReady(value) && selected && detailBodyText(value).startsWith(`skill${selected}`);
   };
   let frame = await waitForDashboardFrame(output, () => rendered, inventorySelection, 'initial Inventory selection');
+  input.write('h');
+  frame = await waitForDashboardFrame(
+    output,
+    () => rendered,
+    (value) => inventorySelection(value) && value.includes('manual-skill'),
+    'Inventory with unmanaged resources shown',
+  );
   const expectedLabels = new Map([
     ['engineering-skill', 'MattPucock[engineering]'],
     ['productivity-skill', 'MattPucock[productivity]'],
