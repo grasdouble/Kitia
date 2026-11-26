@@ -1529,6 +1529,8 @@ test(
         await waitForInkOutput(session, expected, start, 1500);
         return waitForGrid(session, (grid) => grid.includes(expected), `${JSON.stringify(key)} displays ${expected}`);
       };
+      await press('h', 'Shown▾');
+      await waitForInventory('the narrow Inventory shows unmanaged resources');
       const openLocal = async (id, marker, auditMarkers = []) => {
         await press('f', 'TYPE to search');
         session.input.write('\x1b');
