@@ -24,13 +24,21 @@ Kitia installs into the current project by default. Skills default to `standard`
 
 ## Update Kitia
 
-If you installed Kitia globally with npm or pnpm, run `kitia self-update` and confirm, or choose **Update** when the dashboard announces a new version. Restart Kitia after the update.
+If you installed Kitia globally with npm or pnpm, run `kitia self-update` and confirm, or use the update notification in the terminal dashboard or local browser session. Updating from the browser stops `kitia web` first and reports the result in the terminal. Restart Kitia after the update.
 
 For one-off runs, use `npx --yes @grasdouble/kitia@latest` or `pnpm dlx @grasdouble/kitia@latest` instead. For other installations, update Kitia with the tool you used to install it.
 
 ## Manage catalogs and resources
 
 Run `kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository. Without a global install, run `npx --yes @grasdouble/kitia dashboard` instead.
+
+Run `kitia web` from your project to search and filter the project and user inventories, inspect installation details, and preview and audit installed files. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop.
+
+Use **Getting started** to reopen the browser guide. If an inventory needs migration, stop the session, follow the command shown in the notice, and relaunch it.
+
+In **Browse resources**, search configured catalogs, preview pinned sources, and install the catalog pin or a commit from **Revisions**. In **Inventory**, update to the catalog pin or select a different commit, uninstall tracked resources, or explicitly remove unmanaged files. Review the scope and affected paths before confirming. Use the dashboard or CLI to override local conflicts.
+
+In **Catalogs**, add a GitHub repository or start from a preset, edit its discovery rules, check and refresh indexes, and import or export catalog definitions as JSON. Removing a catalog keeps its installed files.
 
 - **Basic** discovers skills recursively under `skills/**/SKILL.md`.
 - **Custom** maps selected repository-relative paths for skills, agents, and instructions. Multiple paths can be registered in one catalog.
@@ -41,7 +49,5 @@ Use `kitia catalog export catalogs.json` and `kitia catalog import catalogs.json
 Kitia tracks managed files and protects untracked or locally modified content. Use `update`, `uninstall`, `check`, and read-only `doctor` to maintain installations. Add `--dry-run --json` to inspect a planned change without modifying files. The CLI stores catalog definitions and metadata-only indexes under `~/.config/kitia/` (override with `KITIA_CONFIG_DIR`); resource bodies remain upstream and catalog entries are pinned to source commits.
 
 See the [CLI contract](docs/cli-contract.md) for commands and machine-readable output, the [resource collections guide](docs/resource-collections.md) for sharing pinned resource selections, the [resource audit guide](docs/resource-audit.md) for opt-in pinned-text checks, and the [inventory migration guide](docs/inventory-migrations.md) for inventory format upgrades.
-
-## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development, testing, and release instructions.

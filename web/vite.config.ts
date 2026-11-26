@@ -8,7 +8,7 @@ import { browserInkPlugins } from './browserInkPlugin';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const require = createRequire(import.meta.url);
-const terminalPackage = dirname(require.resolve('@grasdouble/kitia/package.json'));
+const appPackage = dirname(require.resolve('@grasdouble/kitia/package.json'));
 
 function pageRoutes(): Plugin {
   return {
@@ -40,7 +40,7 @@ export default defineConfig({
   plugins: [...browserInkPlugins(), pageRoutes()],
   resolve: {
     // The browser runs the live dashboard source, not a previous CLI build.
-    alias: { '@grasdouble/kitia/src': resolve(terminalPackage, 'src') },
+    alias: { '@grasdouble/kitia/src': resolve(appPackage, 'src') },
     dedupe: ['ink', 'react', 'react-dom'],
   },
   server: {

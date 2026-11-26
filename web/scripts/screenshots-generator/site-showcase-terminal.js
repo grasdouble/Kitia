@@ -1,10 +1,9 @@
 'use strict';
 
 const { PassThrough } = require('node:stream');
-const { loadCommandCatalogs } = require('@grasdouble/kitia/dist/cli/loading.js');
+const { readCatalogSnapshot } = require('@grasdouble/kitia/dist/application/snapshot.js');
 const { collectInstalledScopes } = require('@grasdouble/kitia/dist/core/inventory/checks.js');
-const { catalogEntries, enrichInstalledResources } = require('@grasdouble/kitia/dist/core/resources/queries.js');
-const { loadUserSourceConfiguration } = require('@grasdouble/kitia/dist/core/catalogs/config.js');
+const { enrichInstalledResources } = require('@grasdouble/kitia/dist/core/resources/queries.js');
 const { createDashboardActionHandler } = require('@grasdouble/kitia/dist/tui/native-actions.js');
 const { DASHBOARD_THEME } = require('@grasdouble/kitia/dist/tui/colors.js');
 const { seedShowcase } = require('./site-showcase-fixture.js');
@@ -216,37 +215,19 @@ async function launchShowcaseDashboard(
         });
     });
 
-    const loaded = loadCommandCatalogs({ command: 'dashboard' }, () => {});
-    const userCatalogs = loadUserSourceConfiguration().map(({ name, repository, mode, entries }) => ({
-      name,
-      repository,
-      mode,
-      entries,
-    }));
-    const installed = collectInstalledScopes({ project: fixture.project, user: fixture.home }, loaded.sourceResources, {
+    const { resources, catalogs: userCatalogs } = readCatalogSnapshot();
+    const targets = { project: fixture.project, user: fixture.home };
+    const installed = collectInstalledScopes(targets, resources, {
       run: inventoryRunOverride,
     });
-    const allResources = catalogEntries(loaded.sourceResources);
-    const rows = enrichInstalledResources(installed.resources, allResources);
-    const catalogResources = catalogResourcesOverride || allResources;
-    const dashboardOptions = { target: fixture.project, userTarget: fixture.home };
+    const rows = enrichInstalledResources(installed.resources, resources);
+    const catalogResources = catalogResourcesOverride || resources;
     const execute = (operation, resource, installOptions) => {
       const { onProgress, ...options } = installOptions;
-      return createDashboardActionHandler(onProgress)(
-        operation,
-        resource,
-        dashboardOptions,
-        { sourceResources: loaded.sourceResources },
-        options,
-      );
+      return createDashboardActionHandler(onProgress)(operation, resource, targets, options);
     };
     const runAction = actionHandlerOverride
-      ? (operation, resource, installOptions) =>
-          actionHandlerOverride(operation, resource, installOptions, {
-            fixture,
-            loaded,
-            dashboardOptions,
-          })
+      ? (operation, resource, installOptions) => actionHandlerOverride(operation, resource, installOptions, targets)
       : execute;
     done = dashboard.runDashboard(
       rows,

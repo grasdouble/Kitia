@@ -64,11 +64,7 @@ export function browserInkPlugins(): Plugin[] {
         // Inject actual references after prebundling. Esbuild's blanket injection
         // makes the process shim and its dependencies initialize one another.
         const plugin = inject({
-          include: [
-            '**/terminal/src/**',
-            '**/node_modules/**',
-            new RegExp(`^${RegExp.escape(normalizePath(cacheDir))}/`),
-          ],
+          include: ['**/app/src/**', '**/node_modules/**', new RegExp(`^${RegExp.escape(normalizePath(cacheDir))}/`)],
           exclude: ['**/terminalRuntime/**'],
           process: [globals, 'process'],
           Buffer: [globals, 'Buffer'],

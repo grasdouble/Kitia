@@ -9,11 +9,10 @@ package version.
 
 The public surface consists of the `kitia` command, documented options and
 defaults, and the machine-readable output described below. In a repository
-checkout, the executable is `terminal/dist/kitia.js`; in the published package
-archive it is `dist/kitia.js`. Direct callers of `terminal/bin/kitia.js` must
-switch to the checkout path or invoke the installed `kitia` command. In a
-checkout, run `pnpm --filter @grasdouble/kitia run build` before using
-the executable. The other JavaScript modules in `terminal/dist/` are implementation
+checkout, the executable is `app/dist/kitia.js`; in the published package
+archive it is `dist/kitia.js`. From a checkout, run
+`pnpm --filter @grasdouble/kitia run build` before using
+the executable. The other JavaScript modules in `app/dist/` are implementation
 details, not a supported JavaScript SDK.
 Human-readable messages, terminal colors, spacing and interactive layouts are
 not machine interfaces.
@@ -33,6 +32,7 @@ Other commands and non-interactive dashboard launches skip the notice.
 | `install`, `update`, `uninstall` | Mutate only when requested; `--dry-run --json` returns a plan, not an executed operation |
 | `versions <kind> <id>` | List up to 500 newest GitHub commits affecting a skill entrypoint or an agent/instruction Markdown file, with abbreviated SHA, committer date and commit subject; supports `--catalog` |
 | `dashboard` | Interactive project/user inventory; `N` adds external catalogs, A/U/Delete request confirmed install/update/uninstall actions |
+| `web [--no-open]` | Start a local browser session to search and inspect inventories and catalog resources |
 | `self-update [--yes]` | Install the latest Kitia release using the package manager that owns the running global npm or pnpm installation; confirm first unless `--yes` is passed |
 | `check` | Report installation state; `--json` returns a versioned report |
 | `doctor` | Read-only diagnostics; network probes require `--network` |
@@ -46,6 +46,45 @@ Aggregate discovery loads each catalog index independently, retaining healthy
 results and reporting warnings for only unavailable or invalid catalogs.
 Targeted discovery loads only the selected index; explicit `validate` remains
 strict across the complete configured set.
+
+`kitia web` binds only to `127.0.0.1` on a system-assigned port. It prints a
+private, per-launch session URL and attempts to open it in the default browser
+unless `--no-open` is supplied. Keep the URL private. The project is fixed to
+the working directory at launch, and the user scope is the user's home
+directory. Press `Ctrl+C` to stop. The browser inventory supports search,
+kind/catalog/license filters, installation details, and read-only preview and
+audit of installed skills, agents, and instructions. **Browse resources**
+searches the configured catalog indexes and opens the pinned source files,
+their entry-file audit, and the GitHub commit history. Catalog previews require
+access to the configured source; skill previews and revision history use the
+GitHub CLI. Browser installation uses the catalog pin by default; choose a
+commit from **Revisions** to install another revision. Skills and agents default
+to user scope; instructions only support project scope. **Inventory** also
+supports updating to the catalog pin or to a listed commit, uninstalling
+tracked files, and removing unmanaged artifacts. Changing a tracked revision
+preserves that scope's destinations. Review the scope, paths, and revision
+before confirming. Removing unmanaged files requires a second confirmation.
+Install and inventory operations show their progress and refresh the inventory
+after partial results. Retrying a local update conflict requires separate
+consent for the listed files; changed files or mismatched provenance block
+the retry. A GitHub CLI overwrite requires separate consent for the reported
+destination. The **Catalogs** section supports presets and Basic/Custom
+discovery, editing and removing definitions, checking and refreshing indexes,
+and importing or exporting version 1 catalog JSON. Review and select imports
+before writing; duplicates are reported and failed index refreshes leave the
+new definitions configured. Removing a catalog does not uninstall resources.
+The local HTTP API is internal and not part of the public CLI compatibility
+contract.
+
+The browser shows the running Kitia version and checks for a newer release.
+The **Getting started** guide can be reopened and shares its first-run marker
+with the dashboard. When inventory migration is required, the browser names
+affected scopes and shows the command to run from the launch project; it
+does not migrate on its own. The update notice links to the release notes.
+For an eligible global installation, confirming an update closes the local
+session before invoking the owning package manager. Check the terminal for
+the outcome and run `kitia web` again. Other installations get manual update
+instructions.
 
 `kitia self-update` leaves local dependencies, one-off caches, linked
 checkouts, and installations of unknown or ambiguous origin untouched.
@@ -521,8 +560,8 @@ a write failure.
 
 Machine-readable schemas ship with the package:
 
-- [Discovery arrays](../terminal/schemas/cli-discovery-v1.schema.json)
-- [Reports, version 1](../terminal/schemas/cli-report-v1.schema.json)
+- [Discovery arrays](../app/schemas/cli-discovery-v1.schema.json)
+- [Reports, version 1](../app/schemas/cli-report-v1.schema.json)
 - [Installation inventory formats and migrations](inventory-migrations.md)
 
 Discovery schema versions are identified by the schema filename; the public

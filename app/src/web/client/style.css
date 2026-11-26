@@ -1,0 +1,259 @@
+:root {
+  color-scheme: light dark;
+  font: 1rem/1.5 system-ui, sans-serif;
+  --border: color-mix(in srgb, CanvasText 25%, Canvas);
+  --panel: color-mix(in srgb, CanvasText 4%, Canvas);
+  --selection: Highlight;
+  --selected-text: HighlightText;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 80rem;
+  margin: auto;
+  padding: 2rem clamp(1rem, 4vw, 3rem);
+}
+
+h1, h2, h3, h4, p {
+  margin: 0 0 0.65rem;
+}
+
+.eyebrow, dt {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.target, td, .details, .warnings, .inspection-sidebar {
+  overflow-wrap: anywhere;
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 1rem 0.5rem;
+}
+
+button, input, select {
+  font: inherit;
+  padding: 0.35rem 1rem;
+  max-width: 100%;
+}
+
+button, select, summary {
+  cursor: pointer;
+}
+
+button[aria-pressed='true'], tr[data-selected='true'] {
+  background: var(--selection);
+  color: var(--selected-text);
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.9rem;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.summary, .workspace, .filters, .inspection-layout {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.summary {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+}
+
+.summary strong {
+  display: block;
+  font-size: 1.65rem;
+  line-height: 1.25;
+}
+
+.summary dd, .detail-fields dd {
+  margin: 0;
+}
+
+.filters {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  align-items: end;
+  margin-block: 1rem;
+}
+
+.filters label {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.filters input, .filters select {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.workspace, .inspection-layout {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.table-scroll, .source-file pre {
+  overflow: auto;
+}
+
+.row-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+}
+
+.detail-fields > div + div, .inspection-sidebar > section + section {
+  margin-block-start: 0.75rem;
+}
+
+.detail-fields ul {
+  margin: 0;
+  padding-inline-start: 1rem;
+}
+
+.warnings {
+  padding-inline-start: 2.2rem;
+}
+
+dialog {
+  width: min(72rem, calc(100% - 2rem));
+  max-height: calc(100vh - 2rem);
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+}
+
+dialog::backdrop {
+  background: color-mix(in srgb, CanvasText 35%, transparent);
+}
+
+.inspection-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.inspection-header button {
+  flex-shrink: 0;
+}
+
+.inspection-header > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.install-options {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0 1rem;
+}
+
+.install-options label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: start;
+}
+
+.source-file pre {
+  max-height: 55vh;
+  margin-block-end: 0;
+  tab-size: 2;
+}
+
+.highlighted-code {
+  padding: 0.75rem;
+  border-radius: 0.4rem;
+}
+
+.resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.maintenance-notice {
+  margin-block: 0.75rem;
+}
+
+.catalog-form {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  margin-block: 0.75rem;
+}
+
+.catalog-form label {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.catalog-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.catalog-form .catalog-choice {
+  display: flex;
+  align-items: start;
+  overflow-wrap: anywhere;
+}
+
+.catalog-form button {
+  justify-self: start;
+}
+
+.app-sections {
+  border-block-end: 1px solid var(--border);
+  padding-block-end: 0.75rem;
+}
+
+.source-tree {
+  list-style: none;
+  margin: 0;
+  padding-inline-start: 1rem;
+}
+
+.source-tree button {
+  padding: 0.15rem 0.35rem;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 50rem) {
+  .workspace, .inspection-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.5rem;
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+code {
+  overflow-wrap: anywhere;
+}
