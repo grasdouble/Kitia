@@ -9,11 +9,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { createInterface } = require('node:readline');
 const { test } = require('node:test');
-const { seedWebCatalog } = require('./fixtures/web-catalog.js');
+const { seedCatalogManagement, seedWebCatalog } = require('./fixtures/web-catalog.js');
 
 const executable = process.env.KITIA_TEST_WEB_EXECUTABLE || path.resolve(__dirname, '../dist/kitia.js');
 
-function request(url, headers, method = 'GET') {
+function request(url, headers, method = 'GET', body) {
   return new Promise((resolve, reject) => {
     const client = http.request(url, { method, headers, agent: false }, (response) => {
       let body = '';
@@ -25,7 +25,7 @@ function request(url, headers, method = 'GET') {
       response.on('error', reject);
     });
     client.on('error', reject);
-    client.end();
+    client.end(body);
   });
 }
 
@@ -471,6 +471,154 @@ test(
         assert.equal(result.code, 0, JSON.stringify(result));
         await assert.rejects(fs.access(absolute), { code: 'ENOENT' });
       }
+    } finally {
+      stdout.close();
+      child.kill();
+      await exited;
+      await fs.rm(temporary, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'catalog management indexes real sources and preserves installed files through refresh, rename, and removal',
+  { timeout: 15_000 },
+  async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-web-catalog-management-'));
+    const { project, config, env, repository, imported, files, indexRef } = seedCatalogManagement(temporary);
+    const child = spawn(process.execPath, [executable, 'web', '--no-open'], {
+      cwd: project,
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const exited = once(child, 'exit');
+    const stdout = createInterface({ input: child.stdout });
+    try {
+      const [line] = await Promise.race([
+        once(stdout, 'line'),
+        exited.then(([code]) => assert.fail(`Kitia exited early (${code})`)),
+      ]);
+      const url = new URL(line.slice('Kitia web: '.length));
+      const authorization = `Bearer ${url.hash.slice('#session='.length)}`;
+      const headers = { authorization };
+      const post = { ...headers, origin: url.origin, 'content-type': 'application/json' };
+      const api = `${url.origin}/api/catalog`;
+      const manage = (command, inputHeaders = post) =>
+        request(`${api}/manage`, inputHeaders, 'POST', JSON.stringify(command));
+      const apply = async (command) => {
+        const result = await manage(command);
+        assert.equal(result.status, 200, result.body);
+        return JSON.parse(result.body);
+      };
+      const catalog = { name: 'Local', repository, mode: 'basic', entries: [] };
+      const add = { action: 'add', catalog };
+      const registry = path.join(config, 'catalogSources.json');
+      const before = await fs.readFile(registry);
+      assert.equal((await manage(add, headers)).status, 403);
+      assert.equal((await manage(add, { ...post, authorization: 'Bearer wrong' })).status, 401);
+      assert.equal((await request(`${api}/manage`, headers)).status, 405);
+      assert.equal((await request(`${api}/export`)).status, 401);
+      assert.equal((await manage(add, { ...post, 'content-type': 'text/plain' })).status, 415);
+      assert.equal((await request(`${api}/manage`, post, 'POST', 'x'.repeat(1024 * 1024 + 1))).status, 413);
+      assert.equal(
+        (await manage({ ...add, catalog: { ...catalog, repository: 'https://elsewhere.invalid/repo' } })).status,
+        400,
+      );
+      assert.equal(
+        (
+          await manage({
+            ...add,
+            catalog: { ...catalog, mode: 'custom', entries: [{ kind: 'skill', path: '../outside' }] },
+          })
+        ).status,
+        400,
+      );
+      assert.deepEqual(await fs.readFile(registry), before);
+      const initialFreshness = JSON.parse((await request(`${api}/freshness`, headers)).body);
+      assert.deepEqual(initialFreshness, [
+        { name: 'Fixture', status: 'outdated' },
+        { name: 'Unavailable', status: 'unknown' },
+      ]);
+
+      const indexed = await apply(add);
+      assert.deepEqual(
+        indexed.snapshot.resources
+          .filter(({ catalog }) => catalog === 'Local')
+          .map(({ kind }) => kind)
+          .sort(),
+        ['agent', 'instruction', 'skill'],
+      );
+      assert.equal((await manage(add)).status, 400);
+
+      const params = new URLSearchParams({
+        catalog: 'Local',
+        kind: 'agent',
+        id: 'registry-agent',
+        ref: indexRef,
+        scope: 'project',
+        destination: 'copilot',
+      });
+      const installed = JSON.parse((await request(`${api}/install?${params}`, post, 'POST')).body);
+      assert.equal(installed.code, 0, JSON.stringify(installed));
+      const installedFile = path.join(project, '.github/agents/registry-agent.agent.md');
+      const installedContent = await fs.readFile(installedFile);
+
+      const mappings = Object.entries(files).map(([kind, path]) => ({
+        kind,
+        path: kind === 'skill' ? path.replace('/SKILL.md', '') : path,
+      }));
+      const edited = await apply({
+        action: 'edit',
+        originalName: 'Local',
+        catalog: { ...catalog, name: 'Curated', mode: 'custom', entries: mappings },
+      });
+      assert.ok(!edited.snapshot.catalogs.some(({ name }) => name === 'Local'));
+      assert.deepEqual(
+        edited.snapshot.resources
+          .filter(({ catalog }) => catalog === 'Curated')
+          .map(({ kind }) => kind)
+          .sort(),
+        ['agent', 'instruction', 'skill'],
+      );
+      assert.deepEqual(await fs.readFile(installedFile), installedContent);
+
+      const one = await apply({ action: 'refresh', name: 'Curated' });
+      assert.equal(one.messages.length, 1);
+      assert.equal(one.warnings.length, 0);
+      const all = await apply({ action: 'refresh' });
+      assert.equal(all.messages.length, 2);
+      assert.ok(all.warnings.some((message) => message.startsWith('Unavailable:')));
+      assert.deepEqual(await fs.readFile(installedFile), installedContent);
+
+      const result = await apply({
+        action: 'import',
+        sources: [
+          { name: 'Curated', repository: imported },
+          { name: 'Duplicate', repository },
+          { name: 'Imported', repository: imported },
+          { name: 'Broken', repository: 'https://github.com/example/broken' },
+        ],
+      });
+      assert.ok(result.messages.includes('Imported Imported.'));
+      for (const label of ['Skipped Curated:', 'Skipped Duplicate:', 'Imported Broken, but']) {
+        assert.ok(
+          result.warnings.some((message) => message.startsWith(label)),
+          result.warnings,
+        );
+      }
+      assert.ok(result.snapshot.unavailable.includes('Broken'));
+      const exported = JSON.parse((await request(`${api}/export`, headers)).body);
+      assert.deepEqual(exported, JSON.parse(await fs.readFile(registry, 'utf8')));
+      const removed = await apply({ action: 'remove', name: 'Curated' });
+      assert.ok(!removed.snapshot.catalogs.some(({ name }) => name === 'Curated'));
+      assert.ok(!removed.snapshot.resources.some(({ catalog }) => catalog === 'Curated'));
+      assert.deepEqual(await fs.readFile(installedFile), installedContent);
+      const inventory = JSON.parse((await request(`${url.origin}/api/inventory`, headers)).body);
+      assert.ok(
+        inventory.inventory.resources.some(
+          ({ catalog, id, managed }) => catalog === 'Local' && id === 'registry-agent' && managed !== false,
+        ),
+      );
     } finally {
       stdout.close();
       child.kill();

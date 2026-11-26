@@ -65,9 +65,13 @@ tracked files, and removing unmanaged artifacts. Changing a tracked revision
 preserves that scope's destinations. Review the scope, paths, and revision
 before confirming. The inventory refreshes after partial operations, and a
 GitHub CLI overwrite retry requires separate confirmation for the reported
-destination. Use the CLI or TUI to override local file conflicts or manage
-catalogs. The local HTTP API is internal and not part of the public CLI
-compatibility contract.
+destination. The **Catalogs** section supports presets and Basic/Custom
+discovery, editing and removing definitions, checking and refreshing indexes,
+and importing or exporting version 1 catalog JSON. Review and select imports
+before writing; duplicates are reported and failed index refreshes leave the
+new definitions configured. Removing a catalog does not uninstall resources.
+Use the CLI or TUI to override local file conflicts. The local HTTP API is
+internal and not part of the public CLI compatibility contract.
 
 `kitia self-update` leaves local dependencies, one-off caches, linked
 checkouts, and installations of unknown or ambiguous origin untouched.

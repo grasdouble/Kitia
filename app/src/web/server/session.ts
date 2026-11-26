@@ -14,6 +14,7 @@ import {
   isInstallationDestination,
   type InstallationDestination,
 } from '../../core/installations/destinations.js';
+import { readCatalogCommand, runCatalogCommand } from './catalog-management.js';
 
 const host = '127.0.0.1';
 const headers = {
@@ -97,6 +98,7 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       attempted: ReadonlySet<InstallationDestination>;
     }
   >();
+  let catalogWrite = false;
   const server = createServer(async (request, response) => {
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (request.headers.host !== authority) {
@@ -110,7 +112,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
     const route = request.url || '/';
     const isCatalogInstall = route === '/api/catalog/install' || route.startsWith(catalogInstallRoute);
     const isInventoryAction = route.startsWith(inventoryActionRoute);
-    const mutation = isCatalogInstall || (isInventoryAction && request.method === 'POST');
+    const isCatalogManagement = route === '/api/catalog/manage';
+    const mutation = isCatalogInstall || isCatalogManagement || (isInventoryAction && request.method === 'POST');
     const method = mutation ? 'POST' : 'GET';
     if (request.method !== method) {
       response.setHeader('Allow', isInventoryAction ? 'GET, POST' : method);
@@ -134,6 +137,9 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       !(
         route === '/api/inventory' ||
         route === '/api/catalog' ||
+        route === '/api/catalog/freshness' ||
+        route === '/api/catalog/export' ||
+        isCatalogManagement ||
         isLocalPreview ||
         isCatalogPreview ||
         isCatalogRevisions ||
@@ -274,6 +280,30 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         sendJson(response, 200, await runOperation({ task: 'catalog-read' }));
         return;
       }
+      if (route === '/api/catalog/freshness' || route === '/api/catalog/export') {
+        sendJson(
+          response,
+          200,
+          await runOperation({ task: route === '/api/catalog/export' ? 'catalog-export' : 'catalog-freshness' }),
+        );
+        return;
+      }
+      if (isCatalogManagement) {
+        const command = await readCatalogCommand(request);
+        if (catalogWrite) {
+          sendJson(response, 409, {
+            error: 'Another catalog operation is running. Wait for it to finish before retrying.',
+          });
+          return;
+        }
+        catalogWrite = true;
+        try {
+          sendJson(response, 200, await runCatalogCommand(command));
+        } finally {
+          catalogWrite = false;
+        }
+        return;
+      }
       if (isLocalPreview) {
         const params = new URLSearchParams(route.slice(localPreviewRoute.length));
         const selector = params.size === 5 ? installedSelector(params) : undefined;
@@ -300,7 +330,18 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       sendJson(response, 200, result);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException)?.code;
-      const status = code === 'RESOURCE_NOT_FOUND' ? 404 : code === 'STALE_SOURCE' ? 409 : 500;
+      const status =
+        code === 'RESOURCE_NOT_FOUND'
+          ? 404
+          : code === 'STALE_SOURCE'
+            ? 409
+            : code === 'PAYLOAD_TOO_LARGE'
+              ? 413
+              : code === 'UNSUPPORTED_MEDIA_TYPE'
+                ? 415
+                : isCatalogManagement && (code === 'INVALID_ARGUMENT' || code === 'CATALOG_ERROR')
+                  ? 400
+                  : 500;
       sendJson(response, status, { error: error instanceof Error ? error.message : 'Could not complete the request.' });
     }
   });

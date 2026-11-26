@@ -3,6 +3,7 @@ import { Worker } from 'node:worker_threads';
 
 import type {
   CatalogConfigurationDocument,
+  checkCatalogFreshness,
   CatalogImportResult,
   CatalogRefreshResult,
 } from '../core/catalogs/manage.js';
@@ -21,6 +22,7 @@ type OperationResults = {
   'inventory-mutate': ResourceActionResult;
   'resource-action': ResourceActionResult;
   'catalog-read': CatalogSnapshot;
+  'catalog-freshness': Awaited<ReturnType<typeof checkCatalogFreshness>>;
   'catalog-preview': SourceInspection;
   'catalog-revisions': ResourceRevision[];
   'catalog-install': ResourceActionResult;

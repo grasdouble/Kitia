@@ -112,4 +112,61 @@ function seedWebCatalog(root) {
   };
 }
 
-module.exports = { seedWebCatalog };
+function seedCatalogManagement(root) {
+  const fixture = seedWebCatalog(root);
+  const git = (...args) => execFileSync('git', ['-C', fixture.repo, ...args], { encoding: 'utf8' }).trim();
+  const files = {
+    skill: 'skills/registry-skill/SKILL.md',
+    agent: 'agents/registry-agent.agent.md',
+    instruction: 'instructions/registry-rules.instructions.md',
+  };
+  for (const item of fixture.items) {
+    const oldFile = path.join(fixture.repo, item.file);
+    if (item.kind === 'skill') fs.rmSync(path.dirname(oldFile), { recursive: true });
+    else fs.unlinkSync(oldFile);
+  }
+  for (const [kind, file] of Object.entries(files)) {
+    const absolute = path.join(fixture.repo, file);
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    const id = kind === 'instruction' ? 'registry-rules' : `registry-${kind}`;
+    fs.writeFileSync(
+      absolute,
+      `---\nname: ${id}\ndescription: Registry ${kind} fixture.\nlicense: MIT\n---\n\n# Registry ${kind}\n`,
+    );
+  }
+  git('add', '.');
+  git(
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '--quiet',
+    '-m',
+    'Publish supported catalog paths',
+  );
+  const repository = 'https://github.com/example/registry';
+  const imported = 'https://github.com/example/imported';
+  const broken = 'https://github.com/example/unavailable';
+  const local = pathToFileURL(fixture.repo).href;
+  const missing = pathToFileURL(path.join(root, 'missing-repository')).href;
+  const rewrites = [
+    [local, fixture.env.GIT_CONFIG_VALUE_0],
+    [local, 'https://github.com/example/web-catalog'],
+    [local, repository],
+    [local, `${repository}.git`],
+    [local, imported],
+    [missing, broken],
+    [missing, 'https://github.com/example/broken'],
+  ];
+  const env = { ...fixture.env, GIT_CONFIG_COUNT: String(rewrites.length) };
+  rewrites.forEach(([target, remote], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = `url.${target}.insteadOf`;
+    env[`GIT_CONFIG_VALUE_${index}`] = remote;
+  });
+  return { ...fixture, env, repository, imported, files, indexRef: git('rev-parse', 'HEAD') };
+}
+
+module.exports = { seedCatalogManagement, seedWebCatalog };

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import type { InstallationTargets, InventorySnapshot, InventoryWorkspace } from '../../application/snapshot.js';
 import type { InstallationScope } from '../../core/installations/model.js';
+import { CatalogManagement } from './catalog-management.js';
 import { BrowseCatalog } from './catalog.js';
 import { Inventory, InventorySummary } from './inventory.js';
 import { readSessionJson } from './session-api.js';
@@ -12,7 +13,7 @@ import './style.css';
 type SessionInventory = InventoryWorkspace & { targets: InstallationTargets };
 
 function App() {
-  const [section, setSection] = useState<'inventory' | 'browse'>('inventory');
+  const [section, setSection] = useState<'inventory' | 'browse' | 'catalogs'>('inventory');
   const [scope, setScope] = useState<InstallationScope>('project');
   const [data, setData] = useState<{ snapshot: SessionInventory; token: string }>();
   const [error, setError] = useState<string>();
@@ -43,11 +44,17 @@ function App() {
     setData((current) => current && { ...current, snapshot: { ...current.snapshot, inventory } });
   }
 
+  async function reloadInventory() {
+    if (!data) return;
+    const snapshot = await readSessionJson<SessionInventory>('/api/inventory', data.token, AbortSignal.timeout(30_000));
+    setData({ snapshot, token: data.token });
+  }
+
   return (
     <main>
       <header>
         <p className="eyebrow">Kitia · Local session</p>
-        <h1>{section === 'inventory' ? 'Inventory' : 'Browse resources'}</h1>
+        <h1>{section === 'inventory' ? 'Inventory' : section === 'browse' ? 'Browse resources' : 'Catalogs'}</h1>
       </header>
       <nav className="app-sections" aria-label="Kitia sections">
         <button type="button" aria-pressed={section === 'inventory'} onClick={() => setSection('inventory')}>
@@ -56,11 +63,16 @@ function App() {
         <button type="button" aria-pressed={section === 'browse'} onClick={() => setSection('browse')}>
           Browse resources
         </button>
+        <button type="button" aria-pressed={section === 'catalogs'} onClick={() => setSection('catalogs')}>
+          Catalogs
+        </button>
       </nav>
       {error ? (
         <p role="alert">{error}</p>
       ) : !data ? (
         <p role="status">Loading inventory…</p>
+      ) : section === 'catalogs' ? (
+        <CatalogManagement token={data.token} onChanged={reloadInventory} />
       ) : section === 'browse' ? (
         <BrowseCatalog
           inventory={data.snapshot.inventory}

@@ -2,6 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 
 import {
   addCatalog,
+  checkCatalogFreshness,
   exportCatalogConfigurationData,
   importCatalogConfigurationText,
   refreshCatalogs,
@@ -45,6 +46,7 @@ export type OperationTask =
       options?: ResourceActionOptions;
     }
   | { task: 'catalog-read' }
+  | { task: 'catalog-freshness' }
   | { task: 'catalog-preview'; selector: CatalogResourceSelector; project: string }
   | { task: 'catalog-revisions'; selector: CatalogResourceSelector }
   | {
@@ -81,6 +83,8 @@ async function execute(data: OperationTask) {
       return runResourceAction(data.action, data.selection, data.targets, data.options);
     case 'catalog-read':
       return readCatalogSnapshot();
+    case 'catalog-freshness':
+      return checkCatalogFreshness();
     case 'catalog-preview': {
       const resource = resolvePinnedCatalogResource(data.selector);
       const preview = await inspectPinnedSource(resource, data.project);

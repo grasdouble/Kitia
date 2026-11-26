@@ -32,6 +32,7 @@ h1, h2, h3, h4, p {
 
 nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-block: 1rem 0.5rem;
 }
@@ -183,6 +184,34 @@ dialog::backdrop {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.catalog-form {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  margin-block: 0.75rem;
+}
+
+.catalog-form label {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.catalog-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.catalog-form .catalog-choice {
+  display: flex;
+  align-items: start;
+  overflow-wrap: anywhere;
+}
+
+.catalog-form button {
+  justify-self: start;
 }
 
 .app-sections {
