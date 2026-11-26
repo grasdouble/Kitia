@@ -481,7 +481,7 @@ test('dashboard colors rows by kind and selection in ANSI', async () => {
     for (const [component, props] of [
       [CatalogScreen, { candidates: resources, resources: [], catalogs: [],
         licenseFilter: "all", controls: { columns: 120, section: "browse", focus: "list", query: "", searchActive: false, filters: [], actions: [] } }],
-      [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true,
+      [InventoryScreen, { resources, errors: [], actionMessage: "", catalogAvailable: true, canExecute: true, showUnmanaged: true,
         controls: { columns: 120, section: "inventory", focus: "list", query: "", searchActive: false, filters: [], actions: [] } }],
     ]) {
       for (let selectedIndex = 0; selectedIndex < resources.length; selectedIndex++) {
@@ -911,6 +911,60 @@ test('dashboard keyboard focus follows Search, Kind, Catalog, and License contro
     assertFocusedInput(dashboard, 'Search');
     dashboard.input.write('alpha-agent');
     await dashboard.wait((frame) => frame.includes('alpha-agent▏'), 'typed search text');
+  } finally {
+    await dashboard.stop();
+  }
+});
+
+test('Inventory can hide and restore unmanaged copies without changing inventory totals or search', async () => {
+  const kindsAndScopes = [
+    ['skill', 'project'],
+    ['skill', 'user'],
+    ['agent', 'project'],
+    ['agent', 'user'],
+    ['instruction', 'project'],
+  ];
+  const resources = kindsAndScopes.flatMap(([kind, scope]) =>
+    [true, false].map((managed) => ({
+      kind,
+      scope,
+      managed,
+      status: managed ? 'current' : 'unmanaged',
+      catalog: managed ? 'toolkit' : '-',
+      id: `${managed ? 'tracked' : 'local'}-${kind.slice(0, 3)}-${scope}`,
+    })),
+  );
+  const dashboard = await startInteractiveDashboard(resources);
+  const hasResults = (count) => (frame) => new RegExp(`\\b${count} results`).test(frame);
+  try {
+    const hidden = await dashboard.wait(
+      (frame) => frame.includes('Hidden▾') && hasResults(5)(frame),
+      'only tracked artifacts are shown by default',
+    );
+    assert.match(hidden, /Inventory 10\b/);
+    for (const { id, managed } of resources) assert.equal(hidden.includes(id), managed, id);
+
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'filter-open' && target.filter === 'unmanaged',
+      'Hidden',
+    );
+    await dashboard.wait((frame) => frame.includes('✓ Hidden'), 'Unmanaged selector opens');
+    clickRenderedTarget(
+      dashboard,
+      (target) => target.type === 'filter-option' && target.filter === 'unmanaged' && target.value === 'Shown',
+      'Shown',
+    );
+    const shown = await dashboard.wait(hasResults(10), 'the selector restores all artifacts');
+    for (const { id } of resources) assert.ok(shown.includes(id), id);
+    dashboard.input.write('f');
+    await dashboard.wait((frame) => frame.includes('TYPE to search'), 'Inventory search is active');
+    dashboard.input.write('local-');
+    await dashboard.wait((frame) => frame.includes('local-▏') && hasResults(5)(frame), 'search finds the local copies');
+    dashboard.input.write('\r');
+    await dashboard.wait((frame) => !frame.includes('TYPE to search') && hasResults(5)(frame), 'search is committed');
+    dashboard.input.write('h');
+    await dashboard.wait((frame) => frame.includes('Hidden▾') && hasResults(0)(frame), 'visibility intersects search');
   } finally {
     await dashboard.stop();
   }
@@ -1557,7 +1611,7 @@ test('Inventory lists the matching destinations for managed and unmanaged artifa
       managed: false,
     },
   ]) {
-    const frame = await captureDashboardFrame([{ id, kind, scope, paths, managed }], {}, [], {
+    const frame = await captureDashboardFrame([{ id, kind, scope, paths, managed }], {}, managed ? [] : ['h'], {
       columns: 120,
       rows: 48,
     });
@@ -2479,6 +2533,8 @@ test('Inventory Remove button accepts the production xterm cell click', async ()
     { columns: 159, rows: 48 },
   );
   try {
+    dashboard.input.write('h');
+    await dashboard.wait((frame) => frame.includes('Remove') && frame.includes('local-testing'), 'local skill shown');
     const position = clickRenderedTarget(
       dashboard,
       (target) => target.type === 'action' && target.action === 'remove',

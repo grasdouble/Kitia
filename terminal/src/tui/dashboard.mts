@@ -100,6 +100,7 @@ export function Dashboard({
   const [inventoryCatalogFilter, setInventoryCatalogFilter] = useState('all');
   const [inventoryKindFilter, setInventoryKindFilter] = useState('all');
   const [inventoryLicenseFilter, setInventoryLicenseFilter] = useState('all');
+  const [showUnmanaged, setShowUnmanaged] = useState(false);
   const [catalogSourceFilter, setCatalogSourceFilter] = useState('all');
   const [catalogKindFilter, setCatalogKindFilter] = useState('all');
   const [catalogLicenseFilter, setCatalogLicenseFilter] = useState('all');
@@ -148,8 +149,11 @@ export function Dashboard({
   ];
 
   const inventoryLabels = inventoryCatalogLabels(installedResources, userCatalogs);
+  const inventoryFilterResources = showUnmanaged
+    ? installedResources
+    : installedResources.filter((resource) => resource.managed !== false);
   const visibleInventory = filterInventory(
-    installedResources,
+    inventoryFilterResources,
     query,
     inventoryCatalogFilter,
     inventoryKindFilter,
@@ -199,7 +203,7 @@ export function Dashboard({
       id: 'kind',
       value: inventoryKindFilter,
       options: inventoryFilterOptions(
-        installedResources,
+        inventoryFilterResources,
         'kind',
         inventoryCatalogFilter,
         inventoryKindFilter,
@@ -211,7 +215,7 @@ export function Dashboard({
       id: 'catalog',
       value: inventoryCatalogFilter,
       options: inventoryFilterOptions(
-        installedResources,
+        inventoryFilterResources,
         'catalog',
         inventoryCatalogFilter,
         inventoryKindFilter,
@@ -223,13 +227,18 @@ export function Dashboard({
       id: 'license',
       value: inventoryLicenseFilter,
       options: inventoryFilterOptions(
-        installedResources,
+        inventoryFilterResources,
         'license',
         inventoryCatalogFilter,
         inventoryKindFilter,
         inventoryLicenseFilter,
         userCatalogs,
       ),
+    },
+    {
+      id: 'unmanaged',
+      value: showUnmanaged ? 'Shown' : 'Hidden',
+      options: ['Shown', 'Hidden'],
     },
   ];
   const browseControlsFilters: DashboardControlFilter[] = [
@@ -356,24 +365,11 @@ export function Dashboard({
     setScreenMode(destination);
     if (section === 'catalogs' && screenMode !== destination) void checkCatalogFreshness();
   };
-  const currentFilterValue = (filter: DashboardFilter) =>
-    controlSection === 'inventory'
-      ? filter === 'catalog'
-        ? inventoryCatalogFilter
-        : filter === 'kind'
-          ? inventoryKindFilter
-          : inventoryLicenseFilter
-      : filter === 'catalog'
-        ? catalogSourceFilter
-        : filter === 'kind'
-          ? catalogKindFilter
-          : catalogLicenseFilter;
   const openFilterMenu = (filter: DashboardFilter) => {
-    const options = (controlSection === 'inventory' ? inventoryControlsFilters : browseControlsFilters).find(
-      ({ id }) => id === filter,
-    )?.options || ['all'];
+    const control = controlsBase.filters?.find(({ id }) => id === filter);
+    if (!control) return;
     setFilterMenu(filter);
-    setFilterMenuIndex(Math.max(0, options.indexOf(currentFilterValue(filter))));
+    setFilterMenuIndex(Math.max(0, control.options.indexOf(control.value)));
     setControlFocus(filter);
     setFilterMode(false);
     setCatalogFilterMode(false);
@@ -382,6 +378,7 @@ export function Dashboard({
     if (controlSection === 'inventory') {
       if (filter === 'catalog') setInventoryCatalogFilter(value);
       else if (filter === 'kind') setInventoryKindFilter(value);
+      else if (filter === 'unmanaged') setShowUnmanaged(value === 'Shown');
       else setInventoryLicenseFilter(value);
       setSelectedIndex(0);
     } else if (filter === 'catalog') {
@@ -608,13 +605,12 @@ export function Dashboard({
       navigateToSection(next);
       return;
     }
-    if (
-      (controlFocus === 'catalog' || controlFocus === 'kind' || controlFocus === 'license') &&
-      controlsBase.filters?.some(({ id }) => id === controlFocus) &&
-      (key.return || input === ' ')
-    ) {
-      openFilterMenu(controlFocus);
-      return;
+    if (key.return || input === ' ') {
+      const control = controlsBase.filters?.find(({ id }) => id === controlFocus);
+      if (control) {
+        openFilterMenu(control.id);
+        return;
+      }
     }
     if (controlFocus === 'actions' && controlActions.length) {
       if (key.leftArrow || key.rightArrow) {
@@ -738,24 +734,41 @@ export function Dashboard({
       setControlFocus('search');
     } else if (character === 'c') {
       setInventoryCatalogFilter(
-        cycleFilter(inventoryCatalogFilter, installedResources, 'catalog', 'kind', inventoryKindFilter, userCatalogs),
+        cycleFilter(
+          inventoryCatalogFilter,
+          inventoryFilterResources,
+          'catalog',
+          'kind',
+          inventoryKindFilter,
+          userCatalogs,
+        ),
       );
       setSelectedIndex(0);
     } else if (character === 'k') {
       setInventoryKindFilter(
-        cycleFilter(inventoryKindFilter, installedResources, 'kind', 'catalog', inventoryCatalogFilter, userCatalogs),
+        cycleFilter(
+          inventoryKindFilter,
+          inventoryFilterResources,
+          'kind',
+          'catalog',
+          inventoryCatalogFilter,
+          userCatalogs,
+        ),
       );
       setSelectedIndex(0);
     } else if (character === 'l') {
       setInventoryLicenseFilter(
         cycleInventoryLicense(
           inventoryLicenseFilter,
-          installedResources,
+          inventoryFilterResources,
           inventoryCatalogFilter,
           inventoryKindFilter,
           userCatalogs,
         ),
       );
+      setSelectedIndex(0);
+    } else if (character === 'h') {
+      setShowUnmanaged((value) => !value);
       setSelectedIndex(0);
     } else if (
       character === 'p' &&
@@ -876,6 +889,7 @@ export function Dashboard({
       catalogFilter: inventoryCatalogFilter,
       kindFilter: inventoryKindFilter,
       licenseFilter: inventoryLicenseFilter,
+      showUnmanaged,
       selectedIndex: activeInventoryIndex,
       versionLabel,
       actionMessage,

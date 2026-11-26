@@ -122,6 +122,7 @@ export function sectionTabMetrics(width: number) {
 }
 
 function filterLabel(filter: DashboardFilter) {
+  if (filter === 'unmanaged') return 'Unmanaged';
   return filter === 'kind' ? 'Kind' : filter === 'catalog' ? 'Catalog' : 'License';
 }
 
@@ -131,6 +132,7 @@ function filterValue(filter: DashboardControlFilter) {
 }
 
 function filterWidth(filter: DashboardControlFilter, width: number) {
+  if (filter.id === 'unmanaged') return Math.min(width, 13);
   return Math.min(width, Math.max(8, filterLabel(filter.id).length, Math.min(22, filterValue(filter).length + 5)));
 }
 
@@ -218,7 +220,7 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
   }
   if (part === 'tabs' || props.modalActive) return { width, height: row, lines, menu: undefined };
 
-  const filters = ['kind', 'catalog', 'license'].flatMap((id) =>
+  const filters = ['kind', 'catalog', 'license', 'unmanaged'].flatMap((id) =>
     (props.filters || []).filter((filter) => filter.id === id),
   );
   const showSearch = props.showSearch !== false;
