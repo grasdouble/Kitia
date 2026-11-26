@@ -81,7 +81,7 @@ export function ControlLayout({
         continue;
       }
       if (line.kind === 'fields') {
-        const compactFields = Boolean(controls.rows && controls.rows < 40);
+        const { compactFields } = layout;
         const fieldRows: React.ReactNode[][] = Array.from({ length: compactFields ? 1 : 3 }, () => []);
         let x = 2;
         for (const [index, item] of line.items.entries()) {

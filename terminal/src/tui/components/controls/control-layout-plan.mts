@@ -86,6 +86,7 @@ export interface ControlLine {
 export interface ControlsLayout {
   width: number;
   height: number;
+  compactFields: boolean;
   lines: ControlLine[];
   menu?: ControlMenu;
 }
@@ -178,7 +179,10 @@ export function dashboardActionButtonLines(props: ControlsProps, width: number) 
 
 export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
   const width = Math.max(1, props.columns - 2);
-  const fieldRows = props.rows && props.rows < 40 ? 2 : 4;
+  const compactFields =
+    Boolean(props.rows && props.rows < 40) ||
+    (props.columns < 64 && Boolean(props.filters?.some(({ id }) => id === 'unmanaged')));
+  const fieldRows = compactFields ? 2 : 4;
   const lines: ControlLine[] = [];
   const part = props.part || 'all';
   let row = 0;
@@ -218,7 +222,7 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
     }
     row += tabLines.length * 3;
   }
-  if (part === 'tabs' || props.modalActive) return { width, height: row, lines, menu: undefined };
+  if (part === 'tabs' || props.modalActive) return { width, height: row, compactFields, lines, menu: undefined };
 
   const filters = ['kind', 'catalog', 'license', 'unmanaged'].flatMap((id) =>
     (props.filters || []).filter((filter) => filter.id === id),
@@ -277,7 +281,7 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
     if (filterLine && anchor && filter) {
       const left = 2 + filterLine.items.slice(0, filterIndex).reduce((used, item) => used + item.width + 1, 0);
       const localLeft = left - 2;
-      const fieldBottom = filterLine.row + (fieldRows === 2 ? 0 : 2);
+      const fieldBottom = filterLine.row + (compactFields ? 0 : 2);
       let top = fieldBottom;
       const terminalBottom = props.rows
         ? props.rows - DASHBOARD_HEADER_ROWS - (props.rowOffset || 0)
@@ -318,5 +322,5 @@ export function dashboardControlsLayout(props: ControlsProps): ControlsLayout {
       row += 3;
     }
   }
-  return { width, height: row, lines, menu };
+  return { width, height: row, compactFields, lines, menu };
 }

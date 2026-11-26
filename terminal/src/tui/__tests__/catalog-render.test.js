@@ -1929,13 +1929,13 @@ test('Inventory detail paging reveals every metadata field at narrow and short s
       );
       assert.ok(frame.includes('Pager replacement'));
 
-      for (let index = 0; index < 6; index += 1) {
-        dashboard.input.write('\t');
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-      const actionFocusFrame = dashboard.frame();
+      const actionFocusFrame = detailBodyText(frame);
+      dashboard.input.write('\x1b[Z');
       dashboard.input.write('\u001b[5~');
-      await dashboard.wait((next) => next !== actionFocusFrame, 'PageUp scrolls while contextual actions retain focus');
+      await dashboard.wait(
+        (next) => detailBodyText(next) !== actionFocusFrame,
+        'PageUp scrolls while contextual actions retain focus',
+      );
       dashboard.input.write('\r');
       await dashboard.wait(
         (next) => next.includes('CONFIRM UPDATE'),
@@ -2762,6 +2762,11 @@ test('mouse preserves cancel and two-stage unmanaged removal confirmations', asy
     { columns: 40, rows: 36 },
   );
   try {
+    dashboard.input.write('h');
+    await dashboard.wait(
+      (frame) => frame.includes('Shown▾') && frame.includes('orphan'),
+      'unmanaged skill shown before opening removal',
+    );
     clickRenderedTarget(dashboard, (target) => target.type === 'action' && target.action === 'remove', 'Remove');
     await dashboard.wait((frame) => frame.includes('CONFIRM REMOVE'), 'first unmanaged removal confirmation');
     clickRenderedTarget(dashboard, (target) => target.type === 'modal-choice' && target.index === 0, 'CANCEL');
