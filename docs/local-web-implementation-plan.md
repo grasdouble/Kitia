@@ -17,17 +17,15 @@
 | 7. Inventory maintenance | Committed · `e3b032a` | Update, uninstall, and remove unmanaged artifacts; separate confirmation for destination-specific GitHub CLI overwrite retries. |
 | 8. Choose a revision | Committed · `397c003` | Select a commit from resource history for a new installation or a replacement that preserves existing destinations. |
 | 9. Catalog management | Committed · `4717746` | Basic/Custom mappings and presets, edit and remove, freshness and refresh (one/all), selective JSON import and JSON export. Removal leaves installed files in place. |
-| 10. Getting started and maintenance | Implemented; not committed | Reopenable welcome guide, version and release notices, eligible self-update after server shutdown, and scoped inventory migration guidance. |
-| 11. Parity and package acceptance | Pending final pass | Close the known UI parity gaps and verify the installed package end to end on Linux, macOS, and Windows. |
+| 10. Getting started and maintenance | Committed · `38eb0a4` | Reopenable welcome guide, version and release notices, eligible self-update after server shutdown, and scoped inventory migration guidance. |
+| 11. Parity and package acceptance | Implemented; Linux and Windows runs pending | Two-step unmanaged removal, recoverable local conflicts with scoped consent, live operation progress, and packaged startup and shutdown checks. |
 
-## Resume here
+## Package acceptance
 
-1. Commit the getting-started and maintenance lot.
-2. Finish lot 11 before calling the browser interface TUI-equivalent:
-   - Add the second explicit confirmation for unmanaged removal. The current browser flow has one confirmation after reviewing the paths.
-   - Add the TUI-style retry for recoverable local update conflicts, with affected paths and separate consent. The current browser supports only destination-specific GitHub CLI overwrite retries; local overrides remain in the CLI/TUI. Never force a provenance conflict or silently overwrite another owner's files.
-   - Check whether long operations need to surface worker progress beyond the current working indicator and final/partial result. Keep all failures visible and preserve the selected resource and filters where applicable.
-   - Exercise startup, browser opening or `--no-open` fallback, a real scoped installation, and `Ctrl+C` shutdown from the installed tarball on **Linux, macOS, and Windows**. Browser checks to date used WebKit on macOS; they are not cross-platform acceptance.
+- The browser uses the same artifact and scope rules as the CLI and TUI. The separate browser consent is backed by one-use tokens; local overwrite approval is limited to the reviewed file contents and never permits replacing a different owner's files.
+- The packaged smoke tests exercise real scoped filesystem changes from fixture catalogs for skills, agents, and instructions; they do not contact GitHub. The existing CI job runs those tests on Linux, macOS, and Windows.
+- The browser-launch smoke test checks the platform command and manual fallback using an intercepted launcher, without opening a real desktop browser. Shutdown uses an OS `SIGINT` on Unix and exercises the same handler through IPC on Windows; a physical Windows console `Ctrl+C` and real default-browser launch still need a desktop acceptance run.
+- Verified on macOS: five packaged web-session tests and eight native installation lifecycle tests. WebKit confirmed a project-scoped agent install, the second unmanaged removal dialog, and a local conflict that preserved the edited file until explicit retry.
 
 Lot 9 verification: `pnpm app:test:package-smoke` (three passing session tests), eight targeted core/TUI tests, and WebKit checks of Custom add, rename, refresh, selective import, and export download using isolated Git fixtures.
 

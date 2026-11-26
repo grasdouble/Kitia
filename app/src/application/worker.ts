@@ -64,6 +64,7 @@ export type OperationTask =
   | { task: 'catalog-export' };
 
 async function execute(data: OperationTask) {
+  const onProgress = (progress: string) => parentPort?.postMessage({ progress });
   switch (data.task) {
     case 'inventory-read': {
       const catalog = readCatalogSnapshot();
@@ -80,7 +81,7 @@ async function execute(data: OperationTask) {
         data.revision,
       );
     case 'inventory-mutate':
-      return runResourceAction(data.action, data.selection, data.targets, data.options);
+      return runResourceAction(data.action, data.selection, data.targets, data.options, onProgress);
     case 'catalog-read':
       return readCatalogSnapshot();
     case 'catalog-freshness':
@@ -95,11 +96,15 @@ async function execute(data: OperationTask) {
     case 'catalog-revisions':
       return listResourceRevisions(resolvePinnedCatalogResource(data.selector));
     case 'catalog-install':
-      return runResourceAction('install', { ...data.selector, revision: data.revision }, data.targets, data.options);
-    case 'resource-action':
-      return runResourceAction(data.action, data.resource, data.targets, data.options, (progress) =>
-        parentPort?.postMessage({ progress }),
+      return runResourceAction(
+        'install',
+        { ...data.selector, revision: data.revision },
+        data.targets,
+        data.options,
+        onProgress,
       );
+    case 'resource-action':
+      return runResourceAction(data.action, data.resource, data.targets, data.options, onProgress);
     case 'catalog-add':
     case 'catalog-update': {
       const { name, repository, mode, entries } = data.request;

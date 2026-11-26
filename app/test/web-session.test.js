@@ -184,6 +184,71 @@ test(
   },
 );
 
+test('a browser launch failure leaves the printed URL usable', { timeout: 10_000 }, async () => {
+  const project = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-web-browser-'));
+  const preload = path.join(project, 'launcher.cjs');
+  await fs.writeFile(
+    preload,
+    `
+const children = require('node:child_process');
+const spawn = children.spawn;
+children.spawn = (program, args, options) => {
+  console.log(JSON.stringify({ program, args }));
+  return spawn(process.execPath, ['-e', 'process.exit(1)'], options);
+};
+require('node:module').syncBuiltinESMExports();
+if (process.platform === 'win32') {
+  process.once('message', () => {
+    process.emit('SIGINT');
+    process.disconnect();
+  });
+}
+`,
+  );
+  const child = spawn(process.execPath, ['--require', preload, executable, 'web'], {
+    cwd: project,
+    env: { ...process.env, HOME: project, USERPROFILE: project, KITIA_CONFIG_DIR: path.join(project, 'config') },
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+  const exited = once(child, 'exit');
+  const stdout = createInterface({ input: child.stdout });
+  const stderr = createInterface({ input: child.stderr });
+  try {
+    const [[url, launch], fallback] = await Promise.race([
+      Promise.all([
+        (async () => {
+          let url;
+          for await (const line of stdout) {
+            if (line.startsWith('Kitia web: ')) url = new URL(line.slice(11));
+            else if (line.startsWith('{')) return [url, JSON.parse(line)];
+          }
+          assert.fail('Kitia did not launch a browser');
+        })(),
+        once(stderr, 'line').then(([line]) => line),
+      ]),
+      exited.then(([code]) => assert.fail(`Kitia exited early (${code})`)),
+    ]);
+    assert.deepEqual(
+      launch,
+      process.platform === 'win32'
+        ? { program: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', url.href] }
+        : { program: process.platform === 'darwin' ? 'open' : 'xdg-open', args: [url.href] },
+    );
+    assert.match(fallback, /Open the session URL above/);
+    assert.equal((await request(url.origin)).status, 200);
+    if (process.platform === 'win32') child.send('stop'); // Test the handler without a Windows console.
+    else child.kill('SIGINT');
+    assert.deepEqual(await exited, [0, null]);
+    await assert.rejects(request(url.origin), { code: 'ECONNREFUSED' });
+  } finally {
+    stdout.close();
+    stderr.close();
+    child.kill();
+    await exited;
+    await fs.rm(project, { recursive: true, force: true });
+  }
+});
+
 test(
   'the browser session installs, updates, and removes only reviewed resources in their selected scopes',
   { timeout: 25_000 },
@@ -344,9 +409,23 @@ test(
         const requested = Object.keys(destinations).filter(
           (id) => !(item === skill && scope === 'project' && id === 'standard'),
         );
-        const response = await request(install(item, scope, requested, next, ref), post, 'POST');
+        const streamed = item.kind === 'agent' && scope === 'project';
+        const response = await request(
+          install(item, scope, requested, next, ref),
+          streamed ? { ...post, accept: 'application/x-ndjson' } : post,
+          'POST',
+        );
         assert.equal(response.status, 200, response.body);
-        const result = JSON.parse(response.body);
+        let result;
+        if (streamed) {
+          assert.match(response.headers['content-type'], /^application\/x-ndjson/);
+          const events = response.body.trimEnd().split('\n').map(JSON.parse);
+          assert.match(events[0].progress, /Validating resource and installation target/);
+          assert.ok(events.slice(0, -1).some(({ progress }) => /audit/i.test(progress)));
+          result = events.at(-1).result;
+        } else {
+          result = JSON.parse(response.body);
+        }
         assert.equal(result.code, 0, response.body);
         const managed = result.resources.find(
           (resource) => resource.id === item.id && resource.managed !== false && resource.scope === scope,
@@ -396,8 +475,14 @@ test(
       await fs.writeFile(localEdit, 'Local edits\n');
       const blocked = await commitAction(agentUpdate, updatedReview);
       assert.equal(blocked.failure.code, 'LOCAL_CONFLICT');
-      assert.equal(blocked.retry, undefined);
+      assert.equal(blocked.retry.kind, 'local');
+      assert.deepEqual(blocked.retry.review.paths, ['.github/agents/catalog-agent.agent.md']);
       assert.equal(await fs.readFile(localEdit, 'utf8'), 'Local edits\n');
+      await fs.writeFile(localEdit, 'Changed again after review\n');
+      const { review: staleReview, ticket: staleTicket } = blocked.retry;
+      const staleRetry = `${agentUpdate}&stamp=${staleReview.stamp}&retry=${staleTicket}`;
+      assert.equal((await request(staleRetry, post, 'POST')).status, 409);
+      assert.equal(await fs.readFile(localEdit, 'utf8'), 'Changed again after review\n');
       await fs.writeFile(localEdit, agent.content);
       await fs.writeFile(index, initialIndex);
       const unlistedUpdate = `${agentUpdate}&revision=${unknownRevision}`;
@@ -413,10 +498,30 @@ test(
 
       for (const [item, scope, target, destinations] of matrices) {
         const update = `${inventoryAction('update', item, scope)}&revision=${next}`;
+        const destination = Object.values(destinations)[0];
+        const edited = item.kind === 'skill' ? `${destination}/${item.id}/references/review.md` : destination;
+        const absolute = path.join(target, edited);
+        if (item.kind === 'skill' && scope === 'project') {
+          const entryFile = path.join(target, destination, item.id, 'SKILL.md');
+          const original = await fs.readFile(entryFile, 'utf8');
+          const wrongSource = original.replace('github-repo: example/web-catalog', 'github-repo: other/repo');
+          await fs.writeFile(entryFile, wrongSource);
+          const foreign = await commitAction(update, await review(update));
+          assert.equal(foreign.failure.category, 'provenance-conflict');
+          assert.equal(foreign.retry, undefined);
+          assert.equal(await fs.readFile(entryFile, 'utf8'), wrongSource);
+          await fs.writeFile(entryFile, original);
+        }
+        await fs.writeFile(absolute, 'Local changes to preserve until confirmed.\n');
         let result = await commitAction(update, await review(update));
+        assert.equal(result.retry.kind, 'local');
+        assert.deepEqual(result.retry.review.paths, [edited]);
+        assert.equal(await fs.readFile(absolute, 'utf8'), 'Local changes to preserve until confirmed.\n');
+        result = await commitAction(update, result.retry.review, result.retry.ticket);
         const visited = new Set();
         while (result.retry) {
           assert.equal(item.kind, 'skill');
+          assert.equal(result.retry.kind, 'github');
           assert.equal(result.failure.code, 'GH_FORCE_REQUIRED');
           assert.ok(!result.errors.some((error) => error.scope === scope), JSON.stringify(result.errors));
           assert.ok(
@@ -435,7 +540,7 @@ test(
         assert.equal(result.code, 0, JSON.stringify(result));
         const lock = JSON.parse(await fs.readFile(path.join(target, '.agents/kitia-lock.json'), 'utf8'));
         assert.equal(lock.sources.Fixture[`${item.kind}s`][item.id].source_ref, next);
-        assert.equal(visited.size, item.kind === 'skill' ? 4 : 0);
+        assert.equal(visited.size, item.kind === 'skill' ? 3 : 0);
         for (const dirOrFile of Object.values(destinations)) {
           const file = item.kind === 'skill' ? `${dirOrFile}/${item.id}/SKILL.md` : dirOrFile;
           assert.ok((await fs.readFile(path.join(target, file), 'utf8')).includes(`# Revised ${item.kind}`));
@@ -467,8 +572,16 @@ test(
         const reviewed = await review(remove);
         assert.deepEqual(reviewed.paths, [kind === 'skill' ? path.posix.dirname(file) : file]);
         await fs.access(absolute);
-        const result = await commitAction(remove, reviewed);
-        assert.equal(result.code, 0, JSON.stringify(result));
+        const pending = await request(`${remove}&stamp=${reviewed.stamp}`, post, 'POST');
+        assert.equal(pending.status, 202, pending.body);
+        const { confirmation } = JSON.parse(pending.body);
+        assert.equal(await fs.readFile(absolute, 'utf8'), 'Unmanaged resource\n');
+        const endpoint = `${remove}&stamp=${reviewed.stamp}&confirmation=`;
+        assert.equal((await request(`${endpoint}${'x'.repeat(32)}`, post, 'POST')).status, 409);
+        const result = await request(`${endpoint}${confirmation}`, post, 'POST');
+        assert.equal(result.status, 200, result.body);
+        assert.equal(JSON.parse(result.body).code, 0, result.body);
+        assert.equal((await request(`${endpoint}${confirmation}`, post, 'POST')).status, 409);
         await assert.rejects(fs.access(absolute), { code: 'ENOENT' });
       }
     } finally {

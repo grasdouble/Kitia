@@ -10,7 +10,7 @@ import type { ResourceActionResult } from '../../application/resource-actions.js
 import type { InventorySnapshot } from '../../application/snapshot.js';
 import { MutationResult } from './mutation-result.js';
 import { RevisionHistory } from './revision-history.js';
-import { postSessionJson, readSessionJson } from './session-api.js';
+import { postSessionJson, readSessionJson, runSessionMutation } from './session-api.js';
 import { SessionDialog } from './session-dialog.js';
 
 const copy = {
@@ -25,8 +25,9 @@ const copy = {
 
 type Response = ResourceActionResult & { retry?: InventoryMutationRetry };
 type State =
-  | { step: 'loading' | 'running' }
-  | { step: 'review'; review: InventoryMutationReview }
+  | { step: 'loading' }
+  | { step: 'running'; progress?: string }
+  | { step: 'review'; review: InventoryMutationReview; confirmation?: string }
   | { step: 'result'; result: Response }
   | { step: 'error'; message: string };
 
@@ -85,12 +86,24 @@ export function InventoryActionDialog({
     });
   }
 
-  async function confirm(stamp: string, ticket?: string) {
+  async function prepareRemoval(review: InventoryMutationReview) {
     setState({ step: 'running' });
     try {
-      const query = new URLSearchParams({ stamp });
-      if (ticket) query.set('retry', ticket);
-      const result = await postSessionJson<Response>(`${endpoint}&${query}`, token);
+      const query = new URLSearchParams({ stamp: review.stamp });
+      const { confirmation } = await postSessionJson<{ confirmation: string }>(`${endpoint}&${query}`, token);
+      setState({ step: 'review', review, confirmation });
+    } catch (error) {
+      failed(error);
+    }
+  }
+
+  async function confirm(stamp: string, authorization?: { retry: string } | { confirmation: string }) {
+    setState({ step: 'running' });
+    try {
+      const query = new URLSearchParams({ stamp, ...authorization });
+      const result = await runSessionMutation<Response>(`${endpoint}&${query}`, token, (progress) =>
+        setState({ step: 'running', progress }),
+      );
       onChanged({ resources: result.resources, errors: result.errors });
       setState({ step: 'result', result });
     } catch (error) {
@@ -100,6 +113,7 @@ export function InventoryActionDialog({
 
   const message = copy[action];
   const retry = state.step === 'result' ? state.result.retry : undefined;
+  const removalConfirmation = state.step === 'review' && state.confirmation;
   return (
     <SessionDialog
       title={selector.id}
@@ -150,35 +164,52 @@ export function InventoryActionDialog({
           {action === 'remove-unmanaged' && selector.kind === 'skill' ? (
             <p>Each listed skill folder and all of its contents will be deleted.</p>
           ) : null}
-          <button type="button" disabled={choosing} onClick={() => void confirm(state.review.stamp)}>
-            Confirm {message.label.toLowerCase()}
-          </button>
+          {removalConfirmation ? (
+            <>
+              <p role="alert">This cannot be undone. Kitia does not keep a copy of these files.</p>
+              <button
+                type="button"
+                onClick={() => void confirm(state.review.stamp, { confirmation: removalConfirmation })}
+              >
+                Permanently remove files
+              </button>
+            </>
+          ) : action === 'remove-unmanaged' ? (
+            <button type="button" onClick={() => void prepareRemoval(state.review)}>
+              Continue to removal confirmation
+            </button>
+          ) : (
+            <button type="button" disabled={choosing} onClick={() => void confirm(state.review.stamp)}>
+              Confirm {message.label.toLowerCase()}
+            </button>
+          )}
         </>
       ) : state.step === 'result' ? (
         <>
           <MutationResult result={state.result} operation={message.result} />
           {retry ? (
             <>
-              <p>
-                GitHub CLI requested permission to replace the existing {state.result.failure?.agent} copy. Other
-                destinations will not be forced.
-              </p>
-              <button type="button" onClick={() => void confirm(retry.review.stamp, retry.ticket)}>
+              {retry.kind === 'local' ? (
+                <p>Retrying can replace the local files listed above. Back them up to keep your changes.</p>
+              ) : (
+                <p>
+                  GitHub CLI requested permission to replace the existing {state.result.failure?.agent} copy. This
+                  confirmation is for that destination only.
+                </p>
+              )}
+              <button type="button" onClick={() => void confirm(retry.review.stamp, { retry: retry.ticket })}>
                 Confirm overwrite and retry
               </button>
             </>
-          ) : state.result.failure?.recoverable && state.result.failure.code === 'LOCAL_CONFLICT' ? (
-            <p>
-              Review or back up the conflicting files before retrying. Use the CLI or terminal dashboard for local
-              conflict overrides.
-            </p>
           ) : null}
         </>
       ) : state.step === 'error' ? (
         <p role="alert">{state.message}</p>
       ) : (
         <p role="status">
-          {state.step === 'running' ? 'Working on the selected resource…' : 'Reviewing the selected paths…'}
+          {state.step === 'running'
+            ? (state.progress ?? 'Working on the selected resource…')
+            : 'Reviewing the selected paths…'}
         </p>
       )}
     </SessionDialog>

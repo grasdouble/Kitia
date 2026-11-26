@@ -8,6 +8,7 @@ import type { CatalogResourceSelector } from '../../application/catalog-preview.
 import type { InventoryMutation, InventoryMutationRetry } from '../../application/inventory-mutation.js';
 import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
 import { hasSeenOnboarding, markOnboardingComplete } from '../../application/onboarding.js';
+import type { ResourceActionResult } from '../../application/resource-actions.js';
 import { manualUpdateInstructions, prepareSelfUpdate } from '../../application/self-update.js';
 import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
 import { checkInstalledVersion } from '../../application/version-check.js';
@@ -89,6 +90,7 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
   }
   const token = randomBytes(32).toString('base64url');
   const credentials = Buffer.from(`Bearer ${token}`);
+  const removals = new Map<string, { token: string; key: string; stamp: string }>();
   let origin: string;
   let authority: string;
   let inventoryRead: Promise<InventoryWorkspace> | undefined;
@@ -98,7 +100,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       ticket: string;
       key: string;
       stamp: string;
-      destination: InstallationDestination;
+      destination?: InstallationDestination;
+      approved: NonNullable<ResourceActionResult['localConflicts']>;
       attempted: ReadonlySet<InstallationDestination>;
     }
   >();
@@ -200,6 +203,20 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       return;
     }
     activeRequests += 1;
+    const progress =
+      request.headers.accept === 'application/x-ndjson'
+        ? (message: string) => {
+            if (response.destroyed) return;
+            if (!response.headersSent) {
+              response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', Vary: 'Accept' });
+            }
+            response.write(`${JSON.stringify({ progress: message })}\n`);
+          }
+        : undefined;
+    function finishMutation(result: object) {
+      if (response.headersSent) response.end(`${JSON.stringify({ result })}\n`);
+      else sendJson(response, 200, result);
+    }
     try {
       if (route === '/api/session') {
         const info: SessionInfo = { version, showOnboarding: !hasSeenOnboarding() };
@@ -237,13 +254,18 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         const action = inventoryActions.find((value) => value === params.get('action'));
         const stamp = params.get('stamp') ?? '';
         const retry = params.get('retry');
+        const confirmation = params.get('confirmation');
         const revision = params.get('revision')?.toLowerCase();
         if (
           !selector ||
           !action ||
           (action === 'remove-unmanaged') === selector.managed ||
           (revision !== undefined && (action !== 'update' || !/^[a-f0-9]{40}$/.test(revision))) ||
-          params.size !== (mutation ? 7 + Number(retry !== null) : 6) + Number(revision !== undefined) ||
+          (confirmation !== null &&
+            (!mutation || action !== 'remove-unmanaged' || !/^[\w-]{32}$/.test(confirmation))) ||
+          params.size !==
+            (mutation ? 7 + Number(retry !== null) + Number(confirmation !== null) : 6) +
+              Number(revision !== undefined) ||
           (mutation ? !/^[a-f0-9]{64}$/.test(stamp) : stamp !== '' || retry !== null)
         ) {
           sendJson(response, 400, { error: 'Invalid inventory action selector.' });
@@ -255,6 +277,25 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
           return;
         }
         const key = JSON.stringify(selector);
+        if (action === 'remove-unmanaged' && retry === null) {
+          if (confirmation === null) {
+            const review = await runOperation(reviewTask);
+            if (review.stamp !== stamp) {
+              sendJson(response, 409, { error: 'The unmanaged files changed. Review the removal again.' });
+              return;
+            }
+            const token = randomBytes(24).toString('base64url');
+            removals.set(selector.scope, { token, key, stamp });
+            sendJson(response, 202, { confirmation: token });
+            return;
+          }
+          const pending = removals.get(selector.scope);
+          if (pending?.token !== confirmation || pending.key !== key || pending.stamp !== stamp) {
+            sendJson(response, 409, { error: 'This removal confirmation is no longer available.' });
+            return;
+          }
+          removals.delete(selector.scope);
+        }
         const previous = retries.get(selector.scope);
         if (
           retry !== null &&
@@ -271,34 +312,52 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
         const destination = retry === null ? undefined : previous?.destination;
         const attempted = new Set(retry === null ? undefined : previous?.attempted);
         if (destination) attempted.add(destination);
+        const approved = new Map(retry === null ? undefined : previous?.approved);
         const selection = { selector, stamp, revision };
         const initial = action === 'update' ? await runOperation(reviewTask) : undefined;
-        const result = await runOperation({
-          task: 'inventory-mutate',
-          targets,
-          action,
-          selection,
-          options: destination ? { ghForce: true, ghForceAgent: destination } : undefined,
-        });
+        const { localConflicts, ...result } = await runOperation(
+          {
+            task: 'inventory-mutate',
+            targets,
+            action,
+            selection,
+            options:
+              action === 'update'
+                ? { reviewedConflicts: approved, ...(destination ? { ghForce: true, ghForceAgent: destination } : {}) }
+                : undefined,
+          },
+          progress,
+        );
         const failure = result.failure;
-        if (
-          action === 'update' &&
+        const githubDestination =
           failure?.code === 'GH_FORCE_REQUIRED' &&
           failure.recoverable &&
           failure.agent &&
           isInstallationDestination(failure.agent) &&
           !attempted.has(failure.agent)
-        ) {
+            ? failure.agent
+            : undefined;
+        if (action === 'update' && (localConflicts?.size || githubDestination)) {
           const review = await runOperation(reviewTask).catch(() => undefined);
           if (review && review.catalogPin === initial?.catalogPin) {
             const ticket = randomBytes(24).toString('base64url');
-            retries.set(selector.scope, { ticket, key, stamp: review.stamp, destination: failure.agent, attempted });
-            const retry: InventoryMutationRetry = { ticket, review };
-            sendJson(response, 200, { ...result, retry });
+            for (const [file, fingerprint] of localConflicts ?? []) approved.set(file, fingerprint);
+            retries.set(selector.scope, {
+              ticket,
+              key,
+              stamp: review.stamp,
+              destination: githubDestination,
+              approved,
+              attempted,
+            });
+            const retry: InventoryMutationRetry = localConflicts?.size
+              ? { ticket, kind: 'local', review: { ...review, paths: [...localConflicts.keys()].sort() } }
+              : { ticket, kind: 'github', review };
+            finishMutation({ ...result, retry });
             return;
           }
         }
-        sendJson(response, 200, result);
+        finishMutation(result);
         return;
       }
       if (isCatalogInstall) {
@@ -326,16 +385,11 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
           });
           return;
         }
-        sendJson(
-          response,
-          200,
-          await runOperation({
-            task: 'catalog-install',
-            selector,
-            revision,
-            targets,
-            options: { scope, destinations },
-          }),
+        finishMutation(
+          await runOperation(
+            { task: 'catalog-install', selector, revision, targets, options: { scope, destinations } },
+            progress,
+          ),
         );
         return;
       }
@@ -412,7 +466,9 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
                 : isCatalogManagement && (code === 'INVALID_ARGUMENT' || code === 'CATALOG_ERROR')
                   ? 400
                   : 500;
-      sendJson(response, status, { error: error instanceof Error ? error.message : 'Could not complete the request.' });
+      const message = error instanceof Error ? error.message : 'Could not complete the request.';
+      if (response.headersSent) response.end(`${JSON.stringify({ error: message })}\n`);
+      else sendJson(response, status, { error: message });
     } finally {
       activeRequests -= 1;
     }

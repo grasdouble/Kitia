@@ -11,6 +11,7 @@ import {
   recordSourceInstallation,
 } from '../inventory/inventory.js';
 import type { InstalledSourceResource } from '../inventory/inventory.js';
+import type { FileFingerprint } from '../inventory/model.js';
 import { preparePinnedSourceFile } from '../resources/content.js';
 import { resolveSourceVersionPrefix, listSourceVersions } from '../resources/history.js';
 import type { CatalogResource, ResourceKind } from '../resources/model.js';
@@ -79,6 +80,7 @@ export interface InstallationRequest extends Omit<SourceOperationRequest, 'actio
   ref?: string;
   ghForce?: boolean;
   ghForceAgent?: string;
+  reviewedConflicts?: ReadonlyMap<string, FileFingerprint>;
   projectTarget?: string;
   userTarget?: string;
 }
@@ -93,12 +95,14 @@ export interface InstallationResult {
 function prepareSourceOperation(
   resource: CatalogResource,
   action: SourceOperationRequest['action'],
-  { audit, onAudit }: Pick<SourceOperationRequest, 'audit' | 'onAudit'>,
+  { audit, onAudit, onProgress }: Pick<SourceOperationRequest, 'audit' | 'onAudit' | 'onProgress'>,
   needsContent = false,
 ) {
   if (!audit && !needsContent) return undefined;
+  onProgress?.('Retrieving the pinned resource...');
   const prepared = preparePinnedSourceFile(resource);
   if (audit) {
+    onProgress?.('Auditing the pinned resource...');
     const report = auditPreparedSourceFile(prepared);
     onAudit?.(report);
     if (action === 'install' && (!report.coverage.complete || report.findings.length)) {
@@ -165,6 +169,7 @@ async function executeInstallationOperation(
       status: 'planned',
       source: true,
     });
+    options.onProgress?.('Removing tracked files...');
     for (const message of uninstallSourceResource(resource, target, options)) output.log(message);
     return { status: 0, messages };
   }
@@ -433,6 +438,7 @@ function runSourceOperation(
   function* installSkill(): Generator<string[], InstallationResult, number | GhSkillResult> {
     const completed: InstallationDestination[] = [];
     for (const { id, relativePath, directory } of skillPaths) {
+      options.onProgress?.(`Invoking GitHub CLI to install ${resource.id} for ${id}...`);
       let result: number | GhSkillResult;
       const partial = completed.length
         ? ` Already installed for ${completed.join(', ')}. Those installations remain in place.`

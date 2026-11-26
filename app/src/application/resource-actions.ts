@@ -5,8 +5,10 @@ import type { ResourceInspection } from '../core/inspection/model.js';
 import { installationPath, resolveInstallationDestinations } from '../core/installations/destinations.js';
 import { executeInstallationOperation, type InstallationRequest } from '../core/installations/lifecycle.js';
 import { acquireOperationLock } from '../core/installations/lock.js';
+import { ReviewedUpdateConflict } from '../core/installations/mutations.js';
 import { removeUnmanagedResource } from '../core/installations/unmanaged.js';
 import { readInstallState, sourceCatalogName } from '../core/inventory/inventory.js';
+import type { FileFingerprint } from '../core/inventory/model.js';
 import { listSourceVersionsAsync } from '../core/resources/history.js';
 import { CatalogError, type CatalogResource } from '../core/resources/model.js';
 import {
@@ -26,7 +28,7 @@ import { readCatalogSnapshot, readInventory, type InstallationTargets, type Inve
 export type ResourceAction = InstallationRequest['operation'] | 'remove-unmanaged';
 export type ResourceActionOptions = Pick<
   InstallationRequest,
-  'scope' | 'destinations' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent'
+  'scope' | 'destinations' | 'force' | 'ref' | 'ghForce' | 'ghForceAgent' | 'reviewedConflicts'
 >;
 
 type ActionFailure = {
@@ -43,6 +45,7 @@ export type ResourceActionResult = InventorySnapshot & {
   code: number;
   messages: Array<string | AuditResult>;
   failure?: ActionFailure;
+  localConflicts?: ReadonlyMap<string, FileFingerprint>;
   inspection?: SourceInspection | (ResourceInspection & { origin: 'local'; root: string });
 };
 
@@ -66,6 +69,7 @@ export async function runResourceAction(
   const messages: ResourceActionResult['messages'] = [];
   let audit: AuditResult | undefined;
   let inspection: ResourceActionResult['inspection'];
+  let localConflicts: ResourceActionResult['localConflicts'];
   let release: (() => void) | undefined;
   let code = 0;
   let failure: ActionFailure | undefined;
@@ -111,6 +115,7 @@ export async function runResourceAction(
     if (action === 'remove-unmanaged') {
       const state = readInstallState(targetRoot);
       if (resource.managed !== false) throw new Error('Only unmanaged dashboard artifacts can be removed this way.');
+      onProgress?.('Removing unmanaged files...');
       messages.push(...removeUnmanagedResource(targetRoot, state, resource));
     } else if (action === 'preview' && resource.scope) {
       const local = inspectInstalledFiles(targetRoot, resource);
@@ -178,6 +183,7 @@ export async function runResourceAction(
   } catch (error) {
     if (!(error instanceof CatalogError)) throw error;
     if (reviewed && (error.code === 'STALE_SOURCE' || error.code === 'RESOURCE_NOT_FOUND')) throw error;
+    if (error instanceof ReviewedUpdateConflict) localConflicts = error.conflicts;
     code = 1;
     failure = {
       code: error.code,
@@ -191,5 +197,5 @@ export async function runResourceAction(
   } finally {
     release?.();
   }
-  return { code, messages, failure, inspection, ...readInventory(targets, catalog) };
+  return { code, messages, failure, inspection, localConflicts, ...readInventory(targets, catalog) };
 }

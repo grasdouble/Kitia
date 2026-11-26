@@ -66,6 +66,7 @@ interface SourceFileInstallPlan {
 interface SourceFileInstallOptions {
   scope?: InstallationScope;
   force?: boolean;
+  reviewedConflicts?: ReadonlyMap<string, FileFingerprint>;
   dryRun?: boolean;
   onAction?: (action: PlanAction) => void;
   onProgress?: (message: string) => void;
@@ -114,7 +115,13 @@ function stageSourceFileInstallation(
   source: CatalogResource | PreparedPinnedSourceFile,
   destinations: string[],
   { target, state, files }: SourceFileInstallPlan,
-  { force = false, dryRun = false, onAction = () => {}, onProgress = () => {} }: SourceFileInstallOptions,
+  {
+    force = false,
+    reviewedConflicts,
+    dryRun = false,
+    onAction = () => {},
+    onProgress = () => {},
+  }: SourceFileInstallOptions,
   prepare = preparePinnedSourceFile,
 ): void {
   const isPrepared = isPreparedPinnedSourceFile(source);
@@ -163,7 +170,8 @@ function stageSourceFileInstallation(
       const fingerprint = sourceFingerprint ?? fileFingerprint(output, false);
       const actual = installedFingerprint(target, relativePath);
       const expected = trackedFiles[relativePath];
-      if (expected && actual && !sameFingerprint(actual, expected) && !force) {
+      const approved = sameFingerprint(actual, reviewedConflicts?.get(relativePath) ?? null);
+      if (expected && actual && !sameFingerprint(actual, expected) && !force && !approved) {
         throw new CatalogError(
           `Refusing to overwrite locally modified source file ${relativePath}; pass --force.`,
           'LOCAL_CONFLICT',
@@ -171,7 +179,7 @@ function stageSourceFileInstallation(
         );
       }
       const unchanged = actual && sameFingerprint(actual, fingerprint);
-      if (!expected && actual && !unchanged && !force) {
+      if (!expected && actual && !unchanged && !force && !approved) {
         throw new CatalogError(`Refusing to overwrite existing file ${relativePath}; pass --force.`, 'LOCAL_CONFLICT', {
           category: 'untracked-destination',
           paths: [relativePath],
@@ -234,7 +242,12 @@ function assertSourceResourceCanBeInstalled(resource: CatalogResource, target: s
 
 function validateSourceUpdates(
   installed: InstalledSourceResource[],
-  { force = false, target, scope = 'project' }: { force?: boolean; target?: string; scope?: InstallationScope } = {},
+  {
+    force = false,
+    target,
+    scope = 'project',
+    reviewedConflicts,
+  }: Pick<SourceFileInstallOptions, 'force' | 'scope' | 'reviewedConflicts'> & { target?: string } = {},
 ): void {
   const targetRoot = target ? fs.realpathSync(target) : undefined;
   const state = targetRoot ? readInstallState(targetRoot) : undefined;
@@ -243,6 +256,10 @@ function validateSourceUpdates(
       throw new CatalogError(
         `${catalogLabel(resource)} ${resource.kind} ${resource.id} was removed from the catalog. Use uninstall to remove it explicitly.`,
       );
+    }
+    if (reviewedConflicts && targetRoot && state) {
+      validateReviewedUpdate(resource, installations, targetRoot, state, scope, reviewedConflicts);
+      continue;
     }
     const modified = installations.filter((installation) => installation.modified);
     if (modified.length && !force) {
@@ -292,6 +309,81 @@ function validateSourceUpdates(
       }
     }
   }
+}
+
+class ReviewedUpdateConflict extends CatalogError {
+  constructor(
+    readonly conflicts: ReadonlyMap<string, FileFingerprint>,
+    message = 'The update is blocked by local files. Review the listed paths before retrying.',
+  ) {
+    super(message, 'LOCAL_CONFLICT', {
+      category: 'reviewed-paths',
+      paths: [...conflicts.keys()].sort(),
+      recoverable: true,
+    });
+  }
+}
+
+function validateReviewedUpdate(
+  resource: CatalogResource,
+  installations: InstalledSourceResource['installations'],
+  target: string,
+  state: InstallState,
+  scope: InstallationScope,
+  reviewed: ReadonlyMap<string, FileFingerprint>,
+): void {
+  const record = state.sources[sourceCatalogName(resource)]?.[`${resource.kind}s`]?.[resource.id];
+  if (!record) throw new CatalogError('The installation has changed. Review the action again.', 'STALE_SOURCE');
+  const skill = resource.kind === 'skill';
+  const directories = skill ? installations.map(({ path: file }) => `${path.posix.dirname(file)}/`) : [];
+  const paths = new Set(
+    skill
+      ? Object.keys(record.files).filter((file) => directories.some((directory) => file.startsWith(directory)))
+      : availableInstallationDestinations(resource.kind, scope).map((layout) => installationPath(layout, resource.id)),
+  );
+  for (const collections of Object.values(state.sources)) {
+    for (const records of Object.values(collections)) {
+      for (const other of Object.values(records)) {
+        if (other === record) continue;
+        const overlaps = Object.keys(other.files).some(
+          (file) => paths.has(file) || directories.some((directory) => file.startsWith(directory)),
+        );
+        if (overlaps) {
+          throw new CatalogError(
+            'Another resource owns files in these destinations. Nothing was overwritten.',
+            'LOCAL_CONFLICT',
+            { category: 'provenance-conflict' },
+          );
+        }
+      }
+    }
+  }
+  if (skill) {
+    for (const entry of installations) {
+      if (!entry.provenanceMatches && installedFingerprint(target, entry.path)) {
+        throw new CatalogError(
+          `Refusing to overwrite a skill with mismatched provenance: ${entry.path}`,
+          'LOCAL_CONFLICT',
+          { category: 'provenance-conflict', paths: [entry.path] },
+        );
+      }
+      const directory = path.posix.dirname(entry.path);
+      if (fs.existsSync(targetPath(target, directory))) {
+        for (const file of untrackedSkillPaths(target, directory, paths)) paths.add(file);
+      }
+    }
+  }
+  const conflicts = new Map<string, FileFingerprint>();
+  for (const file of paths) {
+    const actual = installedFingerprint(target, file);
+    if (!actual || sameFingerprint(actual, record.files[file] ?? null)) continue;
+    const approval = reviewed.get(file);
+    if (approval && !sameFingerprint(actual, approval)) {
+      throw new CatalogError(`The reviewed file changed: ${file}. Review the update again.`, 'STALE_SOURCE');
+    }
+    if (!approval) conflicts.set(file, actual);
+  }
+  if (conflicts.size) throw new ReviewedUpdateConflict(conflicts);
 }
 
 function updateSourceFileResources(
@@ -346,6 +438,7 @@ function* sourceUpdates(
   {
     dryRun = false,
     force = false,
+    reviewedConflicts,
     ghForce = false,
     ghForceAgent,
     onAction = () => {},
@@ -359,13 +452,14 @@ function* sourceUpdates(
   if (ghForce && !ghForceAgent) {
     throw new CatalogError('A GitHub force retry must identify the failed agent.', 'INVALID_ARGUMENT');
   }
-  validateSourceUpdates(installed, { force, target: targetRoot, scope });
+  validateSourceUpdates(installed, { force, target: targetRoot, scope, reviewedConflicts });
   const messages = updateSourceFileResources(
     installed.filter(({ resource }) => resource.kind !== 'skill'),
     targetRoot,
     {
       dryRun,
       force,
+      reviewedConflicts,
       onAction,
       onProgress,
       preparedSourceFile,
@@ -389,9 +483,41 @@ function* sourceUpdates(
     for (const installation of stale) {
       const { destination, path: skillPath } = installation;
       const directory = path.join(targetRoot, path.posix.dirname(path.posix.dirname(skillPath)));
+      let approvedDirectory = false;
+      if (reviewedConflicts) {
+        // A previous GitHub CLI call may have yielded while another program changed this copy.
+        if (completed.length) {
+          try {
+            const current = readInstalledSourceSkills(targetRoot, [resource], { catalog: resource.catalog })
+              .find((entry) => entry.resource.id === resource.id)
+              ?.installations.find(({ path: file }) => file === skillPath);
+            if (!current) throw new CatalogError('The tracked skill is no longer available.', 'STALE_SOURCE');
+            validateReviewedUpdate(
+              resource,
+              [current],
+              targetRoot,
+              readInstallState(targetRoot),
+              scope,
+              reviewedConflicts,
+            );
+          } catch (error) {
+            if (!(error instanceof CatalogError)) throw error;
+            const message = `${error.message} Already updated: ${completed.join(', ')}. Those updates remain in place.`;
+            if (error instanceof ReviewedUpdateConflict) throw new ReviewedUpdateConflict(error.conflicts, message);
+            throw new CatalogError(message, 'LOCAL_CONFLICT', { category: error.category, paths: error.paths });
+          }
+        }
+        const prefix = `${path.posix.dirname(skillPath)}/`;
+        for (const [file, approved] of reviewedConflicts) {
+          if (file.startsWith(prefix) && sameFingerprint(installedFingerprint(targetRoot, file), approved)) {
+            approvedDirectory = true;
+            break;
+          }
+        }
+      }
       const args = buildSourceSkillArgs('install', resource as SourceSkillResource, directory, {
         scope,
-        force: force || (ghForce && destination === ghForceAgent),
+        force: force || approvedDirectory || (ghForce && destination === ghForceAgent),
       });
       if (dryRun) {
         onAction({
@@ -744,6 +870,7 @@ function uninstallSourceResource(
 }
 
 export {
+  ReviewedUpdateConflict,
   assertSourceResourceCanBeInstalled,
   catalogLabel,
   installSourceFileResource,

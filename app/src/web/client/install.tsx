@@ -12,11 +12,12 @@ import {
 import type { InstallationScope } from '../../core/installations/model.js';
 import type { CatalogResource } from '../../core/resources/model.js';
 import { MutationResult } from './mutation-result.js';
-import { postSessionJson } from './session-api.js';
+import { runSessionMutation } from './session-api.js';
 import { SessionDialog } from './session-dialog.js';
 
 type InstallState =
-  | { step: 'options' | 'review' | 'installing' }
+  | { step: 'options' | 'review' }
+  | { step: 'installing'; progress?: string }
   | { step: 'result'; result: ResourceActionResult }
   | { step: 'error'; message: string };
 
@@ -75,7 +76,11 @@ export function InstallDialog({
     query.set('scope', scope);
     for (const { id } of selected) query.append('destination', id);
     try {
-      const result = await postSessionJson<ResourceActionResult>(`/api/catalog/install?${query}`, token);
+      const result = await runSessionMutation<ResourceActionResult>(
+        `/api/catalog/install?${query}`,
+        token,
+        (progress) => setState({ step: 'installing', progress }),
+      );
       onInstalled({ resources: result.resources, errors: result.errors });
       setState({ step: 'result', result });
     } catch (error) {
@@ -182,7 +187,9 @@ export function InstallDialog({
             </p>
           ) : null}
           {busy ? (
-            <p role="status">Installing and auditing the pinned resource…</p>
+            <p role="status">
+              {state.step === 'installing' && (state.progress ?? 'Installing and auditing the pinned resource…')}
+            </p>
           ) : (
             <div className="resource-actions">
               <button type="button" onClick={() => setState({ step: 'options' })}>

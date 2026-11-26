@@ -11,7 +11,7 @@ import type { InstalledResourceSelector } from './inventory-preview.js';
 export type InventoryMutation = 'update' | 'uninstall' | 'remove-unmanaged';
 export type InventoryMutationReview = { paths: string[]; ref?: string; catalogPin?: string; stamp: string };
 export type ConfirmedInventoryMutation = { selector: InstalledResourceSelector; stamp: string; revision?: string };
-export type InventoryMutationRetry = { ticket: string; review: InventoryMutationReview };
+export type InventoryMutationRetry = { ticket: string; review: InventoryMutationReview; kind: 'local' | 'github' };
 
 export function reviewInventoryMutation(
   action: InventoryMutation,

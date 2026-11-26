@@ -63,15 +63,18 @@ to user scope; instructions only support project scope. **Inventory** also
 supports updating to the catalog pin or to a listed commit, uninstalling
 tracked files, and removing unmanaged artifacts. Changing a tracked revision
 preserves that scope's destinations. Review the scope, paths, and revision
-before confirming. The inventory refreshes after partial operations, and a
-GitHub CLI overwrite retry requires separate confirmation for the reported
+before confirming. Removing unmanaged files requires a second confirmation.
+Install and inventory operations show their progress and refresh the inventory
+after partial results. Retrying a local update conflict requires separate
+consent for the listed files; changed files or mismatched provenance block
+the retry. A GitHub CLI overwrite requires separate consent for the reported
 destination. The **Catalogs** section supports presets and Basic/Custom
 discovery, editing and removing definitions, checking and refreshing indexes,
 and importing or exporting version 1 catalog JSON. Review and select imports
 before writing; duplicates are reported and failed index refreshes leave the
 new definitions configured. Removing a catalog does not uninstall resources.
-Use the CLI or TUI to override local file conflicts. The local HTTP API is
-internal and not part of the public CLI compatibility contract.
+The local HTTP API is internal and not part of the public CLI compatibility
+contract.
 
 The browser shows the running Kitia version and checks for a newer release.
 The **Getting started** guide can be reopened and shares its first-run marker
