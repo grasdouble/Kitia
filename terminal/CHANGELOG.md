@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.0
+
+### Minor Changes
+
+- 6e5811a: Show or hide unmanaged artifacts in Inventory
+  - **User-Facing**
+    - Unmanaged skills, agents, and instructions are hidden by default. Use the Unmanaged selector or press `H` to show or hide them without changing installed files or inventory totals.
+
 ## 4.0.1
 
 ### Patch Changes
