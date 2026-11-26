@@ -1247,7 +1247,7 @@ test('narrow inventory preserves direct C/K/L filters and visible control focus'
     await dashboard.stop();
   }
 });
-test('tabs, bordered filters, and menus stay clickable across responsive widths', async () => {
+test('tabs, compact and boxed filters, and menus stay clickable across responsive widths', async () => {
   const resources = [
     {
       catalog: 'alpha',
@@ -1313,7 +1313,7 @@ test('tabs, bordered filters, and menus stay clickable across responsive widths'
       }
       assert.ok(
         ['Search resources…', 'All kinds', 'All catalogs', 'All licenses'].every((value) => frame.includes(value)),
-        `bordered input values remain visible at ${dimensions.columns} columns`,
+        `input values remain visible at ${dimensions.columns} columns`,
       );
       const labels = ['Search', 'Kind', 'Catalog', 'License'].map((label) => {
         const row = frame.split(/\r?\n/).findIndex((line) => new RegExp(`\\b${label}\\b`).test(line));
@@ -1326,27 +1326,30 @@ test('tabs, bordered filters, and menus stay clickable across responsive widths'
         'focus and visual order stays Search, Kind, Catalog, License',
       );
 
-      for (const rowOffset of [-1, 0, 1]) {
+      const { row, column } = renderedTextCell(frame, 'Search resources');
+      const lines = frame.split(/\r?\n/);
+      const filterRows = [-1, 0, 1].filter((offset) => offset === 0 || lines[row + offset]?.[column] === '─');
+      for (const rowOffset of filterRows) {
         clickRenderedButtonRow(
           dashboard,
           (target) => target.type === 'focus' && target.focus === 'search',
           'Search resources',
           rowOffset,
         );
-        await dashboard.wait((next) => next.includes('▏'), `Search border row ${rowOffset} receives focus`);
+        await dashboard.wait((next) => next.includes('▏'), `Search field row ${rowOffset} receives focus`);
         dashboard.input.write('\u001b');
-        await dashboard.wait((next) => !next.includes('▏'), `Search border row ${rowOffset} releases focus`);
+        await dashboard.wait((next) => !next.includes('▏'), `Search field row ${rowOffset} releases focus`);
       }
-      for (const rowOffset of [-1, 0, 1]) {
+      for (const rowOffset of filterRows) {
         clickRenderedButtonRow(
           dashboard,
           (target) => target.type === 'filter-open' && target.filter === 'catalog',
           'All catalogs',
           rowOffset,
         );
-        await dashboard.wait((next) => next.includes('✓ All catalogs'), `Catalog border row ${rowOffset} opens menu`);
+        await dashboard.wait((next) => next.includes('✓ All catalogs'), `Catalog field row ${rowOffset} opens menu`);
         dashboard.input.write('\u001b');
-        await dashboard.wait((next) => !next.includes('✓ All catalogs'), `Catalog border row ${rowOffset} closes menu`);
+        await dashboard.wait((next) => !next.includes('✓ All catalogs'), `Catalog field row ${rowOffset} closes menu`);
       }
       clickRenderedTarget(
         dashboard,
