@@ -17,16 +17,12 @@
 | 7. Inventory maintenance | Committed · `e3b032a` | Update, uninstall, and remove unmanaged artifacts; separate confirmation for destination-specific GitHub CLI overwrite retries. |
 | 8. Choose a revision | Committed · `397c003` | Select a commit from resource history for a new installation or a replacement that preserves existing destinations. |
 | 9. Catalog management | Committed · `4717746` | Basic/Custom mappings and presets, edit and remove, freshness and refresh (one/all), selective JSON import and JSON export. Removal leaves installed files in place. |
-| 10. Getting started and maintenance | Pending | Welcome guide, version and release notices, eligible self-update, and inventory migration guidance. |
+| 10. Getting started and maintenance | Implemented; not committed | Reopenable welcome guide, version and release notices, eligible self-update after server shutdown, and scoped inventory migration guidance. |
 | 11. Parity and package acceptance | Pending final pass | Close the known UI parity gaps and verify the installed package end to end on Linux, macOS, and Windows. |
 
 ## Resume here
 
-1. Implement lot 10 using the CLI/TUI's existing version, eligibility, and migration rules:
-   - Welcome guide: **Inventory → Browse resources → Catalogs**. Make it possible to reopen the guide.
-   - Show the running version, an available release with a release-notes link, and the update instructions appropriate to the installation method.
-   - Offer self-update only to eligible global npm/pnpm installations. Confirm the update, shut down the web server before replacing the package, and tell users to relaunch `kitia web`. Ineligible installs get instructions, not an update action.
-   - When inventory migration is required, identify affected scopes and explain the migration command and restart. Do not apply the migration from the browser.
+1. Commit the getting-started and maintenance lot.
 2. Finish lot 11 before calling the browser interface TUI-equivalent:
    - Add the second explicit confirmation for unmanaged removal. The current browser flow has one confirmation after reviewing the paths.
    - Add the TUI-style retry for recoverable local update conflicts, with affected paths and separate consent. The current browser supports only destination-specific GitHub CLI overwrite retries; local overrides remain in the CLI/TUI. Never force a provenance conflict or silently overwrite another owner's files.

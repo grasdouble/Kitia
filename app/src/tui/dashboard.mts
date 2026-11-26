@@ -1,6 +1,7 @@
 import { render, useInput, useWindowSize } from 'ink';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { checkInstalledVersion, type VersionNotice } from '../application/version-check.js';
 import type { ScanError } from '../core/inventory/checks.js';
 import {
   canPreviewInstalledResource,
@@ -41,7 +42,6 @@ import { createDashboardInputTransport } from './input-transport.mjs';
 import { ModalOverlay, loadingModal } from './modals.mjs';
 import { CatalogManagementScreen, CatalogScreen, InspectionScreen, InventoryScreen, ScreenFrame } from './screens.mjs';
 import { DASHBOARD_HEADER_ROWS } from './sections/header.mjs';
-import { checkInstalledVersion, type VersionNotice } from './version-check.mjs';
 
 const h = React.createElement;
 

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { prepareSelfUpdate } = require('../self-update.ts');
+const { prepareSelfUpdate } = require('../../application/self-update.ts');
 
 const packageName = '@grasdouble/kitia';
 const entry = path.join('dist', 'kitia.js');

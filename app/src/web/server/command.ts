@@ -5,7 +5,7 @@ import os from 'node:os';
 import { startWebSession } from './session.js';
 
 export async function runWebCommand(openBrowser: boolean): Promise<number> {
-  const { server, url } = await startWebSession({ project: process.cwd(), user: os.homedir() });
+  const { server, url, pendingUpdate } = await startWebSession({ project: process.cwd(), user: os.homedir() });
   const closed = once(server, 'close');
   const stop = () => server.close();
   process.once('SIGINT', stop);
@@ -27,9 +27,14 @@ export async function runWebCommand(openBrowser: boolean): Promise<number> {
       child.unref();
     }
     await closed;
-    return 0;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
   }
+  const apply = pendingUpdate();
+  if (apply) {
+    console.log('Kitia web is closed. Updating Kitia; run kitia web again after the update.');
+    await apply();
+  }
+  return 0;
 }

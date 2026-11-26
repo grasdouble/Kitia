@@ -3,10 +3,12 @@ import { createRoot } from 'react-dom/client';
 
 import type { InstallationTargets, InventorySnapshot, InventoryWorkspace } from '../../application/snapshot.js';
 import type { InstallationScope } from '../../core/installations/model.js';
+import type { SessionInfo } from '../maintenance-contract.js';
 import { CatalogManagement } from './catalog-management.js';
 import { BrowseCatalog } from './catalog.js';
 import { Inventory, InventorySummary } from './inventory.js';
-import { readSessionJson } from './session-api.js';
+import { GettingStarted, guideSteps, MigrationNotice, VersionMaintenance } from './maintenance.js';
+import { postSessionJson, readSessionJson } from './session-api.js';
 
 import './style.css';
 
@@ -15,7 +17,10 @@ type SessionInventory = InventoryWorkspace & { targets: InstallationTargets };
 function App() {
   const [section, setSection] = useState<'inventory' | 'browse' | 'catalogs'>('inventory');
   const [scope, setScope] = useState<InstallationScope>('project');
-  const [data, setData] = useState<{ snapshot: SessionInventory; token: string }>();
+  const [data, setData] = useState<{ snapshot: SessionInventory; token: string; info: SessionInfo }>();
+  const [guide, setGuide] = useState<number>();
+  const [guideError, setGuideError] = useState<string>();
+  const [stopped, setStopped] = useState(false);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
@@ -30,8 +35,15 @@ function App() {
       return;
     }
     const controller = new AbortController();
-    void readSessionJson<SessionInventory>('/api/inventory', session, controller.signal).then(
-      (snapshot) => setData({ snapshot, token: session }),
+    void Promise.all([
+      readSessionJson<SessionInventory>('/api/inventory', session, controller.signal),
+      readSessionJson<SessionInfo>('/api/session', session, controller.signal),
+    ]).then(
+      ([snapshot, info]) => {
+        if (controller.signal.aborted) return;
+        setData({ snapshot, token: session, info });
+        if (info.showOnboarding) setGuide(0);
+      },
       (failure: unknown) => {
         if (!controller.signal.aborted)
           setError(failure instanceof Error ? failure.message : 'Could not load the inventory.');
@@ -47,15 +59,58 @@ function App() {
   async function reloadInventory() {
     if (!data) return;
     const snapshot = await readSessionJson<SessionInventory>('/api/inventory', data.token, AbortSignal.timeout(30_000));
-    setData({ snapshot, token: data.token });
+    setData((current) => current && { ...current, snapshot });
   }
+
+  function showStep(step: number) {
+    setGuide(step);
+    setSection(guideSteps[step].section);
+  }
+
+  async function closeGuide() {
+    setGuide(undefined);
+    if (!data?.info.showOnboarding) return;
+    setGuideError(undefined);
+    try {
+      await postSessionJson('/api/onboarding/complete', data.token);
+      setData((current) => current && { ...current, info: { ...current.info, showOnboarding: false } });
+    } catch (failure) {
+      setGuideError(
+        failure instanceof Error
+          ? `Could not save guide completion: ${failure.message}`
+          : 'Could not save guide completion.',
+      );
+    }
+  }
+
+  if (stopped)
+    return (
+      <main>
+        <h1>Kitia web session closed</h1>
+        <p>
+          Update requested. Follow the result in the launch terminal, then run <code>kitia web</code> again.
+        </p>
+      </main>
+    );
 
   return (
     <main>
       <header>
-        <p className="eyebrow">Kitia · Local session</p>
+        <p className="eyebrow">
+          Kitia{data && data.info.version !== 'unknown' ? ` ${data.info.version}` : ''} · Local session
+        </p>
         <h1>{section === 'inventory' ? 'Inventory' : section === 'browse' ? 'Browse resources' : 'Catalogs'}</h1>
       </header>
+      {data ? (
+        <>
+          <button type="button" onClick={() => showStep(0)}>
+            Getting started
+          </button>
+          {guideError ? <p role="alert">{guideError}</p> : null}
+          <VersionMaintenance token={data.token} onStopped={() => setStopped(true)} />
+          <MigrationNotice inventory={data.snapshot.inventory} targets={data.snapshot.targets} />
+        </>
+      ) : null}
       <nav className="app-sections" aria-label="Kitia sections">
         <button type="button" aria-pressed={section === 'inventory'} onClick={() => setSection('inventory')}>
           Inventory
@@ -101,6 +156,7 @@ function App() {
           />
         </>
       )}
+      {guide !== undefined ? <GettingStarted step={guide} onStep={showStep} onClose={() => void closeGuide()} /> : null}
     </main>
   );
 }

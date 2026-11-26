@@ -24,7 +24,7 @@ Kitia installs into the current project by default. Skills default to `standard`
 
 ## Update Kitia
 
-If you installed Kitia globally with npm or pnpm, run `kitia self-update` and confirm, or choose **Update** when the dashboard announces a new version. Restart Kitia after the update.
+If you installed Kitia globally with npm or pnpm, run `kitia self-update` and confirm, or use the update notification in the terminal dashboard or local browser session. Updating from the browser stops `kitia web` first and reports the result in the terminal. Restart Kitia after the update.
 
 For one-off runs, use `npx --yes @grasdouble/kitia@latest` or `pnpm dlx @grasdouble/kitia@latest` instead. For other installations, update Kitia with the tool you used to install it.
 
@@ -33,6 +33,8 @@ For one-off runs, use `npx --yes @grasdouble/kitia@latest` or `pnpm dlx @grasdou
 Run `kitia dashboard` to browse project and user inventories, inspect resources, and manage catalogs. Press `N` in the dashboard to add a repository. Without a global install, run `npx --yes @grasdouble/kitia dashboard` instead.
 
 Run `kitia web` from your project to search and filter the project and user inventories, inspect installation details, and preview and audit installed files. If the browser does not open automatically, use the private URL printed in the terminal. Press `Ctrl+C` to stop.
+
+Use **Getting started** to reopen the browser guide. If an inventory needs migration, stop the session, follow the command shown in the notice, and relaunch it.
 
 In **Browse resources**, search configured catalogs, preview pinned sources, and install the catalog pin or a commit from **Revisions**. In **Inventory**, update to the catalog pin or select a different commit, uninstall tracked resources, or explicitly remove unmanaged files. Review the scope and affected paths before confirming. Use the dashboard or CLI to override local conflicts.
 

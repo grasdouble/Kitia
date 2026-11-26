@@ -627,3 +627,112 @@ test(
     }
   },
 );
+
+test(
+  'web maintenance saves the guide explicitly and stops listening before an eligible update',
+  { timeout: 10_000 },
+  async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'kitia-web-maintenance-'));
+    const originalDist = path.dirname(await fs.realpath(executable));
+    const originalPackage = path.dirname(originalDist);
+    const project = path.join(temporary, 'project');
+    const user = path.join(temporary, 'user');
+    const config = path.join(temporary, 'config');
+    const report = path.join(temporary, 'update-result');
+    const lock = path.join(project, '.agents', 'kitia-lock.json');
+    const preload = path.join(__dirname, 'fixtures', 'web-maintenance-preload.cjs');
+    let child;
+    let exited;
+    let stdout;
+    try {
+      await fs.mkdir(path.dirname(lock), { recursive: true });
+      await fs.mkdir(user);
+      const legacy = JSON.stringify({ lock_version: 1, catalog: 'grasdouble/Kitia', sources: {} });
+      await fs.writeFile(lock, legacy);
+      const originalGlobalRoot = path.dirname(path.dirname(originalPackage));
+      let globalRoot = originalGlobalRoot;
+      let entry = path.join(originalDist, 'kitia.js');
+      if (originalPackage !== path.join(originalGlobalRoot, '@grasdouble', 'kitia')) {
+        globalRoot = path.join(await fs.realpath(temporary), 'node_modules');
+        const location = path.join(globalRoot, '@grasdouble', 'kitia');
+        await fs.mkdir(location, { recursive: true });
+        await fs.cp(originalDist, path.join(location, 'dist'), { recursive: true });
+        await fs.copyFile(path.join(originalPackage, 'package.json'), path.join(location, 'package.json'));
+        entry = path.join(location, 'dist', 'kitia.js');
+      }
+      async function start(eligible) {
+        child = spawn(process.execPath, ['--require', preload, entry, 'web', '--no-open'], {
+          cwd: project,
+          env: {
+            ...process.env,
+            HOME: user,
+            USERPROFILE: user,
+            KITIA_CONFIG_DIR: config,
+            NODE_PATH: [path.join(originalPackage, 'node_modules'), process.env.NODE_PATH]
+              .filter(Boolean)
+              .join(path.delimiter),
+            KITIA_TEST_UPDATE_DIST: path.dirname(entry),
+            KITIA_TEST_UPDATE_ROOT: eligible ? globalRoot : '',
+            KITIA_TEST_UPDATE_REPORT: report,
+            KITIA_TEST_MIGRATABLE: '1',
+          },
+          stdio: ['ignore', 'pipe', 'inherit'],
+        });
+        exited = once(child, 'exit');
+        stdout = createInterface({ input: child.stdout });
+        const [line] = await Promise.race([
+          once(stdout, 'line'),
+          exited.then(([code]) => assert.fail(`Kitia exited early (${code})`)),
+        ]);
+        const url = new URL(line.slice('Kitia web: '.length));
+        const authorization = `Bearer ${url.hash.slice('#session='.length)}`;
+        return { origin: url.origin, headers: { authorization }, post: { authorization, origin: url.origin } };
+      }
+
+      let { origin, headers, post } = await start(false);
+      const info = JSON.parse((await request(`${origin}/api/session`, headers)).body);
+      assert.equal(
+        info.version,
+        JSON.parse(await fs.readFile(path.join(originalPackage, 'package.json'), 'utf8')).version,
+      );
+      assert.equal(info.showOnboarding, true);
+      const catalogVersion = JSON.parse((await request(`${origin}/api/version`, headers)).body);
+      assert.equal(catalogVersion.notice.available, '999.1.2');
+      assert.equal(catalogVersion.manager, undefined);
+      assert.match(catalogVersion.manualUpdate, /original installer/);
+      await assert.rejects(fs.access(config), { code: 'ENOENT' });
+      assert.equal((await request(`${origin}/api/onboarding/complete`, headers, 'POST')).status, 403);
+      assert.equal((await request(`${origin}/api/onboarding/complete`, post, 'POST')).status, 200);
+      assert.equal(await fs.readFile(path.join(config, 'onboarding-complete'), 'utf8'), '1\n');
+      assert.equal((await request(`${origin}/api/self-update`, post, 'POST')).status, 409);
+      const inventory = JSON.parse((await request(`${origin}/api/inventory`, headers)).body);
+      assert.deepEqual(
+        inventory.inventory.errors.map(({ scope, code }) => [scope, code]),
+        [['project', 'INVENTORY_MIGRATION_REQUIRED']],
+      );
+      assert.equal(await fs.readFile(lock, 'utf8'), legacy);
+      stdout.close();
+      child.kill();
+      await exited;
+
+      ({ origin, headers, post } = await start(true));
+      assert.equal(JSON.parse((await request(`${origin}/api/session`, headers)).body).showOnboarding, false);
+      assert.equal(JSON.parse((await request(`${origin}/api/version`, headers)).body).manager, 'npm');
+      assert.equal((await request(`${origin}/api/self-update`, { origin }, 'POST')).status, 401);
+      assert.equal(
+        (await request(`${origin}/api/self-update`, { ...post, origin: 'https://other.invalid' }, 'POST')).status,
+        403,
+      );
+      await assert.rejects(fs.access(report), { code: 'ENOENT' });
+      const accepted = await request(`${origin}/api/self-update`, post, 'POST');
+      assert.equal(accepted.status, 202, accepted.body);
+      assert.deepEqual(await exited, [0, null]);
+      assert.equal(await fs.readFile(report, 'utf8'), 'ECONNREFUSED');
+    } finally {
+      stdout?.close();
+      child?.kill();
+      await exited;
+      await fs.rm(temporary, { recursive: true, force: true });
+    }
+  },
+);

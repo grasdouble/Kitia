@@ -186,6 +186,10 @@ dialog::backdrop {
   gap: 0.5rem;
 }
 
+.maintenance-notice {
+  margin-block: 0.75rem;
+}
+
 .catalog-form {
   display: grid;
   gap: 0.65rem;

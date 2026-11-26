@@ -7,13 +7,17 @@ import path from 'node:path';
 import type { CatalogResourceSelector } from '../../application/catalog-preview.js';
 import type { InventoryMutation, InventoryMutationRetry } from '../../application/inventory-mutation.js';
 import type { InstalledResourceSelector } from '../../application/inventory-preview.js';
+import { hasSeenOnboarding, markOnboardingComplete } from '../../application/onboarding.js';
+import { manualUpdateInstructions, prepareSelfUpdate } from '../../application/self-update.js';
 import type { InstallationTargets, InventoryWorkspace } from '../../application/snapshot.js';
+import { checkInstalledVersion } from '../../application/version-check.js';
 import { runOperation } from '../../application/worker-client.js';
 import {
   installationDestinationIds,
   isInstallationDestination,
   type InstallationDestination,
 } from '../../core/installations/destinations.js';
+import type { SessionInfo, VersionStatus } from '../maintenance-contract.js';
 import { readCatalogCommand, runCatalogCommand } from './catalog-management.js';
 
 const host = '127.0.0.1';
@@ -99,6 +103,26 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
     }
   >();
   let catalogWrite = false;
+  const version = process.env.KITIA_INSTALLED_VERSION || 'unknown';
+  let activeRequests = 0;
+  let applyUpdate: (() => Promise<void>) | undefined;
+  type VersionCheck = { status: VersionStatus; update?: NonNullable<Awaited<ReturnType<typeof prepareSelfUpdate>>> };
+  let versionCheck: Promise<VersionCheck> | undefined;
+
+  function getVersion() {
+    return (versionCheck ??= (async (): Promise<VersionCheck> => {
+      const manualUpdate = manualUpdateInstructions;
+      if (version === 'unknown') return { status: { status: 'unavailable', manualUpdate } };
+      try {
+        const notice = await checkInstalledVersion(version);
+        if (!notice) return { status: { status: 'current', manualUpdate } };
+        const update = (await prepareSelfUpdate().catch(() => null)) ?? undefined;
+        return { status: { status: 'update', notice, manualUpdate, manager: update?.manager }, update };
+      } catch {
+        return { status: { status: 'unavailable', manualUpdate } };
+      }
+    })());
+  }
   const server = createServer(async (request, response) => {
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (request.headers.host !== authority) {
@@ -113,7 +137,14 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
     const isCatalogInstall = route === '/api/catalog/install' || route.startsWith(catalogInstallRoute);
     const isInventoryAction = route.startsWith(inventoryActionRoute);
     const isCatalogManagement = route === '/api/catalog/manage';
-    const mutation = isCatalogInstall || isCatalogManagement || (isInventoryAction && request.method === 'POST');
+    const isSelfUpdate = route === '/api/self-update';
+    const isOnboardingComplete = route === '/api/onboarding/complete';
+    const mutation =
+      isCatalogInstall ||
+      isCatalogManagement ||
+      isSelfUpdate ||
+      isOnboardingComplete ||
+      (isInventoryAction && request.method === 'POST');
     const method = mutation ? 'POST' : 'GET';
     if (request.method !== method) {
       response.setHeader('Allow', isInventoryAction ? 'GET, POST' : method);
@@ -136,6 +167,10 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
     if (
       !(
         route === '/api/inventory' ||
+        route === '/api/session' ||
+        route === '/api/version' ||
+        isSelfUpdate ||
+        isOnboardingComplete ||
         route === '/api/catalog' ||
         route === '/api/catalog/freshness' ||
         route === '/api/catalog/export' ||
@@ -160,7 +195,42 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
       sendJson(response, 401, { error: 'Invalid session.' });
       return;
     }
+    if (applyUpdate) {
+      sendJson(response, 503, { error: 'The session is closing for a Kitia update.' });
+      return;
+    }
+    activeRequests += 1;
     try {
+      if (route === '/api/session') {
+        const info: SessionInfo = { version, showOnboarding: !hasSeenOnboarding() };
+        sendJson(response, 200, info);
+        return;
+      }
+      if (route === '/api/version') {
+        sendJson(response, 200, (await getVersion()).status);
+        return;
+      }
+      if (isOnboardingComplete) {
+        if (!hasSeenOnboarding()) markOnboardingComplete();
+        sendJson(response, 200, { completed: true });
+        return;
+      }
+      if (isSelfUpdate) {
+        const { update } = await getVersion();
+        if (!update) {
+          sendJson(response, 409, { error: 'No automatic update is available for this session.' });
+          return;
+        }
+        if (!server.listening || activeRequests !== 1) {
+          sendJson(response, 409, { error: 'Wait for the current operation or session shutdown before updating.' });
+          return;
+        }
+        if (response.destroyed) return;
+        applyUpdate = update.apply;
+        sendJson(response, 202, { accepted: true });
+        server.close();
+        return;
+      }
       if (isInventoryAction) {
         const params = new URLSearchParams(route.slice(inventoryActionRoute.length));
         const selector = installedSelector(params);
@@ -343,6 +413,8 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
                   ? 400
                   : 500;
       sendJson(response, status, { error: error instanceof Error ? error.message : 'Could not complete the request.' });
+    } finally {
+      activeRequests -= 1;
     }
   });
 
@@ -353,5 +425,5 @@ export async function startWebSession(requestedTargets: InstallationTargets) {
   if (!address || typeof address === 'string') throw new Error('Could not resolve the local web address.');
   authority = `${host}:${address.port}`;
   origin = `http://${authority}`;
-  return { server, url: `${origin}/#session=${token}` };
+  return { server, url: `${origin}/#session=${token}`, pendingUpdate: () => applyUpdate };
 }

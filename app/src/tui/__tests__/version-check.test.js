@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { checkInstalledVersion } = require('../version-check.mts');
+const { checkInstalledVersion } = require('../../application/version-check.ts');
 
 test('version check returns an update notice and changelog link for a newer release', async () => {
   let requestedUrl;

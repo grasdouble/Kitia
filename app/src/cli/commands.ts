@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { hasSeenOnboarding, markOnboardingComplete } from '../application/onboarding.js';
+import { prepareSelfUpdate } from '../application/self-update.js';
 import { listResourceRevisions, readCatalogSnapshot, readInventory } from '../application/snapshot.js';
 import { runOperation } from '../application/worker-client.js';
-import { loadUserSourceConfiguration, userCatalogDirectory } from '../core/catalogs/config.js';
+import { loadUserSourceConfiguration } from '../core/catalogs/config.js';
 import type { CatalogLoadWarning } from '../core/catalogs/indexes.js';
 import { checkCatalogFreshness } from '../core/catalogs/manage.js';
 import { importCollectionText } from '../core/collections/import.js';
@@ -34,7 +36,7 @@ import { formatAuditLines } from './inspection-format.js';
 import { loadCommandCatalogs } from './loading.js';
 import type { CliReport } from './report.js';
 import { formatSourceResource } from './resource-format.js';
-import { prepareSelfUpdate, runSelfUpdate } from './self-update.js';
+import { runSelfUpdate } from './self-update.js';
 
 type LoadedCatalogs = { sourceResources: CatalogResource[]; unavailable: string[] };
 function selectedSourceResource(
@@ -57,17 +59,7 @@ function selectedSourceResource(
 }
 
 function shouldShowOnboarding() {
-  return (
-    process.stdin.isTTY &&
-    process.stdout.isTTY &&
-    !fs.existsSync(path.join(userCatalogDirectory(), 'onboarding-complete'))
-  );
-}
-
-function markOnboardingComplete() {
-  const directory = userCatalogDirectory();
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(directory, 'onboarding-complete'), '1\n');
+  return process.stdin.isTTY && process.stdout.isTTY && !hasSeenOnboarding();
 }
 
 async function executeCommand(options: ParsedCliOptions, report?: CliReport): Promise<number> {

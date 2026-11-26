@@ -73,6 +73,16 @@ new definitions configured. Removing a catalog does not uninstall resources.
 Use the CLI or TUI to override local file conflicts. The local HTTP API is
 internal and not part of the public CLI compatibility contract.
 
+The browser shows the running Kitia version and checks for a newer release.
+The **Getting started** guide can be reopened and shares its first-run marker
+with the dashboard. When inventory migration is required, the browser names
+affected scopes and shows the command to run from the launch project; it
+does not migrate on its own. The update notice links to the release notes.
+For an eligible global installation, confirming an update closes the local
+session before invoking the owning package manager. Check the terminal for
+the outcome and run `kitia web` again. Other installations get manual update
+instructions.
+
 `kitia self-update` leaves local dependencies, one-off caches, linked
 checkouts, and installations of unknown or ambiguous origin untouched.
 Confirmation is required; pass `--yes` when no terminal is attached. If you
